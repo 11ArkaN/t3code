@@ -2,6 +2,7 @@ import {
   OrchestratorMcpCapabilitiesInput,
   OrchestratorMcpCapabilitiesResult,
   OrchestrationV2StopWorkflowInput,
+  OrchestratorMcpEnvironmentLinksResult,
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpCreateThreadsResult,
   OrchestratorMcpDelegateTaskInput,
@@ -37,6 +38,7 @@ import { Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
 
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
@@ -46,6 +48,8 @@ const dependencies = [
   ThreadManagementService.ThreadManagementService,
   OrchestratorMcpService.OrchestratorMcpService,
 ];
+/** Tools that also run in a linked environment, when `environmentId` names one. */
+const forwardingDependencies = [...dependencies, PeerForwarding.PeerForwarding];
 const threadMetadataDependencies = [
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService.ThreadManagementService,
@@ -59,7 +63,7 @@ const OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "Get orchestration capabilities")
   .annotate(Tool.Readonly, true)
@@ -219,7 +223,7 @@ const ThreadListTool = Tool.make("t3_thread_list", {
   success: OrchestratorMcpThreadListResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "List T3 threads")
   .annotate(Tool.Readonly, true)
@@ -233,7 +237,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "Read a T3 thread")
   .annotate(Tool.Strict, true)
@@ -261,7 +265,7 @@ const ThreadSendTool = Tool.make("t3_thread_send", {
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "Send to a T3 thread")
   .annotate(Tool.Destructive, true)
@@ -274,7 +278,7 @@ const ThreadWaitTool = Tool.make("t3_thread_wait", {
   success: OrchestratorMcpThreadWaitResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "Wait for a T3 thread")
   .annotate(Tool.Readonly, true)
@@ -288,10 +292,23 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
   success: OrchestratorMcpThreadInterruptResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
-  dependencies,
+  dependencies: forwardingDependencies,
 })
   .annotate(Tool.Title, "Interrupt a T3 thread")
   .annotate(Tool.Destructive, true);
+
+const EnvironmentLinksTool = Tool.make("t3_environment_links", {
+  description:
+    "List the other T3 Code environments this one is linked to, such as the user's other machines, and whether each answers now. Pass one's environmentId to t3_project_list, t3_thread_launch, t3_thread_list, t3_thread_read, t3_thread_send, t3_thread_wait, t3_thread_interrupt, or orchestrator_capabilities to act there. A linked environment lets this one's agents do at most its access there, and never more than the calling agent may do here. An expired link has to be linked again from a new pairing code.",
+  success: OrchestratorMcpEnvironmentLinksResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: forwardingDependencies,
+})
+  .annotate(Tool.Title, "List linked environments")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
 
 export const OrchestratorToolkit = Toolkit.make(
   OrchestratorCapabilitiesTool,
@@ -312,4 +329,5 @@ export const OrchestratorToolkit = Toolkit.make(
   ThreadSendTool,
   ThreadWaitTool,
   ThreadInterruptTool,
+  EnvironmentLinksTool,
 );
