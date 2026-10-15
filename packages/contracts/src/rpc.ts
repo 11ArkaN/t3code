@@ -143,6 +143,8 @@ import {
   VcsStatusStreamEvent,
 } from "./git.ts";
 import {
+  ReviewBranchCommitsInput,
+  ReviewBranchCommitsResult,
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
   ReviewDiffPreviewError,
@@ -436,6 +438,7 @@ export const WS_METHODS = {
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
   // Review methods
+  reviewGetBranchCommits: "review.getBranchCommits",
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
 
@@ -1435,6 +1438,12 @@ const WsVcsInitRpc = Rpc.make(WS_METHODS.vcsInit, {
  * Not the persisted T3 Review model. Future review sessions should use
  * review.open* + review.getSnapshot.
  */
+const WsReviewGetBranchCommitsRpc = Rpc.make(WS_METHODS.reviewGetBranchCommits, {
+  payload: ReviewBranchCommitsInput,
+  success: ReviewBranchCommitsResult,
+  error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
+});
+
 const WsReviewGetDiffPreviewRpc = Rpc.make(WS_METHODS.reviewGetDiffPreview, {
   payload: ReviewDiffPreviewInput,
   success: ReviewDiffPreviewResult,
@@ -2016,6 +2025,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsCreateRefRpc,
   WsVcsSwitchRefRpc,
   WsVcsInitRpc,
+  WsReviewGetBranchCommitsRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
   WsTerminalOpenRpc,
