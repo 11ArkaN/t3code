@@ -60,8 +60,6 @@ export interface SettingsSearchItem {
   readonly wslAvailableOnly?: boolean;
   readonly managedTunnelOnly?: boolean;
   readonly redesignOnly?: boolean;
-  // Its section only renders for a connected environment with peer links that
-  // lets this session read its links.
   readonly peerLinksOnly?: boolean;
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
