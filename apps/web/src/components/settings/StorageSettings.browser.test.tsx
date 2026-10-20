@@ -97,8 +97,7 @@ let root: Root;
 let container: HTMLDivElement;
 
 function setInputValue(input: HTMLInputElement, value: string) {
-  const prototype = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
-  prototype?.set?.call(input, value);
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -208,11 +207,15 @@ function daysInput(label: string) {
   return container.querySelector<HTMLInputElement>(`input[aria-label="${label} in days"]`);
 }
 
+function pressKey(label: string, key: string) {
+  daysInput(label)?.dispatchEvent(
+    new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+  );
+}
+
 it.each(RETENTION_RULES)("turning %s on does not save 8 days", async (label) => {
   await render();
-
   await act(async () => retentionSwitch(label).click());
-
   expect(state.update).not.toHaveBeenCalled();
   expect(retentionSwitch(label).getAttribute("aria-checked")).toBe("true");
   expect(daysInput(label)?.value).toBe("8");
@@ -223,12 +226,10 @@ it("saves a drafted retention age only when that age is committed", async () => 
   await render();
   await act(async () => retentionSwitch(label).click());
   const input = daysInput(label)!;
-
   await act(async () => {
     setInputValue(input, "30");
     input.blur();
   });
-
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { worktreeAfterDays: 30 },
   });
@@ -239,13 +240,7 @@ it("saves the visible default when Enter commits an untouched retention draft", 
   const label = "Delete inactive worktrees";
   await render();
   await act(async () => retentionSwitch(label).click());
-
-  await act(async () => {
-    daysInput(label)?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    );
-  });
-
+  await act(async () => pressKey(label, "Enter"));
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { worktreeAfterDays: 8 },
   });
@@ -258,11 +253,7 @@ it("commits the parsed retention age when Enter is pressed on grouped text", asy
   const input = daysInput(label)!;
   await act(async () => setInputValue(input, "1000"));
   input.value = "1.000";
-  await act(async () =>
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    ),
-  );
+  await act(async () => pressKey(label, "Enter"));
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { worktreeAfterDays: 1000 },
   });
@@ -289,20 +280,12 @@ it("keeps a retention rule off when its draft is left or cancelled", async () =>
   await act(async () => retentionSwitch(label).click());
   const outside = document.createElement("button");
   document.body.append(outside);
-
   await act(async () => outside.focus());
-
   expect(state.update).not.toHaveBeenCalled();
   expect(daysInput(label)).toBeNull();
   outside.remove();
-
   await act(async () => retentionSwitch(label).click());
-  await act(async () => {
-    daysInput(label)?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-    );
-  });
-
+  await act(async () => pressKey(label, "Escape"));
   expect(state.update).not.toHaveBeenCalled();
   expect(daysInput(label)).toBeNull();
 });
@@ -311,14 +294,27 @@ it("saves a retention step from the drafted age", async () => {
   const label = "Delete old rotated logs";
   await render();
   await act(async () => retentionSwitch(label).click());
-
   await act(async () => {
     container.querySelector<HTMLElement>(`[aria-label="Increase ${label}"]`)?.click();
   });
-
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { logsAfterDays: 9 },
   });
+});
+
+it("does not save a drafted age when that rule's switch is clicked", async () => {
+  const label = "Delete inactive worktrees";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+  const input = daysInput(label)!;
+  await act(async () => setInputValue(input, "30"));
+  const toggle = retentionSwitch(label);
+  await act(async () => {
+    toggle.focus();
+    toggle.click();
+  });
+  expect(state.update).not.toHaveBeenCalled();
+  expect(daysInput(label)).toBeNull();
 });
 
 it("turns an enabled retention rule off immediately and edits it without saving 8", async () => {
@@ -329,7 +325,6 @@ it("turns an enabled retention rule off immediately and edits it without saving 
   };
   await render();
   const input = daysInput(label)!;
-
   await act(async () => {
     input.focus();
     setInputValue(input, "14");
@@ -338,7 +333,6 @@ it("turns an enabled retention rule off immediately and edits it without saving 
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { browserArtifactsAfterDays: 14 },
   });
-
   state.update.mockClear();
   await act(async () => retentionSwitch(label).click());
   expect(state.update).toHaveBeenCalledExactlyOnceWith({

@@ -4,7 +4,7 @@ import type {
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -104,6 +104,14 @@ function WorktreesDirectoryRow() {
   );
 }
 
+function isRuleSwitch(target: EventTarget | null, label: string) {
+  return (
+    target instanceof Element &&
+    target.getAttribute("role") === "switch" &&
+    target.getAttribute("aria-label") === label
+  );
+}
+
 function RetentionControl({
   label,
   value,
@@ -118,21 +126,23 @@ function RetentionControl({
   const initialDays = Math.max(minimum, 8);
   const [draft, setDraft] = useState<number | null>(value);
   const [savedValue, setSavedValue] = useState(value);
-  // `draft` is an age the user can see and has not saved. `holding` is that age after
-  // commit, kept on screen until the saved value arrives so the row does not flash Off.
+  // `holding` keeps a committed age visible until the saved value arrives, so the row does not flash Off.
   const [mode, setMode] = useState<"synced" | "draft" | "holding">("synced");
   const modeRef = useRef(mode);
   const rootRef = useRef<HTMLDivElement>(null);
   const pointerInsideRef = useRef(false);
   const publishedRef = useRef<number | null>(null);
+  // A save can resolve after this render commits and before passive effects.
   const valueRef = useRef(value);
-  valueRef.current = value; // oxlint-disable-line react/refs -- The save result can resolve before effects, and holding must see the latest prop.
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
     setMode("synced");
   }
 
+  useLayoutEffect(() => {
+    valueRef.current = value;
+  }, [value]);
   useEffect(() => {
     modeRef.current = mode;
     if (mode === "synced") publishedRef.current = null;
@@ -177,18 +187,10 @@ function RetentionControl({
     <div
       ref={rootRef}
       className="flex items-center gap-3"
-      onPointerDown={() => {
-        pointerInsideRef.current = true;
-      }}
-      onPointerLeave={() => {
-        pointerInsideRef.current = false;
-      }}
-      onPointerUp={() => {
-        pointerInsideRef.current = false;
-      }}
-      onPointerCancel={() => {
-        pointerInsideRef.current = false;
-      }}
+      onPointerDown={() => (pointerInsideRef.current = true)}
+      onPointerLeave={() => (pointerInsideRef.current = false)}
+      onPointerUp={() => (pointerInsideRef.current = false)}
+      onPointerCancel={() => (pointerInsideRef.current = false)}
       onBlur={(event) => {
         if (modeRef.current !== "draft") return;
         const next = event.relatedTarget;
@@ -206,9 +208,11 @@ function RetentionControl({
           size="sm"
           className="w-auto"
           onValueChange={setDraft}
-          onValueCommitted={(next) => {
+          onValueCommitted={(next, details) => {
+            const related =
+              details.event instanceof FocusEvent ? details.event.relatedTarget : null;
             if (next === null) setDraft(value ?? initialDays);
-            else commitDays(next);
+            else if (!isRuleSwitch(related, label)) commitDays(next);
           }}
         >
           <NumberFieldGroup>
@@ -244,8 +248,7 @@ function RetentionControl({
         aria-label={label}
         checked={enabled}
         onCheckedChange={(nextEnabled) => {
-          // Opening the switch only shows the default age. Nothing is saved until that
-          // age is committed, so cleanup cannot run at 8 days the user has not chosen.
+          // The switch only shows the default age. Cleanup waits until that age is committed.
           if (nextEnabled) {
             publishedRef.current = null;
             setDraft(initialDays);
