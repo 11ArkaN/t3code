@@ -251,6 +251,38 @@ it("saves the visible default when Enter commits an untouched retention draft", 
   });
 });
 
+it("commits the parsed retention age when Enter is pressed on grouped text", async () => {
+  const label = "Delete inactive worktrees";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+  const input = daysInput(label)!;
+  await act(async () => setInputValue(input, "1000"));
+  input.value = "1.000";
+  await act(async () =>
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    ),
+  );
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 1000 },
+  });
+});
+
+it("returns a retention rule to off when saving its age fails", async () => {
+  const label = "Delete inactive worktrees";
+  state.update.mockResolvedValue(false);
+  await render();
+  await act(async () => retentionSwitch(label).click());
+  await act(async () => {
+    setInputValue(daysInput(label)!, "30");
+    daysInput(label)!.blur();
+  });
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 30 },
+  });
+  expect(daysInput(label)).toBeNull();
+});
+
 it("keeps a retention rule off when its draft is left or cancelled", async () => {
   const label = "Delete inactive worktrees";
   await render();

@@ -112,7 +112,7 @@ function RetentionControl({
 }: {
   label: string;
   value: number | null;
-  onChange: (value: number | null) => void;
+  onChange: (value: number | null) => Promise<boolean> | void;
   minimum?: number;
 }) {
   const initialDays = Math.max(minimum, 8);
@@ -125,6 +125,8 @@ function RetentionControl({
   const rootRef = useRef<HTMLDivElement>(null);
   const pointerInsideRef = useRef(false);
   const publishedRef = useRef<number | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value; // oxlint-disable-line react/refs -- The save result can resolve before effects, and holding must see the latest prop.
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
@@ -158,7 +160,17 @@ function RetentionControl({
       setMode("holding");
       publishedRef.current = days;
     }
-    onChange(days);
+    const save = onChange(days);
+    if (value !== null || !(save instanceof Promise)) return;
+    void save.then((succeeded) => {
+      if (
+        !succeeded &&
+        valueRef.current === null &&
+        modeRef.current === "holding" &&
+        publishedRef.current === days
+      )
+        discardDraft();
+    });
   }
 
   return (
@@ -167,6 +179,9 @@ function RetentionControl({
       className="flex items-center gap-3"
       onPointerDown={() => {
         pointerInsideRef.current = true;
+      }}
+      onPointerLeave={() => {
+        pointerInsideRef.current = false;
       }}
       onPointerUp={() => {
         pointerInsideRef.current = false;
@@ -213,10 +228,7 @@ function RetentionControl({
                 }
                 if (event.key !== "Enter") return;
                 event.preventDefault();
-                const raw = event.currentTarget.value.trim();
-                if (raw === "") return;
-                const parsed = Number(raw);
-                if (Number.isFinite(parsed)) commitDays(parsed);
+                if (draft !== null) commitDays(draft);
               }}
             />
             <span aria-hidden="true" className="self-center pr-2 text-xs">
