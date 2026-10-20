@@ -238,8 +238,11 @@ try {
     stdio: "inherit",
   });
 
-  const lockfile = NodeFS.readFileSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), "utf8");
-  assertContains(lockfile, "lockfileVersion:", "Expected pnpm-lock.yaml to be refreshed.");
+  NodeChildProcess.execFileSync(
+    "vp",
+    ["install", "--lockfile-only", "--ignore-scripts", "--frozen-lockfile"],
+    { cwd: tempRoot, stdio: "inherit" },
+  );
 
   for (const relativePath of [
     "apps/server/package.json",
