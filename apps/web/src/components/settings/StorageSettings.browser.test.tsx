@@ -13,6 +13,7 @@ import { page } from "vite-plus/test/browser";
 const state = vi.hoisted(() => ({
   settings: {} as typeof DEFAULT_SERVER_SETTINGS,
   run: vi.fn(),
+  update: vi.fn(),
   report: null as StorageCleanupReport | null,
 }));
 
@@ -67,7 +68,7 @@ vi.mock(import("./useScopedSettings"), async (original) => ({
   ...(await original()),
   useScopedSettings: (() => state.settings) as never,
   useScopedSettingsMixed: () => false,
-  useUpdateScopedSettings: () => vi.fn(),
+  useUpdateScopedSettings: () => state.update,
   useClearScopedSettings: () => vi.fn(),
 }));
 // The real page container needs a router and the real row reads write permission and
@@ -95,7 +96,14 @@ import { StorageSettingsPanel } from "./StorageSettings";
 let root: Root;
 let container: HTMLDivElement;
 
+function setInputValue(input: HTMLInputElement, value: string) {
+  const prototype = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  prototype?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   state.settings = {
     ...DEFAULT_SERVER_SETTINGS,
     storageCleanup: {
@@ -112,6 +120,7 @@ beforeEach(() => {
   };
   state.report = null;
   state.run.mockReset();
+  state.update.mockReset();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -120,6 +129,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 async function render() {
@@ -180,6 +190,129 @@ it.each(["machine-wide immediate", "project custom"])(
     expect(button.textContent).toBe("Delete now");
   },
 );
+
+const RETENTION_RULES = [
+  ["Delete inactive worktrees", "worktreeAfterDays"],
+  ["Delete settled worktrees", "worktreeSettledAfterDays"],
+  ["Delete old browser artifacts", "browserArtifactsAfterDays"],
+  ["Delete old rotated logs", "logsAfterDays"],
+] as const;
+
+function retentionSwitch(label: string) {
+  const element = container.querySelector<HTMLElement>(`[role="switch"][aria-label="${label}"]`);
+  if (!element) throw new Error(`Missing switch ${label}`);
+  return element;
+}
+
+function daysInput(label: string) {
+  return container.querySelector<HTMLInputElement>(`input[aria-label="${label} in days"]`);
+}
+
+it.each(RETENTION_RULES)("turning %s on does not save 8 days", async (label) => {
+  await render();
+
+  await act(async () => retentionSwitch(label).click());
+
+  expect(state.update).not.toHaveBeenCalled();
+  expect(retentionSwitch(label).getAttribute("aria-checked")).toBe("true");
+  expect(daysInput(label)?.value).toBe("8");
+});
+
+it("saves a drafted retention age only when that age is committed", async () => {
+  const label = "Delete inactive worktrees";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+  const input = daysInput(label)!;
+
+  await act(async () => {
+    setInputValue(input, "30");
+    input.blur();
+  });
+
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 30 },
+  });
+  expect(daysInput(label)?.value).toBe("30");
+});
+
+it("saves the visible default when Enter commits an untouched retention draft", async () => {
+  const label = "Delete inactive worktrees";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+
+  await act(async () => {
+    daysInput(label)?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+  });
+
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 8 },
+  });
+});
+
+it("keeps a retention rule off when its draft is left or cancelled", async () => {
+  const label = "Delete inactive worktrees";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+  const outside = document.createElement("button");
+  document.body.append(outside);
+
+  await act(async () => outside.focus());
+
+  expect(state.update).not.toHaveBeenCalled();
+  expect(daysInput(label)).toBeNull();
+  outside.remove();
+
+  await act(async () => retentionSwitch(label).click());
+  await act(async () => {
+    daysInput(label)?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  });
+
+  expect(state.update).not.toHaveBeenCalled();
+  expect(daysInput(label)).toBeNull();
+});
+
+it("saves a retention step from the drafted age", async () => {
+  const label = "Delete old rotated logs";
+  await render();
+  await act(async () => retentionSwitch(label).click());
+
+  await act(async () => {
+    container.querySelector<HTMLElement>(`[aria-label="Increase ${label}"]`)?.click();
+  });
+
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { logsAfterDays: 9 },
+  });
+});
+
+it("turns an enabled retention rule off immediately and edits it without saving 8", async () => {
+  const label = "Delete old browser artifacts";
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, browserArtifactsAfterDays: 30 },
+  };
+  await render();
+  const input = daysInput(label)!;
+
+  await act(async () => {
+    input.focus();
+    setInputValue(input, "14");
+    input.blur();
+  });
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: 14 },
+  });
+
+  state.update.mockClear();
+  await act(async () => retentionSwitch(label).click());
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: null },
+  });
+});
 
 it("keeps cleanup disabled when settled retention and all other rules are off", async () => {
   const button = await render();

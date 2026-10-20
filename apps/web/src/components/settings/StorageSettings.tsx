@@ -4,7 +4,7 @@ import type {
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -115,16 +115,74 @@ function RetentionControl({
   onChange: (value: number | null) => void;
   minimum?: number;
 }) {
-  const [draft, setDraft] = useState(value);
+  const initialDays = Math.max(minimum, 8);
+  const [draft, setDraft] = useState<number | null>(value);
   const [savedValue, setSavedValue] = useState(value);
+  // `draft` is an age the user can see and has not saved. `holding` is that age after
+  // commit, kept on screen until the saved value arrives so the row does not flash Off.
+  const [mode, setMode] = useState<"synced" | "draft" | "holding">("synced");
+  const modeRef = useRef(mode);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const pointerInsideRef = useRef(false);
+  const publishedRef = useRef<number | null>(null);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
+    setMode("synced");
+  }
+
+  useEffect(() => {
+    modeRef.current = mode;
+    if (mode === "synced") publishedRef.current = null;
+    if (mode !== "draft") return;
+    const input = rootRef.current?.querySelector("input");
+    input?.focus();
+    input?.select();
+  }, [mode]);
+
+  const enabled = value !== null || mode !== "synced";
+
+  function discardDraft() {
+    modeRef.current = "synced";
+    publishedRef.current = null;
+    setMode("synced");
+    setDraft(value);
+  }
+
+  function commitDays(next: number) {
+    const days = Math.min(3650, Math.max(minimum, Math.round(next)));
+    if (value === null && modeRef.current === "holding" && publishedRef.current === days) return;
+    setDraft(days);
+    if (value === null) {
+      modeRef.current = "holding";
+      setMode("holding");
+      publishedRef.current = days;
+    }
+    onChange(days);
   }
 
   return (
-    <div className="flex items-center gap-3">
-      {value !== null ? (
+    <div
+      ref={rootRef}
+      className="flex items-center gap-3"
+      onPointerDown={() => {
+        pointerInsideRef.current = true;
+      }}
+      onPointerUp={() => {
+        pointerInsideRef.current = false;
+      }}
+      onPointerCancel={() => {
+        pointerInsideRef.current = false;
+      }}
+      onBlur={(event) => {
+        if (modeRef.current !== "draft") return;
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        if (pointerInsideRef.current) return;
+        discardDraft();
+      }}
+    >
+      {enabled ? (
         <NumberField
           value={draft}
           min={minimum}
@@ -134,20 +192,32 @@ function RetentionControl({
           className="w-auto"
           onValueChange={setDraft}
           onValueCommitted={(next) => {
-            if (next === null) setDraft(value);
-            else {
-              const days = Math.min(3650, Math.max(minimum, Math.round(next)));
-              setDraft(days);
-              onChange(days);
-            }
+            if (next === null) setDraft(value ?? initialDays);
+            else commitDays(next);
           }}
         >
           <NumberFieldGroup>
             <NumberFieldDecrement aria-label={`Decrease ${label}`} />
             <NumberFieldInput
               aria-label={`${label} in days`}
-              size={new Intl.NumberFormat().format(draft ?? value).length}
+              size={new Intl.NumberFormat().format(draft ?? value ?? initialDays).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (modeRef.current !== "draft") return;
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  discardDraft();
+                  return;
+                }
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                const raw = event.currentTarget.value.trim();
+                if (raw === "") return;
+                const parsed = Number(raw);
+                if (Number.isFinite(parsed)) commitDays(parsed);
+              }}
             />
             <span aria-hidden="true" className="self-center pr-2 text-xs">
               days
@@ -160,8 +230,21 @@ function RetentionControl({
       )}
       <Switch
         aria-label={label}
-        checked={value !== null}
-        onCheckedChange={(enabled) => onChange(enabled ? 8 : null)}
+        checked={enabled}
+        onCheckedChange={(nextEnabled) => {
+          // Opening the switch only shows the default age. Nothing is saved until that
+          // age is committed, so cleanup cannot run at 8 days the user has not chosen.
+          if (nextEnabled) {
+            publishedRef.current = null;
+            setDraft(initialDays);
+            modeRef.current = "draft";
+            setMode("draft");
+            return;
+          }
+          const publishOff = value !== null || modeRef.current === "holding";
+          discardDraft();
+          if (publishOff) onChange(null);
+        }}
       />
     </div>
   );
