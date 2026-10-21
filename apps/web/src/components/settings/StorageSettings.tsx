@@ -136,9 +136,11 @@ function RetentionControl({
   const valueRef = useRef(value);
   if (savedValue !== value) {
     setSavedValue(value);
-    setDraft(value);
-    // A queued age can arrive after the user already chose Off. Keep that choice until null lands.
-    if (value === null || mode !== "off") setMode("synced");
+    // A draft outlives a late null from its off save. Off still waits for that null.
+    if (mode !== "draft") {
+      setDraft(value);
+      if (value === null || mode !== "off") setMode("synced");
+    }
   }
 
   useLayoutEffect(() => {
@@ -167,9 +169,8 @@ function RetentionControl({
     if (value === null && modeRef.current === "holding" && publishedRef.current === days) return;
     setDraft(days);
     if (value === null) {
-      modeRef.current = "holding";
-      setMode("holding");
       publishedRef.current = days;
+      setMode((modeRef.current = "holding"));
     }
     const save = onChange(days);
     if (value !== null || !(save instanceof Promise)) return;
@@ -193,10 +194,9 @@ function RetentionControl({
       onPointerUp={() => (pointerInsideRef.current = false)}
       onPointerCancel={() => (pointerInsideRef.current = false)}
       onBlur={(event) => {
-        if (modeRef.current !== "draft") return;
         const next = event.relatedTarget;
+        if (modeRef.current !== "draft" || pointerInsideRef.current) return;
         if (next instanceof Node && event.currentTarget.contains(next)) return;
-        if (pointerInsideRef.current) return;
         discardDraft();
       }}
     >
@@ -223,17 +223,15 @@ function RetentionControl({
               size={new Intl.NumberFormat().format(draft ?? value ?? initialDays).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (modeRef.current !== "draft") return;
+                if (event.nativeEvent.isComposing || modeRef.current !== "draft") return;
                 if (event.key === "Escape") {
                   event.preventDefault();
                   event.stopPropagation();
                   discardDraft();
-                  return;
+                } else if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (draft !== null) commitDays(draft);
                 }
-                if (event.key !== "Enter") return;
-                event.preventDefault();
-                if (draft !== null) commitDays(draft);
               }}
             />
             <span aria-hidden="true" className="self-center pr-2 text-xs">
@@ -253,8 +251,7 @@ function RetentionControl({
             offGenRef.current += 1;
             publishedRef.current = null;
             setDraft(initialDays);
-            modeRef.current = "draft";
-            setMode("draft");
+            setMode((modeRef.current = "draft"));
             return;
           }
           const publishOff = value !== null || modeRef.current === "holding";
@@ -556,6 +553,7 @@ export function StorageSettingsPanel() {
       : undefined;
   const update = (patch: Partial<StorageCleanupSettings>) =>
     updateSettings({ storageCleanup: patch });
+  const scopeKey = targets.map((entry) => `${entry.environmentId}:${entry.projectId}`).join(",");
   const updateWorktree = (patch: Partial<WorktreeCleanupRules>) =>
     isProjectScope
       ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
@@ -673,6 +671,7 @@ export function StorageSettingsPanel() {
               serverScoped={!isProjectScope}
               control={
                 <RetentionControl
+                  key={scopeKey}
                   label="Delete inactive worktrees"
                   value={settings.worktreeAfterDays}
                   onChange={(worktreeAfterDays) => updateWorktree({ worktreeAfterDays })}
@@ -699,6 +698,7 @@ export function StorageSettingsPanel() {
                   serverScoped={!isProjectScope}
                   control={
                     <RetentionControl
+                      key={scopeKey}
                       label="Delete settled worktrees"
                       value={settings.worktreeSettledAfterDays}
                       minimum={0}
@@ -791,6 +791,7 @@ export function StorageSettingsPanel() {
             serverScoped
             control={
               <RetentionControl
+                key={scopeKey}
                 label="Delete old browser artifacts"
                 value={settings.browserArtifactsAfterDays}
                 onChange={(browserArtifactsAfterDays) => update({ browserArtifactsAfterDays })}
@@ -804,6 +805,7 @@ export function StorageSettingsPanel() {
             serverScoped
             control={
               <RetentionControl
+                key={scopeKey}
                 label="Delete old rotated logs"
                 value={settings.logsAfterDays}
                 onChange={(logsAfterDays) => update({ logsAfterDays })}

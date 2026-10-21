@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   settings: {} as typeof DEFAULT_SERVER_SETTINGS,
   run: vi.fn(),
   update: vi.fn(),
+  targets: [] as never[],
   report: null as StorageCleanupReport | null,
 }));
 
@@ -53,7 +54,7 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
       scope: { kind: "environment" },
       environments: [environment],
       connectedEnvironments: [environment],
-      targets: [],
+      targets: state.targets,
       target: null,
     };
   }) as never,
@@ -103,6 +104,7 @@ function setup() {
     projectSettingsOverrides: {},
   };
   state.report = null;
+  state.targets = [];
   state.run.mockReset();
   state.update.mockReset();
 }
@@ -143,6 +145,12 @@ async function openDraft(label: string) {
   await act(async () => ruleSwitch(screen.container, label).click());
   return screen;
 }
+function expectSaved(rule: Record<string, number | null>) {
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({ storageCleanup: rule });
+}
+function retentionTarget(environmentId: string) {
+  return [{ environmentId, projectId: null, sources: {}, settings: state.settings }] as never[];
+}
 
 it.each(RETENTION_RULES)("turning %s on does not save 8 days", async (label) => {
   setup();
@@ -160,9 +168,7 @@ it("saves a drafted retention age only when that age is committed", async () => 
     setInputValue(input, "30");
     input.blur();
   });
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { worktreeAfterDays: 30 },
-  });
+  expectSaved({ worktreeAfterDays: 30 });
   expect(daysInput(screen.container, inactive)?.value).toBe("30");
 });
 
@@ -170,11 +176,8 @@ it("saves the visible default when Enter commits an untouched retention draft", 
   setup();
   await using screen = await openDraft(inactive);
   await act(async () => pressKey(daysInput(screen.container, inactive)!, "Enter"));
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { worktreeAfterDays: 8 },
-  });
+  expectSaved({ worktreeAfterDays: 8 });
 });
-
 it("commits the parsed retention age when Enter is pressed on grouped text", async () => {
   setup();
   await using screen = await openDraft(inactive);
@@ -182,11 +185,8 @@ it("commits the parsed retention age when Enter is pressed on grouped text", asy
   await act(async () => setInputValue(input, "1000"));
   input.value = "1.000";
   await act(async () => pressKey(input, "Enter"));
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { worktreeAfterDays: 1000 },
-  });
+  expectSaved({ worktreeAfterDays: 1000 });
 });
-
 it("returns a retention rule to off when saving its age fails", async () => {
   setup();
   state.update.mockResolvedValue(false);
@@ -196,12 +196,9 @@ it("returns a retention rule to off when saving its age fails", async () => {
     setInputValue(input, "30");
     input.blur();
   });
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { worktreeAfterDays: 30 },
-  });
+  expectSaved({ worktreeAfterDays: 30 });
   expect(daysInput(screen.container, inactive)).toBeNull();
 });
-
 it("keeps a retention rule off when its draft is left or cancelled", async () => {
   setup();
   await using screen = await openDraft(inactive);
@@ -223,11 +220,8 @@ it("saves a retention step from the drafted age", async () => {
   await using screen = await openDraft(label);
   const step = screen.container.querySelector<HTMLElement>(`[aria-label="Increase ${label}"]`)!;
   await act(async () => step.click());
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { logsAfterDays: 9 },
-  });
+  expectSaved({ logsAfterDays: 9 });
 });
-
 it("does not save a drafted age when that rule's switch is clicked", async () => {
   setup();
   await using screen = await openDraft(inactive);
@@ -245,10 +239,7 @@ it("does not save a drafted age when that rule's switch is clicked", async () =>
 it("turns an enabled retention rule off immediately and edits it without saving 8", async () => {
   const label = "Delete old browser artifacts";
   setup();
-  state.settings = {
-    ...state.settings,
-    storageCleanup: { ...state.settings.storageCleanup, browserArtifactsAfterDays: 30 },
-  };
+  Object.assign(state.settings.storageCleanup, { browserArtifactsAfterDays: 30 });
   await using screen = await render(panel());
   const input = daysInput(screen.container, label)!;
   await act(async () => {
@@ -256,14 +247,19 @@ it("turns an enabled retention rule off immediately and edits it without saving 
     setInputValue(input, "14");
     input.blur();
   });
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { browserArtifactsAfterDays: 14 },
-  });
+  expectSaved({ browserArtifactsAfterDays: 14 });
   state.update.mockClear();
   await act(async () => ruleSwitch(screen.container, label).click());
-  expect(state.update).toHaveBeenCalledExactlyOnceWith({
-    storageCleanup: { browserArtifactsAfterDays: null },
-  });
+  expectSaved({ browserArtifactsAfterDays: null });
+});
+it("drops a retention draft when the settings scope changes", async () => {
+  setup();
+  state.targets = retentionTarget("a");
+  await using screen = await openDraft(inactive);
+  state.targets = retentionTarget("b");
+  await act(async () => screen.rerender(panel()));
+  expect(daysInput(screen.container, inactive)).toBeNull();
+  expect(state.update).not.toHaveBeenCalled();
 });
 
 it("keeps cleanup disabled when settled retention and all other rules are off", async () => {
