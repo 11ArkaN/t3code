@@ -193,7 +193,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         className="px-4 pt-1.5"
       >
         <ComposerBanner.Content>
-          <span className="shrink-0 text-muted-foreground">{activeQuestion.header}</span>
+          <span className="min-w-0 truncate text-muted-foreground">{activeQuestion.header}</span>
           {isCollapsed ? (
             <>
               <ComposerBanner.Separator />
