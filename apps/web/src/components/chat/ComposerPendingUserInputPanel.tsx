@@ -7,9 +7,8 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { CheckboxMark } from "../ui/checkbox";
+import { CheckIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
-import { Kbd } from "../ui/kbd";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
 import ChatMarkdown from "../ChatMarkdown";
@@ -190,24 +189,23 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           isCollapsed ? "Show the question and its options" : "Hide the question and its options"
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
-        className="px-4 pt-1.5"
       >
+        <ComposerBanner.Icon />
         <ComposerBanner.Content>
-          <span className="min-w-0 truncate text-muted-foreground">{activeQuestion.header}</span>
+          <span className="min-w-0 truncate font-medium text-muted-foreground">
+            {activeQuestion.header}
+          </span>
           {isCollapsed ? (
-            <>
-              <ComposerBanner.Separator />
-              <span className="min-w-0 flex-1 truncate text-secondary-label">
-                {activeQuestion.question}
-              </span>
-            </>
+            <span className="min-w-0 flex-1 truncate text-secondary-label">
+              {activeQuestion.question}
+            </span>
           ) : null}
         </ComposerBanner.Content>
-        <ComposerBanner.Actions className="gap-0">
+        <ComposerBanner.Actions>
           {prompt.questions.length > 1 ? (
-            <ComposerBanner.Count>
+            <span className="text-3xs font-medium text-muted-foreground tabular-nums">
               {questionIndex + 1}/{prompt.questions.length}
-            </ComposerBanner.Count>
+            </span>
           ) : null}
           <ComposerBanner.ToggleIcon expanded={!isCollapsed} />
           {prompt.dismissible ? (
@@ -234,15 +232,17 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="ps-6 pe-4 pb-1 wrap-anywhere sm:ps-5.5">
+          <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
             <ChatMarkdown
               text={activeQuestion.question}
               cwd={cwd}
               threadRef={threadRef}
-              className="pt-2 text-foreground/85"
+              className="text-xs/5 text-secondary-label"
             />
-            {/* Rows span the header row's width so the radios align with the question text and the shortcut column sits under the dismiss button. */}
-            <div className="-ms-2 mt-1.5 sm:-ms-1.5">
+            {activeQuestion.multiSelect ? (
+              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
+            ) : null}
+            <div className="mt-2 space-y-0.5 border-t border-border/60 pt-1.5">
               {activeQuestion.options.map((option, index) => {
                 const optionValue = option.value ?? option.label;
                 const isOptimisticallySelected =
@@ -250,35 +250,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   optimisticSingleSelect.optionValue === optionValue;
                 const isSelected =
                   isOptimisticallySelected || draftSelectedOptions?.[index] === true;
-                const className = cn(
-                  "group flex w-full items-start gap-2.5 rounded-md bg-transparent py-1.5 ps-2 text-left sm:ps-1.5 outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
-                  isSelected ? "text-foreground" : "text-foreground/70 hover:bg-muted/30",
-                  (disabled || isResponding) && "opacity-50 cursor-not-allowed",
-                  !disabled && !isResponding && "cursor-pointer",
-                );
-                // The h-5 slots match the label's line box, so the indicator and shortcut stay on its first line.
-                const content = (
-                  <>
-                    <span className="pointer-events-none flex h-5 shrink-0 items-center">
-                      {activeQuestion.multiSelect ? (
-                        <CheckboxMark checked={isSelected} />
-                      ) : (
-                        <OptionRadio checked={isSelected} />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                      <span className="text-sm font-medium">{option.label}</span>
-                      {option.description && option.description !== option.label ? (
-                        <span className="text-secondary-label text-2xs">{option.description}</span>
-                      ) : null}
-                    </div>
-                    {index < 9 ? (
-                      <span className="flex h-5 w-7 shrink-0 items-center justify-center sm:w-6">
-                        <Kbd>{index + 1}</Kbd>
-                      </span>
-                    ) : null}
-                  </>
-                );
                 return (
                   <button
                     key={`${activeQuestion.id}:${optionValue}`}
@@ -288,9 +259,33 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                     onClick={() => {
                       handleOptionSelection(activeQuestion.id, optionValue);
                     }}
-                    className={className}
+                    className={cn(
+                      "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-foreground outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/25",
+                      // A black overlay darkens the row on every theme surface, light or dark.
+                      isSelected
+                        ? "bg-black/[0.045] dark:bg-black/20"
+                        : "bg-transparent hover:bg-muted/30",
+                      (disabled || isResponding) && "opacity-50 cursor-not-allowed",
+                      !disabled && !isResponding && "cursor-pointer",
+                    )}
                   >
-                    {content}
+                    <kbd
+                      data-pending-user-input-option-key
+                      className={cn(
+                        "flex size-5 shrink-0 items-center justify-center rounded border font-sans text-3xs font-medium tabular-nums transition-colors duration-150",
+                        isSelected
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {isSelected ? <CheckIcon aria-hidden className="size-3" /> : index + 1}
+                    </kbd>
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="text-sm font-semibold">{option.label}</span>
+                      {option.description && option.description !== option.label ? (
+                        <span className="text-secondary-label text-2xs">{option.description}</span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}
@@ -301,21 +296,3 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     </Collapsible>
   );
 });
-
-// Drawn with ui/radio-group's look instead of using its Radio: Radio only checks inside a
-// RadioGroup, whose arrow keys select options and would trip the single-select auto-advance.
-function OptionRadio({ checked }: { checked: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "relative inline-flex size-4.5 shrink-0 items-center justify-center rounded-full border border-input bg-background not-dark:bg-clip-padding sm:size-4 dark:bg-input/32",
-        checked ? "shadow-none" : "shadow-xs/5",
-      )}
-    >
-      {checked ? (
-        <span className="-inset-px absolute flex items-center justify-center rounded-full bg-primary before:size-2 before:rounded-full before:bg-primary-foreground sm:before:size-1.5" />
-      ) : null}
-    </span>
-  );
-}
