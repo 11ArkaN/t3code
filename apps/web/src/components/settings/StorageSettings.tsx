@@ -127,17 +127,18 @@ function RetentionControl({
   const [draft, setDraft] = useState<number | null>(value);
   const [savedValue, setSavedValue] = useState(value);
   // `holding` keeps a committed age visible until the saved value arrives, so the row does not flash Off.
-  const [mode, setMode] = useState<"synced" | "draft" | "holding">("synced");
+  const [mode, setMode] = useState<"synced" | "draft" | "holding" | "off">("synced");
   const modeRef = useRef(mode);
   const rootRef = useRef<HTMLDivElement>(null);
   const pointerInsideRef = useRef(false);
   const publishedRef = useRef<number | null>(null);
-  // A save can resolve after this render commits and before passive effects.
+  const offGenRef = useRef(0);
   const valueRef = useRef(value);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
-    setMode("synced");
+    // A queued age can arrive after the user already chose Off. Keep that choice until null lands.
+    if (value === null || mode !== "off") setMode("synced");
   }
 
   useLayoutEffect(() => {
@@ -152,7 +153,7 @@ function RetentionControl({
     input?.select();
   }, [mode]);
 
-  const enabled = value !== null || mode !== "synced";
+  const enabled = mode !== "off" && (value !== null || mode !== "synced");
 
   function discardDraft() {
     modeRef.current = "synced";
@@ -248,8 +249,8 @@ function RetentionControl({
         aria-label={label}
         checked={enabled}
         onCheckedChange={(nextEnabled) => {
-          // The switch only shows the default age. Cleanup waits until that age is committed.
           if (nextEnabled) {
+            offGenRef.current += 1;
             publishedRef.current = null;
             setDraft(initialDays);
             modeRef.current = "draft";
@@ -258,7 +259,15 @@ function RetentionControl({
           }
           const publishOff = value !== null || modeRef.current === "holding";
           discardDraft();
-          if (publishOff) onChange(null);
+          const save = publishOff ? onChange(null) : null;
+          if (!(save instanceof Promise)) return;
+          const generation = (offGenRef.current += 1);
+          modeRef.current = "off";
+          setMode("off");
+          void save.then((succeeded) => {
+            if (succeeded || offGenRef.current !== generation) return;
+            setMode((modeRef.current = "synced"));
+          });
         }}
       />
     </div>
