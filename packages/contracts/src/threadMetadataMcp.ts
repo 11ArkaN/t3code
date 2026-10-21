@@ -36,9 +36,11 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-const ThreadMetadataTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512)).annotate({
-  description: "New concise display title. Required only when action is rename.",
-});
+const ThreadMetadataTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512)).pipe(
+  Schema.annotateEncoded({
+    description: "New concise display title. Required only when action is rename.",
+  }),
+);
 
 const ThreadMetadataClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLength(256))
   .check(
@@ -70,9 +72,11 @@ export const ThreadMetadataMcpAction = Schema.Literals([
 export type ThreadMetadataMcpAction = typeof ThreadMetadataMcpAction.Type;
 
 export const ThreadMetadataMcpPullRequest = Schema.Struct({
-  repository: TrimmedNonEmptyString.annotate({
-    description: "Repository name as owner/name.",
-  }),
+  repository: TrimmedNonEmptyString.pipe(
+    Schema.annotateEncoded({
+      description: "Repository name as owner/name.",
+    }),
+  ),
   number: PositiveInt.annotate({ description: "Pull request number." }),
   url: ThreadMetadataMcpPullRequestUrl,
 });

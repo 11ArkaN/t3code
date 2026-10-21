@@ -44,15 +44,21 @@ import {
 } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
-const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
-  description: "Complete task or message text for the target agent.",
-});
-const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512)).annotate({
-  description: "Optional concise display title.",
-});
-const OrchestratorMcpClientRequestId = TrimmedNonEmptyString.check(
-  Schema.isMaxLength(256),
-).annotate({ description: "Stable idempotency key to reuse when retrying this mutation." });
+const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).pipe(
+  Schema.annotateEncoded({
+    description: "Complete task or message text for the target agent.",
+  }),
+);
+const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512)).pipe(
+  Schema.annotateEncoded({
+    description: "Optional concise display title.",
+  }),
+);
+const OrchestratorMcpClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLength(256)).pipe(
+  Schema.annotateEncoded({
+    description: "Stable idempotency key to reuse when retrying this mutation.",
+  }),
+);
 
 /**
  * OpenCode 1.15 has been observed serializing nested MCP union objects as JSON
@@ -98,21 +104,15 @@ export const OrchestratorMcpTargetOptions = Schema.Union([
 export type OrchestratorMcpTargetOptions = typeof OrchestratorMcpTargetOptions.Type;
 
 export const OrchestratorMcpTarget = Schema.Struct({
-  providerInstanceId: Schema.optional(
-    ProviderInstanceId.annotate({
-      description: "Configured provider instance id from orchestrator_capabilities.",
-    }),
-  ),
-  driverKind: Schema.optional(
-    ProviderDriverKind.annotate({
-      description: "Provider driver kind; prefer providerInstanceId when available.",
-    }),
-  ),
-  model: Schema.optional(
-    TrimmedNonEmptyString.annotate({
-      description: "Model id advertised for the selected provider instance.",
-    }),
-  ),
+  providerInstanceId: Schema.optional(ProviderInstanceId).annotate({
+    description: "Configured provider instance id from orchestrator_capabilities.",
+  }),
+  driverKind: Schema.optional(ProviderDriverKind).annotate({
+    description: "Provider driver kind; prefer providerInstanceId when available.",
+  }),
+  model: Schema.optional(TrimmedNonEmptyString).annotate({
+    description: "Model id advertised for the selected provider instance.",
+  }),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
@@ -162,9 +162,11 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
   typeof OrchestratorMcpTerminalDelegatedTaskStatus.Type;
 
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
-  task: OrchestratorMcpPrompt.annotate({
-    description: "Self-contained task for one delegated child agent/subagent.",
-  }),
+  task: OrchestratorMcpPrompt.pipe(
+    Schema.annotateEncoded({
+      description: "Self-contained task for one delegated child agent/subagent.",
+    }),
+  ),
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
@@ -302,12 +304,10 @@ export const OrchestratorMcpThreadStatus = Schema.Union([
 ]);
 export type OrchestratorMcpThreadStatus = typeof OrchestratorMcpThreadStatus.Type;
 
-const OrchestratorMcpProjectTarget = Schema.optional(
-  ProjectId.annotate({
-    description:
-      "Project to act on. Omit for the calling thread's project; required when the caller is not a T3 thread.",
-  }),
-);
+const OrchestratorMcpProjectTarget = Schema.optional(ProjectId).annotate({
+  description:
+    "Project to act on. Omit for the calling thread's project; required when the caller is not a T3 thread.",
+});
 
 export const OrchestratorMcpThreadListInput = Schema.Struct({
   projectId: OrchestratorMcpProjectTarget,
@@ -548,9 +548,11 @@ export type OrchestratorMcpCapabilitiesResult = typeof OrchestratorMcpCapabiliti
 
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
   projectId: OrchestratorMcpProjectTarget,
-  prompt: OrchestratorMcpPrompt.annotate({
-    description: "Prompt executed on every scheduled run.",
-  }),
+  prompt: OrchestratorMcpPrompt.pipe(
+    Schema.annotateEncoded({
+      description: "Prompt executed on every scheduled run.",
+    }),
+  ),
   schedule: OrchestratorMcpSchedule,
   title: Schema.optional(OrchestratorMcpTitle),
   enabled: Schema.optional(
@@ -590,12 +592,10 @@ export const OrchestratorMcpScheduleTaskResult = OrchestratorMcpScheduledTask;
 export type OrchestratorMcpScheduleTaskResult = typeof OrchestratorMcpScheduleTaskResult.Type;
 
 export const OrchestratorMcpListScheduledTasksInput = Schema.Struct({
-  projectId: Schema.optional(
-    ProjectId.annotate({
-      description:
-        "Only list this project's tasks. Omit for the calling thread's project, or for every project when the caller is not a T3 thread.",
-    }),
-  ),
+  projectId: Schema.optional(ProjectId).annotate({
+    description:
+      "Only list this project's tasks. Omit for the calling thread's project, or for every project when the caller is not a T3 thread.",
+  }),
 });
 export type OrchestratorMcpListScheduledTasksInput =
   typeof OrchestratorMcpListScheduledTasksInput.Type;
@@ -618,13 +618,17 @@ export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;
 
 export const OrchestratorMcpRequestSecretInput = Schema.Struct({
-  label: TrimmedNonEmptyString.annotate({
-    description: "What you need, shown as the card's title, e.g. 'GitHub webhook secret'.",
-  }),
-  reason: TrimmedNonEmptyString.annotate({
-    description:
-      "One or two sentences on what it is for and where the user gets or also enters it.",
-  }),
+  label: TrimmedNonEmptyString.pipe(
+    Schema.annotateEncoded({
+      description: "What you need, shown as the card's title, e.g. 'GitHub webhook secret'.",
+    }),
+  ),
+  reason: TrimmedNonEmptyString.pipe(
+    Schema.annotateEncoded({
+      description:
+        "One or two sentences on what it is for and where the user gets or also enters it.",
+    }),
+  ),
   placeholder: Schema.optional(TrimmedNonEmptyString).annotate({
     description: "Hint inside the input, e.g. 'Paste your GitHub token'.",
   }),
