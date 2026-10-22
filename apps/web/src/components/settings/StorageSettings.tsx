@@ -165,6 +165,14 @@ function RetentionControl({
       onPointerUp={releasePointer}
       onPointerLeave={releasePointer}
       onPointerCancel={releasePointer}
+      // A press on the row's text or gaps would otherwise blur the draft while the blur
+      // handler treats it as a press inside the row, leaving the draft open after it.
+      onMouseDown={(event) => {
+        const target = event.target;
+        if (enablingRef.current === "draft" && target instanceof Element) {
+          if (!target.closest("button, input")) event.preventDefault();
+        }
+      }}
       onBlur={(event) => {
         if (enablingRef.current !== "draft" || pressing.current) return;
         const next = event.relatedTarget;
@@ -199,6 +207,9 @@ function RetentionControl({
               autoFocus={value === null}
               size={new Intl.NumberFormat().format(draft ?? value ?? 8).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
+              // The field reports a value only for text it can parse, and does so right after
+              // this runs, so text like "+" leaves no hidden age for Enter to commit.
+              onChange={() => setDraft(null)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || enablingRef.current !== "draft") return;
                 if (event.key === "Escape") {

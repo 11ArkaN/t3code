@@ -3,6 +3,7 @@ import { RegistryProvider } from "@effect/atom-react";
 import { DEFAULT_SERVER_SETTINGS, type StorageCleanupReport } from "@t3tools/contracts";
 import { type ReactNode } from "react";
 import { expect, it, vi } from "vite-plus/test";
+import { userEvent } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   settings: {} as typeof DEFAULT_SERVER_SETTINGS,
@@ -173,6 +174,36 @@ it("saves the visible default when Enter commits an untouched retention draft", 
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { worktreeAfterDays: 8 },
   });
+});
+
+it("does not save a retention draft whose visible text is not a number", async () => {
+  setup();
+  await using screen = await openDraft(inactive);
+  const input = daysInput(screen.container, inactive)!;
+  for (const text of ["+", "."]) {
+    input.select();
+    await userEvent.keyboard(`${text}{Enter}`);
+    expect(input.value).toBe(text);
+  }
+  expect(state.update).not.toHaveBeenCalled();
+  input.select();
+  await userEvent.keyboard("30{Enter}");
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 30 },
+  });
+});
+
+it("still cancels a retention draft left after clicking its days label", async () => {
+  setup();
+  await using screen = await openDraft(inactive);
+  const input = daysInput(screen.container, inactive)!;
+  await userEvent.click(input.parentElement!.querySelector("span[aria-hidden]")!);
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  await userEvent.click(outside);
+  outside.remove();
+  expect(daysInput(screen.container, inactive)).toBeNull();
+  expect(state.update).not.toHaveBeenCalled();
 });
 
 it("saves a retention step from the drafted age", async () => {
