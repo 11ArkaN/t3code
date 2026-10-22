@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 const home = process.argv[2];
 if (!home?.startsWith("/tmp/issue-14743-")) {
   throw new Error("Use an isolated /tmp/issue-14743- home, with its server stopped");
@@ -12,10 +12,10 @@ const rules = {
   worktreeOnDelete: false,
   worktreeUnchanged: false,
 };
-mkdirSync(`${home}/userdata`, { recursive: true });
-mkdirSync(`${home}/project`, { recursive: true });
-execFileSync("git", ["init", "--quiet", `${home}/project`]);
-writeFileSync(
+NodeFS.mkdirSync(`${home}/userdata`, { recursive: true });
+NodeFS.mkdirSync(`${home}/project`, { recursive: true });
+NodeChildProcess.execFileSync("git", ["init", "--quiet", `${home}/project`]);
+NodeFS.writeFileSync(
   `${home}/userdata/settings.json`,
   JSON.stringify(
     {
