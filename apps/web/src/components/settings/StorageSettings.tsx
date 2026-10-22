@@ -161,7 +161,9 @@ function RetentionControl({
   return (
     <div
       className="flex items-center gap-3"
-      onPointerDown={() => (pressing.current ??= "row")}
+      onPointerDown={() => {
+        if (pressing.current === null) pressing.current = "row";
+      }}
       onPointerUp={releasePointer}
       onPointerLeave={releasePointer}
       onPointerCancel={releasePointer}
