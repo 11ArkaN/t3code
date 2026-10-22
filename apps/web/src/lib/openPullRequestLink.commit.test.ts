@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   GitCommandError,
   ProjectId,
+  RunId,
   ThreadId,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
@@ -377,6 +378,38 @@ describe("commit link opening", () => {
       sha: newerSha,
       baseRef: null,
     });
+    expect(state.openLink).not.toHaveBeenCalled();
+  });
+
+  it.each(
+    ["unstaged", "turn", "commit", "base"].flatMap((selection) =>
+      ["success", "failure"].map((outcome) => ({ selection, outcome })),
+    ),
+  )("keeps a newer $selection selection after a late $outcome", async ({ selection, outcome }) => {
+    const preview = deferred<AtomCommandResult<ReviewDiffPreviewResult, unknown>>();
+    state.preview.mockReturnValueOnce(preview.promise);
+    useRightPanelStore.getState().open(ref, "diff");
+    expect(useOpenChangeRequestLink(ref)(click(), commitUrl)).toBe(true);
+
+    const store = useDiffPanelStore.getState();
+    if (selection === "unstaged") store.selectGitScope(ref, "unstaged");
+    else if (selection === "turn") store.selectTurn(ref, RunId.make("picker-turn"));
+    else if (selection === "commit") store.selectCommit(ref, "6".repeat(40));
+    else store.selectBranchBaseRef(ref, "origin/release");
+    const chosen = selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref);
+    const panel = useRightPanelStore.getState().byThreadKey;
+
+    preview.resolve(
+      outcome === "success"
+        ? AsyncResult.success(previewResult())
+        : AsyncResult.failure(Cause.fail(new Error("Missing commit"))),
+    );
+    await preview.promise;
+
+    expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref)).toBe(
+      chosen,
+    );
+    expect(useRightPanelStore.getState().byThreadKey).toBe(panel);
     expect(state.openLink).not.toHaveBeenCalled();
   });
 

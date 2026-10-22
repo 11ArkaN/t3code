@@ -15,7 +15,11 @@ import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
-import { selectThreadBranchBaseRef, useDiffPanelStore } from "../diffPanelStore";
+import {
+  selectThreadBranchBaseRef,
+  selectThreadDiffPanelSelection,
+  useDiffPanelStore,
+} from "../diffPanelStore";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -159,6 +163,10 @@ export function useOpenChangeRequestLink(
       event.stopPropagation();
       const userActionRevision = useRightPanelStore.getState().markUserAction(resolvedThreadRef);
       const baseRef = selectThreadBranchBaseRef(useDiffPanelStore.getState(), resolvedThreadRef);
+      const selection = selectThreadDiffPanelSelection(
+        useDiffPanelStore.getState().byThreadKey,
+        resolvedThreadRef,
+      );
       void readDiffPreview({
         environmentId: resolvedThreadRef.environmentId,
         input: {
@@ -171,7 +179,11 @@ export function useOpenChangeRequestLink(
         .then((result) => {
           if (
             useRightPanelStore.getState().getUserActionRevision(resolvedThreadRef) !==
-            userActionRevision
+              userActionRevision ||
+            selectThreadDiffPanelSelection(
+              useDiffPanelStore.getState().byThreadKey,
+              resolvedThreadRef,
+            ) !== selection
           )
             return;
           if (
