@@ -2138,6 +2138,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
+  const [autoExpandedTurnId, setAutoExpandedTurnId] = useState<RunId | null>(null);
   const userScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const headerMaterialVisibleRef = useRef(false);
   const { width: windowWidth, fontScale } = useWindowDimensions();
@@ -2862,7 +2863,8 @@ export const ThreadFeed = memo(function ThreadFeed({
     }
     return new Set(terminalIdsByTurn.values());
   })();
-  // An interrupted run unfolds; a run that is no longer latest folds back.
+  // An in-session interrupt expands its turn so the user keeps their place; the next
+  // run folds only that expansion, never one the user opened.
   const [previousLatestRun, setPreviousLatestRun] = useState(props.latestRun);
   if (previousLatestRun !== props.latestRun) {
     setPreviousLatestRun(props.latestRun);
@@ -2870,14 +2872,17 @@ export const ThreadFeed = memo(function ThreadFeed({
     const previous = previousLatestRun;
     if (latest && previous) {
       if (latest.runId !== previous.runId) {
-        if (expandedTurnIds.has(previous.runId)) {
+        if (autoExpandedTurnId === previous.runId) {
+          setAutoExpandedTurnId(null);
           setInteractionState((current) => {
+            if (!current.expandedTurnIds.has(previous.runId)) return current;
             const next = new Set(current.expandedTurnIds);
             next.delete(previous.runId);
             return { ...current, expandedTurnIds: next };
           });
         }
       } else if (previous.status === "running" && latest.status === "interrupted") {
+        setAutoExpandedTurnId(latest.runId);
         setInteractionState((current) => ({
           ...current,
           expandedTurnIds: new Set(current.expandedTurnIds).add(latest.runId),
@@ -2999,6 +3004,9 @@ export const ThreadFeed = memo(function ThreadFeed({
 
   const onToggleTurnFold = (runId: RunId) => {
     suspendEndScrollMaintenanceForDisclosure(`run-fold:${runId}`);
+    if (autoExpandedTurnId === runId) {
+      setAutoExpandedTurnId(null);
+    }
     setInteractionState((current) => {
       const next = new Set(current.expandedTurnIds);
       if (next.has(runId)) {

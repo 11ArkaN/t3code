@@ -497,18 +497,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
     return disclosureAnchorKey === null || row.id === disclosureAnchorKey;
   };
 
-  const [userExpandedRunIds, setUserExpandedRunIds] = useState(() => new Set<RunId>());
+  const [autoExpandedRunId, setAutoExpandedRunId] = useState<RunId | null>(null);
   const onToggleTurnFold = (runId: RunId) => {
     suspendEndScrollMaintenanceForDisclosure(`turn-fold:${runId}`);
-    setUserExpandedRunIds((existing) => {
-      const next = new Set(existing);
-      if (expandedRunIds.has(runId)) {
-        next.delete(runId);
-      } else {
-        next.add(runId);
-      }
-      return next;
-    });
+    if (autoExpandedRunId === runId) {
+      setAutoExpandedRunId(null);
+    }
     setExpandedRunIds((existing) => {
       const next = new Set(existing);
       if (next.has(runId)) {
@@ -544,8 +538,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   };
 
-  // An interrupted run opens its fold; a newer run closes the previous run's unless
-  // the user opened it themselves.
+  // An in-session interrupt expands its turn so the user keeps their place; the next
+  // run folds only that expansion, never one the user, a citation, or find opened.
   const [observedLatestRun, setObservedLatestRun] = useState({
     identity: listIdentityKey,
     runId: latestRun?.runId,
@@ -563,13 +557,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
     const previousRunId = observedLatestRun.runId;
     if (observedLatestRun.identity !== listIdentityKey) {
-      setUserExpandedRunIds(new Set());
+      setAutoExpandedRunId(null);
     } else if (latestRun && previousRunId !== undefined) {
       if (latestRun.runId === previousRunId) {
         if (observedLatestRun.status === "running" && latestRun.status === "interrupted") {
+          setAutoExpandedRunId(latestRun.runId);
           setExpandedRunIds((existing) => new Set(existing).add(latestRun.runId));
         }
-      } else if (!userExpandedRunIds.has(previousRunId)) {
+      } else if (autoExpandedRunId === previousRunId) {
+        setAutoExpandedRunId(null);
         setExpandedRunIds((existing) => {
           if (!existing.has(previousRunId)) return existing;
           const next = new Set(existing);
