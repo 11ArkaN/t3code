@@ -2881,7 +2881,11 @@ export const ThreadFeed = memo(function ThreadFeed({
             return { ...current, expandedTurnIds: next };
           });
         }
-      } else if (previous.status === "running" && latest.status === "interrupted") {
+      } else if (
+        previous.status === "running" &&
+        latest.status === "interrupted" &&
+        !expandedTurnIds.has(latest.runId)
+      ) {
         setAutoExpandedTurnId(latest.runId);
         setInteractionState((current) => ({
           ...current,

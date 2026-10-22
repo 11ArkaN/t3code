@@ -560,7 +560,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
       setAutoExpandedRunId(null);
     } else if (latestRun && previousRunId !== undefined) {
       if (latestRun.runId === previousRunId) {
-        if (observedLatestRun.status === "running" && latestRun.status === "interrupted") {
+        if (
+          observedLatestRun.status === "running" &&
+          latestRun.status === "interrupted" &&
+          !expandedRunIds.has(latestRun.runId)
+        ) {
           setAutoExpandedRunId(latestRun.runId);
           setExpandedRunIds((existing) => new Set(existing).add(latestRun.runId));
         }
