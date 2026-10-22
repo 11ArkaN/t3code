@@ -8,7 +8,7 @@ import {
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
 } from "@t3tools/contracts";
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import type { AtomCommandResult, AtomQueryOptions } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import { AsyncResult } from "effect/reactivity";
@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
   repositoryKey: "github.com/pingdotgg/t3code",
   projectEnvironmentId: "local",
   worktreePath: null as string | null,
+  previewCache: new Map<string, Promise<AtomCommandResult<ReviewDiffPreviewResult, unknown>>>(),
   preview:
     vi.fn<
       (target: {
@@ -41,7 +42,18 @@ vi.mock("../hooks/useSettings", () => ({
   ) => select({ pullRequestLinksOpenInApp: state.openInApp, diffIgnoreWhitespace: true }),
 }));
 vi.mock("../state/review", () => ({ reviewEnvironment: { diffPreview: {} } }));
-vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => state.preview }));
+vi.mock("../state/use-atom-query-runner", () => ({
+  useAtomQueryRunner:
+    (_family: unknown, options?: AtomQueryOptions) =>
+    (target: Parameters<typeof state.preview>[0]) => {
+      const key = JSON.stringify(target);
+      const cached = state.previewCache.get(key);
+      if (cached && !options?.refresh) return cached;
+      const result = state.preview(target);
+      state.previewCache.set(key, result);
+      return result;
+    },
+}));
 vi.mock("../browser/useOpenLink", () => ({ useOpenLink: () => state.openLink }));
 vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "local" }));
 vi.mock("../rpc/atomRegistry", () => ({
@@ -132,6 +144,7 @@ beforeEach(() => {
   state.repositoryKey = "github.com/pingdotgg/t3code";
   state.projectEnvironmentId = "local";
   state.worktreePath = null;
+  state.previewCache.clear();
   state.preview.mockReset().mockResolvedValue(AsyncResult.success(previewResult()));
   state.openLink.mockReset().mockResolvedValue(undefined);
   state.navigate.mockReset();
@@ -308,6 +321,28 @@ describe("commit link opening", () => {
       expect(useDiffPanelStore.getState().byThreadKey).toBe(selection);
     },
   );
+
+  it("opens a repeated commit link externally when the commit becomes unavailable", async () => {
+    const openCommit = useOpenChangeRequestLink(ref);
+    expect(openCommit(click(), commitUrl)).toBe(true);
+    await state.preview.mock.results[0]?.value;
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, ref)).toBe("diff");
+
+    state.preview.mockResolvedValue(AsyncResult.failure(Cause.fail(new Error("Missing commit"))));
+    useRightPanelStore.getState().openFile(ref, "README.md");
+    const panel = useRightPanelStore.getState().byThreadKey;
+    const selection = useDiffPanelStore.getState().byThreadKey;
+
+    expect(openCommit(click(), commitUrl)).toBe(true);
+    await state.preview.mock.results.at(-1)?.value;
+
+    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(commitUrl, {
+      event: { metaKey: true, ctrlKey: false },
+      threadRef: ref,
+    });
+    expect(useRightPanelStore.getState().byThreadKey).toBe(panel);
+    expect(useDiffPanelStore.getState().byThreadKey).toBe(selection);
+  });
 
   it.each(["success", "failure"])("ignores a late commit %s after a PR opens", async (outcome) => {
     const preview = deferred<AtomCommandResult<ReviewDiffPreviewResult, unknown>>();

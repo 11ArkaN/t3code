@@ -133,6 +133,7 @@ export function useOpenChangeRequestLink(
   const ignoreWhitespace = useClientSettings((settings) => settings.diffIgnoreWhitespace);
   const readDiffPreview = useAtomQueryRunner(reviewEnvironment.diffPreview, {
     reportFailure: false,
+    refresh: true,
   });
   const openLink = useOpenLink(threadRef);
   return (event, targetUrl, targetThreadRef, targetEnvironmentId) => {
