@@ -162,8 +162,10 @@ function setInputValue(input: HTMLInputElement, value: string) {
 const pressKey = (input: HTMLInputElement, key: string) =>
   input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 async function openDraft(label: string) {
-  const screen = await render(panel());
+  await using stack = new AsyncDisposableStack();
+  const screen = stack.use(await render(panel()));
   await act(async () => ruleSwitch(screen.container, label).click());
+  stack.move();
   return screen;
 }
 

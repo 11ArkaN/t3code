@@ -2,6 +2,16 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 const root = NodePath.resolve(import.meta.dirname, "../../..");
+// The harnesses import app modules relative to apps/web/src, so they are generated
+// there, where typecheck and reactCompilerCoverage.test.ts also read them. Remove
+// them once the browser capture is done.
+if (process.argv[2] === "--cleanup") {
+  NodeFS.rmSync(`${root}/apps/web/src/evidence-14743`, { recursive: true, force: true });
+  for (const name of NodeFS.readdirSync(`${root}/apps/web`))
+    if (/^evidence-14743-.*\.html$/.test(name)) NodeFS.rmSync(`${root}/apps/web/${name}`);
+  console.log("Removed issue-14743 component harnesses from apps/web.");
+  process.exit(0);
+}
 const home = process.argv[2];
 if (!home?.startsWith("/tmp/issue-14743-"))
   throw new Error("Use a disposable /tmp/issue-14743- home");
@@ -48,5 +58,6 @@ for (const [name, sha] of [
 }
 console.log(
   "Prepared fresh isolated home and exact-source component harnesses. Start dev with --home-dir " +
-    home,
+    home +
+    ". After capture, run `node scripts/fixtures/issue-14743/prepare.mjs --cleanup`.",
 );
