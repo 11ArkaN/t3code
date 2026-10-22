@@ -71,6 +71,12 @@ export interface TimelineRowSharedState {
   onForkFromRun:
     | ((input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => Promise<void>)
     | undefined;
+  /** Present when side chats are available: "Ask about this response" in the fork menu. */
+  onAskAboutResponse:
+    | ((input: { readonly sourceThreadId: ThreadId; readonly runId: RunId }) => Promise<void>)
+    | undefined;
+  /** Why "Ask about this response" cannot share history yet; null when it can. */
+  askAboutResponseDisabledReason: string | null;
   onRollbackCheckpoint: (input: {
     readonly checkpointId: string;
     readonly scopeId: string;

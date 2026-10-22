@@ -48,6 +48,7 @@ import { remainingComposerAttachmentSlots } from "./composerThreadImport";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import { resizeSnapShotSource } from "../../lib/snapShotSource";
 import { resolveShortcutCommand } from "../../keybindings";
+import { composerTakesShortcut } from "./composerEventScope";
 import { toastManager } from "../ui/toast";
 import type { useComposerTriggerState } from "./useComposerTriggerState";
 import {
@@ -89,6 +90,7 @@ export function useComposerStash(input: {
   readonly attachmentTargetKeyRef: RefObject<string>;
   readonly composerDraftTargetKeyRef: RefObject<string>;
   readonly composerEditorRef: RefObject<ComposerPromptEditorHandle | null>;
+  readonly composerFormRef: RefObject<HTMLFormElement | null>;
   readonly isRevertingCheckpointRef: RefObject<boolean>;
   readonly pendingThreadImportsRef: RefObject<Map<string, number>>;
   readonly setComposerCursor: Dispatch<SetStateAction<number>>;
@@ -123,6 +125,7 @@ export function useComposerStash(input: {
     attachmentTargetKeyRef,
     composerDraftTargetKeyRef,
     composerEditorRef,
+    composerFormRef,
     isRevertingCheckpointRef,
     pendingThreadImportsRef,
     setComposerCursor,
@@ -705,6 +708,8 @@ export function useComposerStash(input: {
         },
       });
       if (command !== "composer.stash") return;
+      // A side chat mounts a second composer; only the one the key is meant for stashes.
+      if (!composerTakesShortcut(event.target, composerFormRef.current)) return;
       // Always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
       event.preventDefault();
@@ -726,6 +731,7 @@ export function useComposerStash(input: {
   }, [
     activePendingProgress,
     backgroundThread,
+    composerFormRef,
     isComposerModelPickerOpen,
     keybindings,
     pendingUserInputs.length,
