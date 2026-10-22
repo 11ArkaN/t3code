@@ -15,13 +15,15 @@ import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useRightPanelStore } from "../rightPanelStore";
-import { useDiffPanelStore } from "../diffPanelStore";
+import { selectThreadBranchBaseRef, useDiffPanelStore } from "../diffPanelStore";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { readProject, readProjects, readThreadShell, useProjects } from "../state/entities";
 import { environmentServerConfigsAtom, serverEnvironment } from "../state/server";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { reviewEnvironment } from "../state/review";
+import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
 export {
   parseChangeRequestUrl,
@@ -124,6 +126,11 @@ export function useOpenChangeRequestLink(
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
+  const ignoreWhitespace = useClientSettings((settings) => settings.diffIgnoreWhitespace);
+  const readDiffPreview = useAtomQueryRunner(reviewEnvironment.diffPreview, {
+    reportFailure: false,
+  });
+  const openLink = useOpenLink(threadRef);
   return (event, targetUrl, targetThreadRef, targetEnvironmentId) => {
     if (!openInApp || shouldOpenPullRequestExternally(event)) return false;
     // Read at click time: every provider status push replaces the config map, and
@@ -150,8 +157,39 @@ export function useOpenChangeRequestLink(
         return false;
       event.preventDefault();
       event.stopPropagation();
-      useDiffPanelStore.getState().selectCommit(resolvedThreadRef, commit.sha);
-      useRightPanelStore.getState().open(resolvedThreadRef, "diff");
+      const userActionRevision = useRightPanelStore.getState().markUserAction(resolvedThreadRef);
+      const baseRef = selectThreadBranchBaseRef(useDiffPanelStore.getState(), resolvedThreadRef);
+      void readDiffPreview({
+        environmentId: resolvedThreadRef.environmentId,
+        input: {
+          cwd: thread.worktreePath ?? project.workspaceRoot,
+          ...(baseRef ? { baseRef } : {}),
+          commitSha: commit.sha,
+          ignoreWhitespace,
+        },
+      })
+        .then((result) => {
+          if (
+            useRightPanelStore.getState().getUserActionRevision(resolvedThreadRef) !==
+            userActionRevision
+          )
+            return;
+          if (
+            result._tag === "Success" &&
+            result.value.sources.some(
+              (source) => source.kind === "commit" && source.headRef === commit.sha,
+            )
+          ) {
+            useDiffPanelStore.getState().selectCommit(resolvedThreadRef, commit.sha);
+            useRightPanelStore.getState().open(resolvedThreadRef, "diff");
+            return;
+          }
+          return openLink(targetUrl, {
+            event: { metaKey: true, ctrlKey: false },
+            threadRef: resolvedThreadRef,
+          });
+        })
+        .catch((error: unknown) => console.error(error));
       return true;
     }
     const parsed = parseChangeRequestUrl(targetUrl);
