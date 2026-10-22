@@ -1432,21 +1432,46 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("rejects invalid and stale commit selections", () =>
+    it.effect("previews older HEAD ancestors and rejects invalid or stale commit selections", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const { initialBranch } = yield* initRepoWithCommit(cwd);
-        const initialSha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const rootSha = yield* git(cwd, ["rev-parse", "HEAD"]);
         const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* writeTextFile(cwd, "README.md", "# main commit\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "main change"]);
+        const olderSha = yield* git(cwd, ["rev-parse", "HEAD"]);
         yield* git(cwd, ["checkout", "-b", "feature/stale-preview"]);
         yield* writeTextFile(cwd, "README.md", "# feature\n");
         yield* git(cwd, ["add", "README.md"]);
         yield* git(cwd, ["commit", "-m", "feature"]);
         const featureSha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const list = yield* driver.getReviewBranchCommits({ cwd, baseRef: initialBranch });
+        assert.deepStrictEqual(
+          list.commits.map((commit) => commit.sha),
+          [featureSha],
+        );
+        const older = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: initialBranch,
+          commitSha: olderSha,
+        });
+        assert.strictEqual(older.sources[0]?.baseRef, rootSha);
+        assert.strictEqual(older.sources[0]?.headRef, olderSha);
+        assert.include(older.sources[0]?.diff, "+# main commit");
+        const withoutBase = yield* driver.getReviewDiffPreview({
+          cwd,
+          baseRef: "missing-base",
+          commitSha: olderSha,
+        });
+        assert.strictEqual(withoutBase.sources[0]?.headRef, olderSha);
+        const root = yield* driver.getReviewDiffPreview({ cwd, commitSha: rootSha });
+        assert.include(root.sources[0]?.diff, "+# test");
         assert.throws(() =>
           decodeReviewDiffPreviewInput({ cwd, baseRef: initialBranch, commitSha: "" }),
         );
-        for (const commitSha of ["", "bad-sha", initialSha]) {
+        for (const commitSha of ["", "bad-sha", "0".repeat(40)]) {
           const error = yield* driver
             .getReviewDiffPreview({ cwd, baseRef: initialBranch, commitSha })
             .pipe(Effect.flip);
@@ -1461,7 +1486,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           .getReviewDiffFileContents(
             makeReviewDiffFileContentsInput(cwd, {
               sourceKind: "commit",
-              baseRef: initialSha,
+              baseRef: olderSha,
               headRef: featureSha,
             }),
           )

@@ -3085,7 +3085,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveReviewCommit = Effect.fn("resolveReviewCommit")(function* (
     cwd: string,
     sha: string,
-    mergeBase?: string,
   ) {
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(sha)) {
       return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
@@ -3098,23 +3097,6 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
     if (reachable.exitCode !== 0) {
       return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
-    }
-    if (mergeBase) {
-      const inBase = yield* executeGit(
-        "GitVcsDriver.reviewCommit.inBase",
-        cwd,
-        ["merge-base", "--is-ancestor", sha, mergeBase],
-        { allowNonZeroExit: true },
-      );
-      if (inBase.exitCode === 0) {
-        return yield* reviewCommitError(
-          cwd,
-          "Selected commit is outside the current branch diff range.",
-        );
-      }
-      if (inBase.exitCode !== 1) {
-        return yield* reviewCommitError(cwd, "Could not verify the selected commit range.");
-      }
     }
     const parents = yield* runGitStdout("GitVcsDriver.reviewCommit.parents", cwd, [
       "rev-list",
@@ -3246,12 +3228,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       if (!input.commitSha || (input.file && input.file.sourceKind !== "commit")) {
         return yield* reviewCommitError(cwd, "Selected commit request is invalid.");
       }
-      const { mergeBase } = yield* resolveReviewMergeBase(
-        cwd,
-        repository.currentBranch,
-        input.baseRef,
-      );
-      const commit = yield* resolveReviewCommit(cwd, input.commitSha, mergeBase);
+      const commit = yield* resolveReviewCommit(cwd, input.commitSha);
       const diffArgs = [
         ...REVIEW_DIFF_ARGS,
         ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),

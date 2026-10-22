@@ -15,6 +15,9 @@ commit at a time. The list shows up to 100 of the newest commits in the current 
 commit shows its changes against its first parent. If the branch changes, select a commit again to
 refresh the view.
 
+GitHub commit links open in the Diff pane when the current thread belongs to the same repository.
+Use Command/Ctrl+Click to open the original link in your browser.
+
 ## Connect an account
 
 Install Git and configure authentication on the machine running your T3 Code server. For a remote

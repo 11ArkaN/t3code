@@ -18,6 +18,35 @@ function isHostOf(hostname: string, apex: string, label?: string): boolean {
   return label !== undefined && hostname.split(".").includes(label);
 }
 
+export function parseCommitUrl(targetUrl: string): {
+  readonly host: string;
+  readonly repository: string;
+  readonly sha: string;
+} | null {
+  let url: URL;
+  try {
+    url = new URL(targetUrl);
+  } catch {
+    return null;
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") ||
+    !isHostOf(url.hostname.toLowerCase(), "github.com", "github")
+  )
+    return null;
+  const match =
+    /^\/([^/]+\/[^/]+)\/(?:commit|pull\/[1-9]\d*\/commits)\/([0-9a-f]{40}|[0-9a-f]{64})\/?$/iu.exec(
+      url.pathname,
+    );
+  return match?.[1] && match[2]
+    ? {
+        host: url.hostname.toLowerCase(),
+        repository: match[1].toLowerCase(),
+        sha: match[2].toLowerCase(),
+      }
+    : null;
+}
+
 export function parseChangeRequestUrl(targetUrl: string): ChangeRequestLink | null {
   let url: URL;
   try {
