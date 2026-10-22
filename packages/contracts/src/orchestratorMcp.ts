@@ -524,12 +524,10 @@ export const OrchestratorMcpThreadInterruptResult = Schema.Struct({
 export type OrchestratorMcpThreadInterruptResult = typeof OrchestratorMcpThreadInterruptResult.Type;
 
 export const OrchestratorMcpCapabilitiesInput = Schema.Struct({
-  search: Schema.optional(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(200)).annotate({
-      description:
-        "Words to match against model ids and labels. Lists matching models instead of the default short list.",
-    }),
-  ),
+  search: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))).annotate({
+    description:
+      "Words to match against model ids and labels. Lists matching models instead of the default short list.",
+  }),
 });
 export type OrchestratorMcpCapabilitiesInput = typeof OrchestratorMcpCapabilitiesInput.Type;
 
