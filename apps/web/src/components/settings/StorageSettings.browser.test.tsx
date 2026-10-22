@@ -193,6 +193,25 @@ it("returns a retention rule to off when saving its age fails", async () => {
   expect(daysInput(screen.container, inactive)).toBeNull();
 });
 
+it("saves an age edited while an earlier enabling save is pending", async () => {
+  setup();
+  let failFirst!: (saved: boolean) => void;
+  state.update
+    .mockReturnValueOnce(new Promise<boolean>((resolve) => (failFirst = resolve)))
+    .mockReturnValueOnce(new Promise<boolean>(() => {}));
+  await using screen = await openDraft(inactive);
+  const input = daysInput(screen.container, inactive)!;
+  await act(async () => pressKey(input, "Enter"));
+  await act(async () => {
+    setInputValue(input, "30");
+    input.blur();
+  });
+  expect(state.update).toHaveBeenNthCalledWith(2, { storageCleanup: { worktreeAfterDays: 30 } });
+
+  await act(async () => failFirst(false));
+  expect(daysInput(screen.container, inactive)).not.toBeNull();
+});
+
 it("keeps a retention rule off when its draft is left, cancelled, or switched off", async () => {
   setup();
   await using screen = await openDraft(inactive);

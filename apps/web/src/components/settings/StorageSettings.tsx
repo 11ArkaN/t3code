@@ -127,6 +127,9 @@ function RetentionControl({
     setEnablingState(next);
   };
   const pressing = useRef<"switch" | "row" | null>(null);
+  // The latest age sent while enabling, so a repeated commit of it is not resent and an
+  // older save that fails cannot close the rule over a newer one.
+  const submitted = useRef<{ days: number } | null>(null);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
@@ -139,12 +142,18 @@ function RetentionControl({
   const commit = (next: number) => {
     const days = Math.min(3650, Math.max(minimum, Math.round(next)));
     setDraft(days);
-    if (value === null && enablingRef.current === "saving" && days === draft) return;
+    if (value === null && enablingRef.current === "saving" && submitted.current?.days === days) {
+      return;
+    }
     const save = onChange(days);
     if (value !== null) return;
+    const submission = { days };
+    submitted.current = submission;
     setEnabling("saving");
     void save?.then((saved) => {
-      if (!saved && enablingRef.current === "saving") setEnabling(null);
+      if (!saved && submitted.current === submission && enablingRef.current === "saving") {
+        setEnabling(null);
+      }
     });
   };
   const releasePointer = () => (pressing.current = null);
