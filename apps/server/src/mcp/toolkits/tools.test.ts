@@ -18,28 +18,42 @@ interface JsonSchemaNode {
   readonly description?: string;
   readonly properties?: Readonly<Record<string, JsonSchemaNode>>;
   readonly anyOf?: ReadonlyArray<JsonSchemaNode>;
+  readonly items?: JsonSchemaNode;
 }
 
 const descriptionOf = (schema: JsonSchemaNode | undefined): string | undefined =>
   schema?.description ?? schema?.anyOf?.map(descriptionOf).find(Boolean);
 
-const objectOf = (schema: JsonSchemaNode | undefined): JsonSchemaNode | undefined =>
-  schema?.properties ? schema : schema?.anyOf?.map(objectOf).find(Boolean);
+// Every object a field can hold: each union member and each array's items.
+const objectsOf = (schema: JsonSchemaNode | undefined): ReadonlyArray<JsonSchemaNode> =>
+  schema?.properties
+    ? [schema]
+    : [...(schema?.anyOf ?? []), ...(schema?.items ? [schema.items] : [])].flatMap(objectsOf);
 
+const fieldsOf = (
+  schemas: ReadonlyArray<JsonSchemaNode>,
+  field: string,
+): ReadonlyArray<JsonSchemaNode> =>
+  schemas.flatMap(objectsOf).flatMap((object) => object.properties?.[field] ?? []);
+
+// Union members are matched by field name, so every variant of a union is walked.
 const missingDescriptions = (
   decoded: JsonSchemaNode | undefined,
-  served: JsonSchemaNode | undefined,
+  served: ReadonlyArray<JsonSchemaNode>,
   path: string,
 ): ReadonlyArray<string> =>
-  Object.entries(objectOf(decoded)?.properties ?? {}).flatMap(([field, fieldSchema]) => {
-    const servedField = objectOf(served)?.properties?.[field];
-    const description = descriptionOf(fieldSchema);
-    const missing =
-      description !== undefined && descriptionOf(servedField) !== description
-        ? [`${path}.${field}`]
-        : [];
-    return [...missing, ...missingDescriptions(fieldSchema, servedField, `${path}.${field}`)];
-  });
+  objectsOf(decoded).flatMap((object) =>
+    Object.entries(object.properties ?? {}).flatMap(([field, fieldSchema]) => {
+      const servedFields = fieldsOf(served, field);
+      const description = descriptionOf(fieldSchema);
+      const missing =
+        description !== undefined &&
+        !servedFields.some((servedField) => descriptionOf(servedField) === description)
+          ? [`${path}.${field}`]
+          : [];
+      return [...missing, ...missingDescriptions(fieldSchema, servedFields, `${path}.${field}`)];
+    }),
+  );
 
 const tools = [
   AttachmentToolkit,
@@ -57,17 +71,18 @@ const tools = [
 
 // Agents receive the encoded-side JSON schema, so this compares the two
 // projections: a description on the decoded side but not on the encoded side is
-// one no agent sees. A description lost from both projections, such as
-// `.annotate` after `Schema.makeFilter`, stays invisible here and needs a pin.
+// one no agent sees. The walk follows object properties, every anyOf member and
+// array items. A description lost from both projections, such as `.annotate`
+// after `Schema.makeFilter`, is not seen here and needs a pin.
 it("serves every parameter description written on the decoded side", () => {
   const missing = tools.flatMap((tool) =>
     missingDescriptions(
       Schema.toJsonSchemaDocument(Schema.toType(tool.parametersSchema)).schema as JsonSchemaNode,
-      Tool.getJsonSchema(tool) as JsonSchemaNode,
+      [Tool.getJsonSchema(tool) as JsonSchemaNode],
       tool.name,
     ),
   );
-  expect(missing).toEqual([]);
+  expect([...new Set(missing)]).toEqual([]);
 });
 
 it.each([
@@ -80,13 +95,17 @@ it.each([
   ["device_open", "deviceId"],
   ["t3_thread_update", "clientRequestId"],
   ["t3_thread_update", "pullRequest.url"],
+  ["create_threads", "threads.prompt"],
+  ["schedule_task", "schedule.timeOfDay"],
+  ["update_scheduled_task", "schedule.filters.path"],
 ])("describes %s.%s to agents", (name, path) => {
   const tool = tools.find((candidate) => candidate.name === name);
   const served = path
     .split(".")
-    .reduce<JsonSchemaNode | undefined>(
-      (schema, field) => objectOf(schema)?.properties?.[field],
-      tool && (Tool.getJsonSchema(tool) as JsonSchemaNode),
+    .reduce<ReadonlyArray<JsonSchemaNode>>(
+      fieldsOf,
+      tool ? [Tool.getJsonSchema(tool) as JsonSchemaNode] : [],
     );
-  expect(descriptionOf(served)).toBeTruthy();
+  expect(served).not.toEqual([]);
+  expect(served.filter((field) => !descriptionOf(field))).toEqual([]);
 });
