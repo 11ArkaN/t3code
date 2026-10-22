@@ -50,15 +50,21 @@ const ThreadMetadataClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLe
         : "clientRequestId must contain valid paired Unicode surrogates.",
     ),
   )
-  .annotate({ description: "Stable idempotency key to reuse when retrying this mutation." });
+  .pipe(
+    Schema.annotateEncoded({
+      description: "Stable idempotency key to reuse when retrying this mutation.",
+    }),
+  );
 
 const ThreadMetadataMcpPullRequestUrl = TrimmedNonEmptyString.check(
   Schema.makeFilter((value) =>
     isHttpUrl(value) ? true : "Pull request URL must be a well-formed HTTP(S) URL.",
   ),
-).annotate({
-  description: "Canonical HTTP(S) pull request URL, including self-hosted repository URLs.",
-});
+).pipe(
+  Schema.annotateEncoded({
+    description: "Canonical HTTP(S) pull request URL, including self-hosted repository URLs.",
+  }),
+);
 
 export const ThreadMetadataMcpAction = Schema.Literals([
   "rename",

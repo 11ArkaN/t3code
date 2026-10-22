@@ -55,8 +55,10 @@ const tools = [
   WorktreeToolkit,
 ].flatMap((toolkit) => Object.values(toolkit.tools) as Tool.Any[]);
 
-// Agents receive the encoded-side JSON schema, so a description written with
-// `.annotate` on a transformed field, such as a trimmed string, never reaches them.
+// Agents receive the encoded-side JSON schema, so this compares the two
+// projections: a description on the decoded side but not on the encoded side is
+// one no agent sees. A description lost from both projections, such as
+// `.annotate` after `Schema.makeFilter`, stays invisible here and needs a pin.
 it("serves every parameter description written on the decoded side", () => {
   const missing = tools.flatMap((tool) =>
     missingDescriptions(
@@ -76,8 +78,15 @@ it.each([
   ["link_pull_request", "url"],
   ["t3_worktree_handoff", "branch"],
   ["device_open", "deviceId"],
-])("describes %s.%s to agents", (name, field) => {
+  ["t3_thread_update", "clientRequestId"],
+  ["t3_thread_update", "pullRequest.url"],
+])("describes %s.%s to agents", (name, path) => {
   const tool = tools.find((candidate) => candidate.name === name);
-  const served = tool && (Tool.getJsonSchema(tool) as JsonSchemaNode);
-  expect(descriptionOf(served?.properties?.[field])).toBeTruthy();
+  const served = path
+    .split(".")
+    .reduce<JsonSchemaNode | undefined>(
+      (schema, field) => objectOf(schema)?.properties?.[field],
+      tool && (Tool.getJsonSchema(tool) as JsonSchemaNode),
+    );
+  expect(descriptionOf(served)).toBeTruthy();
 });
