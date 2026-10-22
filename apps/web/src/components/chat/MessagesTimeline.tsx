@@ -497,8 +497,18 @@ const ConversationTimeline = memo(function ConversationTimeline({
     return disclosureAnchorKey === null || row.id === disclosureAnchorKey;
   };
 
+  const [userExpandedRunIds, setUserExpandedRunIds] = useState(() => new Set<RunId>());
   const onToggleTurnFold = (runId: RunId) => {
     suspendEndScrollMaintenanceForDisclosure(`turn-fold:${runId}`);
+    setUserExpandedRunIds((existing) => {
+      const next = new Set(existing);
+      if (expandedRunIds.has(runId)) {
+        next.delete(runId);
+      } else {
+        next.add(runId);
+      }
+      return next;
+    });
     setExpandedRunIds((existing) => {
       const next = new Set(existing);
       if (next.has(runId)) {
@@ -534,7 +544,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   };
 
-  // An interrupted run opens its fold; a newer run closes the previous run's.
+  // An interrupted run opens its fold; a newer run closes the previous run's unless
+  // the user opened it themselves.
   const [observedLatestRun, setObservedLatestRun] = useState({
     identity: listIdentityKey,
     runId: latestRun?.runId,
@@ -551,16 +562,14 @@ const ConversationTimeline = memo(function ConversationTimeline({
       status: latestRun?.status,
     });
     const previousRunId = observedLatestRun.runId;
-    if (
-      observedLatestRun.identity === listIdentityKey &&
-      latestRun &&
-      previousRunId !== undefined
-    ) {
+    if (observedLatestRun.identity !== listIdentityKey) {
+      setUserExpandedRunIds(new Set());
+    } else if (latestRun && previousRunId !== undefined) {
       if (latestRun.runId === previousRunId) {
         if (observedLatestRun.status === "running" && latestRun.status === "interrupted") {
           setExpandedRunIds((existing) => new Set(existing).add(latestRun.runId));
         }
-      } else {
+      } else if (!userExpandedRunIds.has(previousRunId)) {
         setExpandedRunIds((existing) => {
           if (!existing.has(previousRunId)) return existing;
           const next = new Set(existing);
