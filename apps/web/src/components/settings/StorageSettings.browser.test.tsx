@@ -7,6 +7,7 @@ import { expect, it, vi } from "vite-plus/test";
 const state = vi.hoisted(() => ({
   settings: {} as typeof DEFAULT_SERVER_SETTINGS,
   run: vi.fn(),
+  update: vi.fn(),
   report: null as StorageCleanupReport | null,
 }));
 
@@ -61,7 +62,7 @@ vi.mock(import("./useScopedSettings"), async (original) => ({
   ...(await original()),
   useScopedSettings: (() => state.settings) as never,
   useScopedSettingsMixed: () => false,
-  useUpdateScopedSettings: () => vi.fn(),
+  useUpdateScopedSettings: () => state.update,
   useClearScopedSettings: () => vi.fn(),
 }));
 // The real page container needs a router and the real row reads write permission and
@@ -103,6 +104,7 @@ function setup() {
   };
   state.report = null;
   state.run.mockReset();
+  state.update.mockReset();
 }
 
 const panel = () => (
@@ -123,4 +125,26 @@ it("keeps cleanup disabled when settled retention and all other rules are off", 
   expect(button.disabled).toBe(true);
   await act(async () => button.click());
   expect(state.run).not.toHaveBeenCalled();
+});
+
+it("saves a newly enabled retention rule only once its visible age is committed", async () => {
+  const label = "Delete inactive worktrees";
+  setup();
+  await using screen = await render(panel());
+  await act(async () =>
+    screen.container.querySelector<HTMLElement>(`[role="switch"][aria-label="${label}"]`)!.click(),
+  );
+  expect(state.update).not.toHaveBeenCalled();
+
+  const input = screen.container.querySelector<HTMLInputElement>(
+    `input[aria-label="${label} in days"]`,
+  )!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "30");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.blur();
+  });
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { worktreeAfterDays: 30 },
+  });
 });
