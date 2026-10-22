@@ -242,7 +242,7 @@ it("saves an age edited while an earlier enabling save is pending", async () => 
   expect(state.update).toHaveBeenNthCalledWith(2, { storageCleanup: { worktreeAfterDays: 30 } });
 
   await act(async () => failFirst(false));
-  expect(daysInput(screen.container, inactive)).not.toBeNull();
+  expect(daysInput(screen.container, inactive)?.value).toBe("30");
 });
 
 it("keeps a retention rule off when its draft is left, cancelled, or switched off", async () => {
