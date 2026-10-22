@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - realpathSync.native resolves Windows 8.3 short names, which the Effect realPath does not.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -1267,6 +1268,45 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
   });
 
   describe("review diff previews", () => {
+    it.effect("lists signed commits when Git shows signatures by default", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["checkout", "-b", "feature/signed-commit"]);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const keyPath = path.join(cwd, "signing-key");
+        yield* Effect.sync(() =>
+          NodeChildProcess.execFileSync("ssh-keygen", [
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-f",
+            keyPath,
+          ]),
+        );
+        const publicKey = yield* fs.readFileString(`${keyPath}.pub`);
+        const allowedSigners = path.join(cwd, "allowed-signers");
+        yield* fs.writeFileString(allowedSigners, `test@test.com ${publicKey}`);
+        yield* git(cwd, ["config", "gpg.format", "ssh"]);
+        yield* git(cwd, ["config", "user.signingkey", keyPath]);
+        yield* git(cwd, ["config", "gpg.ssh.allowedSignersFile", allowedSigners]);
+        yield* git(cwd, ["commit", "--allow-empty", "-S", "-m", "signed feature"]);
+        const sha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* git(cwd, ["config", "log.showSignature", "true"]);
+        assert.include(yield* git(cwd, ["log", "-1", "--format=%H"]), 'Good "git" signature');
+
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const result = yield* driver.getReviewBranchCommits({ cwd, baseRef: initialBranch });
+        assert.deepStrictEqual(
+          result.commits.map((commit) => [commit.sha, commit.subject]),
+          [[sha, "signed feature"]],
+        );
+      }),
+    );
+
     it.effect("lists only branch-range commits with bounded metadata", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

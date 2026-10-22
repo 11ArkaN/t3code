@@ -3142,6 +3142,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "log",
         "-z",
         "--no-notes",
+        "--no-show-signature",
         "--format=%H%x00%s%x00%cI",
         `--max-count=${REVIEW_BRANCH_COMMIT_LIMIT + 1}`,
         `${mergeBase}..HEAD`,
