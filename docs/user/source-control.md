@@ -15,6 +15,10 @@ commit at a time. The list shows up to 100 of the newest commits in the current 
 commit shows its changes against its first parent. If the branch changes, select a commit again to
 refresh the view.
 
+The selected commit shows its name and a clickable source link. Short descriptions use your
+text generation model and load as you browse the commit list. Hover over a cut-off description
+to read it in full.
+
 GitHub commit links open in the Diff pane when the current thread belongs to the same repository.
 Use Command/Ctrl+Click to open the original link in your browser.
 

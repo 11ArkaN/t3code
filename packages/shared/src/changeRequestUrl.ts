@@ -1,5 +1,5 @@
 import type { RepositoryIdentity, ThreadLinkedPullRequest } from "@t3tools/contracts";
-import { canonicalRepositoryKey } from "./sourceControl.ts";
+import { canonicalRepositoryKey, sourceControlRepositorySelector } from "./sourceControl.ts";
 
 /**
  * The two strings are what `pullRequestHostOf` and the project's `repositoryIdentity` produce
@@ -141,7 +141,27 @@ export function gitHubPullRequestBrowserUrl(
   repository: string,
   number: number,
 ): string | null {
-  if (identity?.provider !== "github" || !Number.isSafeInteger(number) || number < 1) return null;
+  if (!Number.isSafeInteger(number) || number < 1) return null;
+  return gitHubRepositoryBrowserUrl(identity, repository, `pull/${number}`);
+}
+
+export function gitHubCommitBrowserUrl(
+  identity: RepositoryIdentity | null | undefined,
+  sha: string,
+): string | null {
+  const repository =
+    sourceControlRepositorySelector(identity) ??
+    identity?.canonicalKey.split("/").slice(1).join("/") ??
+    "";
+  return gitHubRepositoryBrowserUrl(identity, repository, `commit/${sha}`);
+}
+
+function gitHubRepositoryBrowserUrl(
+  identity: RepositoryIdentity | null | undefined,
+  repository: string,
+  route: string,
+): string | null {
+  if (identity?.provider !== "github") return null;
   const repositoryPath = repository.split("/");
   if (
     repositoryPath.length !== 2 ||
@@ -162,7 +182,7 @@ export function gitHubPullRequestBrowserUrl(
 
   try {
     const url = new URL(origin ?? `https://${hostname}`);
-    url.pathname = `/${repositoryPath.join("/")}/pull/${number}`;
+    url.pathname = `/${repositoryPath.join("/")}/${route}`;
     return url.toString();
   } catch {
     return null;

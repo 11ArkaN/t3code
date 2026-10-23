@@ -32,6 +32,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 export {
   parseChangeRequestUrl,
   type ChangeRequestLink,
+  gitHubCommitBrowserUrl,
   gitHubPullRequestBrowserUrl,
   pullRequestCandidateUrlFromReferenceAutolink,
   matchesLinkedPullRequestUrl,
