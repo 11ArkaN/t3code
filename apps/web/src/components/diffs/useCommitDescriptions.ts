@@ -22,6 +22,7 @@ interface DescriptionState {
   readonly scope: string | null;
   readonly wanted: number;
   readonly descriptions: ReadonlyMap<string, string>;
+  readonly pending: boolean;
   readonly failed: boolean;
 }
 
@@ -29,6 +30,7 @@ const initialState = (scope: string | null): DescriptionState => ({
   scope,
   wanted: BATCH_SIZE,
   descriptions: new Map(),
+  pending: false,
   failed: false,
 });
 
@@ -38,6 +40,8 @@ export function useCommitDescriptions({
   cwd,
   modelKey,
   shas,
+  enabled,
+  visible,
   open,
 }: {
   environmentId: EnvironmentId | null;
@@ -45,6 +49,8 @@ export function useCommitDescriptions({
   cwd: string | undefined;
   modelKey: string;
   shas: ReadonlyArray<string>;
+  enabled: boolean;
+  visible: boolean;
   open: boolean;
 }) {
   const canGenerate = useAtomValue(
@@ -52,7 +58,7 @@ export function useCommitDescriptions({
   );
   const generate = useAtomCommand(reviewEnvironment.commitDescriptions, { reportFailure: false });
   const scope =
-    canGenerate && environmentId && threadId && cwd
+    enabled && canGenerate && environmentId && threadId && cwd
       ? JSON.stringify([environmentId, threadId, cwd, modelKey])
       : null;
   const [stored, setState] = useState(() => initialState(scope));
@@ -61,22 +67,41 @@ export function useCommitDescriptions({
   const shasKey = shas.join(",");
 
   useEffect(() => {
-    if (!open || scope === null || state.failed || !environmentId || !threadId || !cwd) return;
-    if (requested.current.scope !== scope) requested.current = { scope, shas: new Set() };
+    if (requested.current.scope !== scope) {
+      requested.current = { scope, shas: new Set() };
+      setState(initialState(scope));
+    }
+    if (
+      !visible ||
+      scope === null ||
+      state.failed ||
+      state.pending ||
+      !environmentId ||
+      !threadId ||
+      !cwd
+    )
+      return;
+    const request = requested.current;
     const batch = nextCommitDescriptionBatch(
       shasKey ? shasKey.split(",") : [],
-      state.wanted,
-      requested.current.shas,
+      open ? state.wanted : BATCH_SIZE,
+      request.shas,
     );
     if (batch.length === 0) return;
-    for (const sha of batch) requested.current.shas.add(sha);
-    void generate({ environmentId, input: { cwd, threadId, shas: batch } }).then((result) =>
+    for (const sha of batch) request.shas.add(sha);
+    setState((stored) => ({
+      ...(stored.scope === scope ? stored : initialState(scope)),
+      pending: true,
+    }));
+    void generate({ environmentId, input: { cwd, threadId, shas: batch } }).then((result) => {
+      if (requested.current !== request) return;
       setState((stored) => {
         const current = stored.scope === scope ? stored : initialState(scope);
-        if (requested.current.scope !== scope) return stored;
+        if (requested.current !== request) return stored;
         return result._tag === "Success"
           ? {
               ...current,
+              pending: false,
               descriptions: new Map([
                 ...current.descriptions,
                 ...result.value.descriptions.map(
@@ -84,10 +109,22 @@ export function useCommitDescriptions({
                 ),
               ]),
             }
-          : { ...current, failed: true };
-      }),
-    );
-  }, [cwd, environmentId, generate, open, scope, shasKey, state.failed, state.wanted, threadId]);
+          : { ...current, pending: false, failed: true };
+      });
+    });
+  }, [
+    cwd,
+    environmentId,
+    generate,
+    open,
+    scope,
+    shasKey,
+    state.failed,
+    state.pending,
+    state.wanted,
+    threadId,
+    visible,
+  ]);
 
   const observeLast = (element: HTMLElement | null) => {
     if (!element) return;

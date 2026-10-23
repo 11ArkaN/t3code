@@ -343,7 +343,7 @@ export default function DiffPanel({
       : null,
   );
   const branchCommits = useEnvironmentQuery(
-    commitMenuOpen && canReadFiles && activeThread && activeCwd
+    visible && isGitRepo && canReadFiles && activeThread && activeCwd
       ? reviewEnvironment.branchCommits({
           environmentId: activeThread.environmentId,
           input: {
@@ -411,6 +411,8 @@ export default function DiffPanel({
         : null,
     ),
     shas: branchCommits.data?.commits.map((commit) => commit.sha) ?? [],
+    enabled: isGitRepo && canReadFiles && !!serverConfig?.settings && !!activeProjectId,
+    visible,
     open: commitMenuOpen,
   });
   const refreshPreviewQuery = branchDiffPreview.refresh;
@@ -793,7 +795,12 @@ export default function DiffPanel({
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-            <DropdownMenuSub onOpenChange={setCommitMenuOpen}>
+            <DropdownMenuSub
+              onOpenChange={(open) => {
+                setCommitMenuOpen(open);
+                if (open) branchCommits.refresh();
+              }}
+            >
               <DropdownMenuSubTrigger>Commits</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-80 max-w-96">
                 <DropdownMenuRadioGroup
@@ -807,38 +814,44 @@ export default function DiffPanel({
                       commit.sha,
                     );
                     return (
-                      <div key={commit.sha} className="flex items-start">
-                        <DropdownMenuRadioItem
-                          ref={
-                            index === commitDescriptions.lastIndex
-                              ? commitDescriptions.observeLast
-                              : undefined
-                          }
-                          className="min-w-0 flex-1"
-                          value={`commit:${commit.sha}`}
-                          closeOnClick
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="min-w-0 truncate">{commit.subject}</span>
-                            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-                              {formatRelativeTimeLabel(commit.committedAt)}
+                      <div
+                        key={commit.sha}
+                        className="flex items-start rounded-sm has-data-highlighted:bg-accent *:data-highlighted:bg-transparent"
+                      >
+                        <Tooltip>
+                          <TooltipTrigger
+                            ref={
+                              index === commitDescriptions.lastIndex
+                                ? commitDescriptions.observeLast
+                                : undefined
+                            }
+                            render={
+                              <DropdownMenuRadioItem
+                                className="min-w-0 flex-1"
+                                value={`commit:${commit.sha}`}
+                                closeOnClick
+                              />
+                            }
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="min-w-0 truncate">{commit.subject}</span>
+                              <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+                                {formatRelativeTimeLabel(commit.committedAt)}
+                              </span>
                             </span>
-                          </span>
-                          {description ? (
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <span className="block truncate text-xs text-muted-foreground" />
-                                }
-                              >
+                            {description ? (
+                              <span className="block truncate text-xs text-muted-foreground">
                                 {description}
-                              </TooltipTrigger>
-                              <TooltipPopup side="right" className="max-w-80">
-                                {description}
-                              </TooltipPopup>
-                            </Tooltip>
-                          ) : null}
-                        </DropdownMenuRadioItem>
+                              </span>
+                            ) : null}
+                          </TooltipTrigger>
+                          <TooltipPopup side="right" className="max-w-80">
+                            {commit.subject}
+                            {description ? (
+                              <span className="block text-muted-foreground">{description}</span>
+                            ) : null}
+                          </TooltipPopup>
+                        </Tooltip>
                         {commitUrl ? (
                           <DropdownMenuItem
                             className="shrink-0"
