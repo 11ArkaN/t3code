@@ -807,59 +807,61 @@ export default function DiffPanel({
                       commit.sha,
                     );
                     return (
-                      <DropdownMenuRadioItem
-                        key={commit.sha}
-                        ref={
-                          index === commitDescriptions.lastIndex
-                            ? commitDescriptions.observeLast
-                            : undefined
-                        }
-                        value={`commit:${commit.sha}`}
-                        closeOnClick
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 truncate">{commit.subject}</span>
-                          {commitUrl ? (
-                            <a
-                              href={commitUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Open commit ${commit.sha.slice(0, 7)}`}
-                              className="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                              onClick={(event) => openPrLink(event, commitUrl)}
-                              onFocus={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                  event.stopPropagation();
+                      <div key={commit.sha} className="flex items-start">
+                        <DropdownMenuRadioItem
+                          ref={
+                            index === commitDescriptions.lastIndex
+                              ? commitDescriptions.observeLast
+                              : undefined
+                          }
+                          className="min-w-0 flex-1"
+                          value={`commit:${commit.sha}`}
+                          closeOnClick
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="min-w-0 truncate">{commit.subject}</span>
+                            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+                              {formatRelativeTimeLabel(commit.committedAt)}
+                            </span>
+                          </span>
+                          {description ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span className="block truncate text-xs text-muted-foreground" />
                                 }
-                              }}
-                            >
-                              {commit.sha.slice(0, 7)}
-                            </a>
-                          ) : (
-                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              >
+                                {description}
+                              </TooltipTrigger>
+                              <TooltipPopup side="right" className="max-w-80">
+                                {description}
+                              </TooltipPopup>
+                            </Tooltip>
+                          ) : null}
+                        </DropdownMenuRadioItem>
+                        {commitUrl ? (
+                          <DropdownMenuItem
+                            className="shrink-0"
+                            render={
+                              <a
+                                href={commitUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`Open commit ${commit.sha.slice(0, 7)}`}
+                              />
+                            }
+                            onClick={(event) => openPrLink(event, commitUrl)}
+                          >
+                            <span className="font-mono text-xs text-muted-foreground underline underline-offset-4">
                               {commit.sha.slice(0, 7)}
                             </span>
-                          )}
-                          <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {formatRelativeTimeLabel(commit.committedAt)}
+                          </DropdownMenuItem>
+                        ) : (
+                          <span className="shrink-0 px-2 py-1 font-mono text-xs text-muted-foreground">
+                            {commit.sha.slice(0, 7)}
                           </span>
-                        </span>
-                        {description ? (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span className="block truncate text-xs text-muted-foreground" />
-                              }
-                            >
-                              {description}
-                            </TooltipTrigger>
-                            <TooltipPopup side="right" className="max-w-80">
-                              {description}
-                            </TooltipPopup>
-                          </Tooltip>
-                        ) : null}
-                      </DropdownMenuRadioItem>
+                        )}
+                      </div>
                     );
                   })}
                 </DropdownMenuRadioGroup>
