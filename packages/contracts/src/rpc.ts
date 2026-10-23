@@ -145,6 +145,9 @@ import {
 import {
   ReviewBranchCommitsInput,
   ReviewBranchCommitsResult,
+  ReviewCommitDescriptionsError,
+  ReviewCommitDescriptionsInput,
+  ReviewCommitDescriptionsResult,
   ReviewDiffFileContentsInput,
   ReviewDiffFileContentsResult,
   ReviewDiffPreviewError,
@@ -440,6 +443,7 @@ export const WS_METHODS = {
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
   reviewGetBranchCommits: "review.getBranchCommits",
+  reviewGenerateCommitDescriptions: "review.generateCommitDescriptions",
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
 
@@ -1441,6 +1445,15 @@ const WsReviewGetBranchCommitsRpc = Rpc.make(WS_METHODS.reviewGetBranchCommits, 
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+const WsReviewGenerateCommitDescriptionsRpc = Rpc.make(
+  WS_METHODS.reviewGenerateCommitDescriptions,
+  {
+    payload: ReviewCommitDescriptionsInput,
+    success: ReviewCommitDescriptionsResult,
+    error: Schema.Union([ReviewCommitDescriptionsError, EnvironmentAuthorizationError]),
+  },
+);
+
 const WsReviewGetDiffPreviewRpc = Rpc.make(WS_METHODS.reviewGetDiffPreview, {
   payload: ReviewDiffPreviewInput,
   success: ReviewDiffPreviewResult,
@@ -2033,6 +2046,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsSwitchRefRpc,
   WsVcsInitRpc,
   WsReviewGetBranchCommitsRpc,
+  WsReviewGenerateCommitDescriptionsRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
   WsTerminalOpenRpc,

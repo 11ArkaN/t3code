@@ -72,6 +72,8 @@ const REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES = 1024 * 1024;
 const REVIEW_BRANCH_COMMIT_LIMIT = 100;
 const REVIEW_BRANCH_SUBJECT_LIMIT = 300;
 const REVIEW_BRANCH_COMMIT_MAX_OUTPUT_BYTES = 128 * 1024;
+const REVIEW_COMMIT_DESCRIPTION_PATCH_MAX_OUTPUT_BYTES = 6_000;
+const REVIEW_COMMIT_DESCRIPTION_FILES_MAX_OUTPUT_BYTES = 8_000;
 // Patches the clients render are parsed against git's default a/ and b/ path
 // prefixes. A repository or global diff.noprefix or diff.mnemonicPrefix would
 // otherwise leak into the patch and leave every parsed file unnamed.
@@ -3112,6 +3114,77 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { sha: resolvedSha, parent: firstParent ?? (yield* readEmptyTreeHash(cwd)) };
   });
 
+  const readReviewCommitMessage = Effect.fn("GitVcsDriver.readReviewCommitMessage")(function* (
+    cwd: string,
+    sha: string,
+  ) {
+    const result = yield* executeGit(
+      "GitVcsDriver.readReviewCommitMessage",
+      cwd,
+      ["show", "-s", "--no-notes", "--no-show-signature", "--format=%B", sha],
+      { maxOutputBytes: 8_192, appendTruncationMarker: true },
+    );
+    const endOfSubject = result.stdout.indexOf("\n");
+    return {
+      subject: result.stdout.slice(0, endOfSubject < 0 ? undefined : endOfSubject).slice(0, 300),
+      body: endOfSubject < 0 ? "" : result.stdout.slice(endOfSubject).trim().slice(0, 2_000),
+    };
+  });
+
+  const resolveReviewCommits = Effect.fn("GitVcsDriver.resolveReviewCommits")(function* (input: {
+    cwd: string;
+    shas: ReadonlyArray<string>;
+  }) {
+    const repository = yield* resolveRepositoryPathsUncached(input.cwd);
+    if (!repository?.worktreeRoot) {
+      return yield* reviewCommitError(
+        input.cwd,
+        "Selected commit is invalid or no longer available.",
+      );
+    }
+    const cwd = repository.worktreeRoot;
+    const commits = yield* Effect.forEach(input.shas, (sha) => resolveReviewCommit(cwd, sha));
+    return { cwd, repositoryKey: repository.gitCommonDir, commits };
+  });
+
+  const getReviewCommitDescriptionContext = Effect.fn(
+    "GitVcsDriver.getReviewCommitDescriptionContext",
+  )(function* (input: { cwd: string; shas: ReadonlyArray<string> }) {
+    const resolved = yield* resolveReviewCommits(input);
+    const { cwd } = resolved;
+    const commits = yield* Effect.forEach(resolved.commits, (commit) =>
+      Effect.gen(function* () {
+        const message = yield* readReviewCommitMessage(cwd, commit.sha);
+        const files = yield* executeGit(
+          "GitVcsDriver.getReviewCommitDescriptionContext.files",
+          cwd,
+          ["diff", "--name-only", "-z", commit.parent, commit.sha, "--"],
+          {
+            maxOutputBytes: REVIEW_COMMIT_DESCRIPTION_FILES_MAX_OUTPUT_BYTES,
+            appendTruncationMarker: true,
+          },
+        );
+        const completeFiles = files.stdout.slice(0, files.stdout.lastIndexOf("\0") + 1);
+        const patch = yield* executeGit(
+          "GitVcsDriver.getReviewCommitDescriptionContext.patch",
+          cwd,
+          [...REVIEW_DIFF_ARGS, "--patch", commit.parent, commit.sha, "--"],
+          {
+            maxOutputBytes: REVIEW_COMMIT_DESCRIPTION_PATCH_MAX_OUTPUT_BYTES,
+            appendTruncationMarker: true,
+          },
+        );
+        return {
+          sha: commit.sha,
+          ...message,
+          files: completeFiles.split("\0").filter(Boolean).slice(0, 40),
+          patch: patch.stdout,
+        };
+      }),
+    );
+    return { repositoryKey: resolved.repositoryKey, commits };
+  });
+
   const getReviewBranchCommits = Effect.fn("getReviewBranchCommits")(function* (
     input: ReviewBranchCommitsInput,
   ) {
@@ -3230,6 +3303,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         return yield* reviewCommitError(cwd, "Selected commit request is invalid.");
       }
       const commit = yield* resolveReviewCommit(cwd, input.commitSha);
+      const { subject } = yield* readReviewCommitMessage(cwd, commit.sha);
       const diffArgs = [
         ...REVIEW_DIFF_ARGS,
         ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
@@ -3256,6 +3330,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             id: commit.sha,
             kind: "commit" as const,
             title: `Commit ${commit.sha.slice(0, 7)}`,
+            ...(subject.trim() ? { commitSubject: subject.trim() } : {}),
             baseRef: commit.parent,
             headRef: commit.sha,
             diff: patch.stdout,
@@ -4681,6 +4756,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     pullCurrentBranch: (cwd) => withListRefsInvalidation(cwd, pullCurrentBranch(cwd)),
     readRangeContext,
     getReviewBranchCommits,
+    resolveReviewCommits,
+    getReviewCommitDescriptionContext,
     getReviewDiffPreview,
     getReviewDiffFileContents,
     readConfigValue,

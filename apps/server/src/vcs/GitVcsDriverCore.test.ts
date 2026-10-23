@@ -1330,6 +1330,64 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("reads bounded context for linked ancestors and rejects off-branch commits", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const ancestor = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* git(cwd, ["checkout", "-b", "side"]);
+        yield* git(cwd, ["commit", "--allow-empty", "-m", "side only"]);
+        const offBranch = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* writeTextFile(cwd, "README.md", "# changed\n");
+        yield* git(cwd, ["add", "README.md"]);
+        yield* git(cwd, ["commit", "-m", "update readme", "-m", "Explains the change."]);
+        const head = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* git(cwd, ["config", "log.showSignature", "true"]);
+
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const resolved = yield* driver.resolveReviewCommits({ cwd, shas: [ancestor, head] });
+        assert.deepStrictEqual(
+          resolved.commits.map((commit) => commit.sha),
+          [ancestor, head],
+        );
+        const result = yield* driver.getReviewCommitDescriptionContext({
+          cwd,
+          shas: [ancestor, head],
+        });
+        assert.match(result.repositoryKey, /\.git$/);
+        assert.strictEqual(resolved.repositoryKey, result.repositoryKey);
+        assert.deepStrictEqual(
+          result.commits.map((commit) => commit.sha),
+          [ancestor, head],
+        );
+        assert.strictEqual(result.commits[1]?.subject, "update readme");
+        assert.strictEqual(result.commits[1]?.body, "Explains the change.");
+        assert.deepStrictEqual(result.commits[1]?.files, ["README.md"]);
+        assert.include(result.commits[1]?.patch ?? "", "+# changed");
+
+        const error = yield* driver
+          .resolveReviewCommits({ cwd, shas: [offBranch] })
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "GitCommandError");
+      }),
+    );
+
+    it.effect("omits the selected commit subject when the commit message is empty", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["commit", "--allow-empty", "--allow-empty-message", "-m", ""]);
+        const commitSha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          commitSha,
+        });
+        assert.strictEqual(preview.sources[0]?.commitSubject, undefined);
+      }),
+    );
+
     it.effect("keeps complete commit records when metadata output is truncated", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -1381,6 +1439,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         });
         const source = preview.sources[0]!;
         assert.strictEqual(source.kind, "commit");
+        assert.strictEqual(
+          source.commitSubject,
+          "Merge branch 'feature/side' into feature/merge-preview",
+        );
         assert.strictEqual(source.baseRef, firstParent);
         assert.strictEqual(source.headRef, mergeSha);
         assert.deepStrictEqual(

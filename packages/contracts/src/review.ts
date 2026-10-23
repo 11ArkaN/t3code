@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { GitCommandError } from "./git.ts";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { GitCommandError, TextGenerationError } from "./git.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import { VcsError } from "./vcs.ts";
 
 export const ReviewDiffPreviewInput = Schema.Struct({
@@ -36,6 +37,28 @@ export const ReviewBranchCommitsResult = Schema.Struct({
 });
 export type ReviewBranchCommitsResult = typeof ReviewBranchCommitsResult.Type;
 
+export const ReviewCommitDescriptionsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  shas: Schema.Array(
+    TrimmedNonEmptyString.check(Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i)),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(10)),
+});
+export type ReviewCommitDescriptionsInput = typeof ReviewCommitDescriptionsInput.Type;
+
+export const ReviewCommitDescriptionsResult = Schema.Struct({
+  modelSelection: ModelSelection,
+  descriptions: Schema.Array(Schema.Struct({ sha: Schema.String, description: Schema.String })),
+});
+export type ReviewCommitDescriptionsResult = typeof ReviewCommitDescriptionsResult.Type;
+
+export const ReviewCommitDescriptionsError = Schema.Union([
+  VcsError,
+  GitCommandError,
+  TextGenerationError,
+]);
+export type ReviewCommitDescriptionsError = typeof ReviewCommitDescriptionsError.Type;
+
 export const ReviewDiffPreviewSourceKind = Schema.Literals([
   "working-tree",
   "branch-range",
@@ -55,6 +78,7 @@ export const ReviewDiffPreviewSource = Schema.Struct({
   id: TrimmedNonEmptyString,
   kind: ReviewDiffPreviewSourceKind,
   title: TrimmedNonEmptyString,
+  commitSubject: Schema.optionalKey(TrimmedNonEmptyString),
   baseRef: Schema.NullOr(TrimmedNonEmptyString),
   headRef: Schema.NullOr(TrimmedNonEmptyString),
   diff: Schema.String,

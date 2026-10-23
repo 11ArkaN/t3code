@@ -22,6 +22,7 @@ import {
   type VcsCreateWorktreeResult,
   type ReviewBranchCommitsInput,
   type ReviewBranchCommitsResult,
+  type ReviewCommitDescriptionsInput,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
   type ReviewDiffFileContentsInput,
@@ -44,6 +45,17 @@ import {
 } from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+
+export interface ReviewCommitDescriptionContext {
+  readonly repositoryKey: string;
+  readonly commits: ReadonlyArray<{
+    readonly sha: string;
+    readonly subject: string;
+    readonly body: string;
+    readonly files: ReadonlyArray<string>;
+    readonly patch: string;
+  }>;
+}
 
 export interface ExecuteGitInput {
   readonly operation: string;
@@ -337,6 +349,19 @@ export class GitVcsDriver extends Context.Service<
     readonly getReviewBranchCommits: (
       input: ReviewBranchCommitsInput,
     ) => Effect.Effect<ReviewBranchCommitsResult, GitCommandError>;
+    readonly resolveReviewCommits: (
+      input: Pick<ReviewCommitDescriptionsInput, "cwd" | "shas">,
+    ) => Effect.Effect<
+      {
+        readonly cwd: string;
+        readonly repositoryKey: string;
+        readonly commits: ReadonlyArray<{ readonly sha: string; readonly parent: string }>;
+      },
+      GitCommandError
+    >;
+    readonly getReviewCommitDescriptionContext: (
+      input: Pick<ReviewCommitDescriptionsInput, "cwd" | "shas">,
+    ) => Effect.Effect<ReviewCommitDescriptionContext, GitCommandError>;
     readonly getReviewDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, GitCommandError>;
