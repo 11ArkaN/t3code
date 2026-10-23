@@ -1,4 +1,8 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import * as Cause from "effect/Cause";
+import { AsyncResult } from "effect/reactivity";
+import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, render } from "../../../test/render";
@@ -26,9 +30,18 @@ const defaults = {
 };
 
 function Probe(props: Partial<typeof defaults>) {
-  const { descriptions } = useCommitDescriptions({ ...defaults, ...props });
+  const [open, setOpen] = useState(false);
+  const { descriptions, retry } = useCommitDescriptions({ ...defaults, open, ...props });
   return (
     <>
+      <button
+        onClick={() => {
+          if (!open) retry();
+          setOpen(!open);
+        }}
+      >
+        {open ? "Close menu" : "Open menu"}
+      </button>
       <output aria-label="Summary count">{descriptions.size}</output>
       <ul aria-label="Summaries">
         {[...descriptions].map(([sha, description]) => (
@@ -42,10 +55,10 @@ function Probe(props: Partial<typeof defaults>) {
 function setup() {
   mocks.allowed = true;
   mocks.generate.mockReset();
-  type Result = {
-    _tag: "Success";
-    value: { descriptions: Array<{ sha: string; description: string }> };
-  };
+  type Result = AtomCommandResult<
+    { descriptions: Array<{ sha: string; description: string }> },
+    Error
+  >;
   const requests: Array<{ shas: string[]; resolve: (result: Result) => void }> = [];
   mocks.generate.mockImplementation(
     ({ input }: { input: { shas: string[] } }) =>
@@ -54,13 +67,17 @@ function setup() {
       }),
   );
   return {
+    async fail(index: number) {
+      await act(() =>
+        requests[index]!.resolve(AsyncResult.failure(Cause.fail(new Error("Failed")))),
+      );
+    },
     async complete(index: number, description = "Prepared summary") {
       const request = requests[index]!;
       await act(() =>
-        request.resolve({
-          _tag: "Success",
-          value: { descriptions: request.shas.map((sha) => ({ sha, description })) },
-        }),
+        request.resolve(
+          AsyncResult.success({ descriptions: request.shas.map((sha) => ({ sha, description })) }),
+        ),
       );
     },
   };
@@ -93,6 +110,34 @@ it("starts no generation while hidden and retains loaded summaries across hiding
   await screen.rerender(<Probe open />);
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
   expect(mocks.generate).toHaveBeenCalledTimes(1);
+});
+
+it("retries a failed batch only on menu reopening and preserves successful summaries", async () => {
+  const test = setup();
+  await using screen = await render(<Probe />);
+  await test.complete(0);
+  const changed = ["new-sha", "other-new-sha", ...shas];
+  await screen.rerender(<Probe shas={changed} />);
+  await screen.getByRole("button", { name: "Open menu" }).click();
+  await test.fail(1);
+  await screen.rerender(<Probe shas={changed} />);
+  await screen.rerender(<Probe visible={false} shas={changed} />);
+  await screen.rerender(<Probe shas={changed} />);
+  await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
+  expect(mocks.generate).toHaveBeenCalledTimes(2);
+  await screen.getByRole("button", { name: "Close menu" }).click();
+  expect(mocks.generate).toHaveBeenCalledTimes(2);
+  await screen.getByRole("button", { name: "Open menu" }).click();
+  expect(mocks.generate).toHaveBeenCalledTimes(3);
+  expect(mocks.generate.mock.calls[2]![0].input.shas).toEqual(["new-sha", "other-new-sha"]);
+  await screen.getByRole("button", { name: "Close menu" }).click();
+  await screen.getByRole("button", { name: "Open menu" }).click();
+  expect(mocks.generate).toHaveBeenCalledTimes(3);
+  await test.complete(2, "Retried summary");
+  await expect.element(screen.getByText("Retried summary").first()).toBeVisible();
+  await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("12");
+  await expect.element(screen.getByRole("listitem").first()).toHaveTextContent("Prepared summary");
+  expect(mocks.generate).toHaveBeenCalledTimes(3);
 });
 
 it("serializes changed commit lists and waits until the panel is visible to fetch missing summaries", async () => {

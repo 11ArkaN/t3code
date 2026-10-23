@@ -798,7 +798,10 @@ export default function DiffPanel({
             <DropdownMenuSub
               onOpenChange={(open) => {
                 setCommitMenuOpen(open);
-                if (open) branchCommits.refresh();
+                if (open) {
+                  commitDescriptions.retry();
+                  branchCommits.refresh();
+                }
               }}
             >
               <DropdownMenuSubTrigger>Commits</DropdownMenuSubTrigger>

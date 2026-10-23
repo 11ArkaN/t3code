@@ -95,6 +95,9 @@ export function useCommitDescriptions({
     }));
     void generate({ environmentId, input: { cwd, threadId, shas: batch } }).then((result) => {
       if (requested.current !== request) return;
+      if (result._tag !== "Success") {
+        for (const sha of batch) request.shas.delete(sha);
+      }
       setState((stored) => {
         const current = stored.scope === scope ? stored : initialState(scope);
         if (requested.current !== request) return stored;
@@ -126,6 +129,12 @@ export function useCommitDescriptions({
     visible,
   ]);
 
+  const retry = () => {
+    setState((stored) =>
+      stored.scope === scope && stored.failed ? { ...stored, failed: false } : stored,
+    );
+  };
+
   const observeLast = (element: HTMLElement | null) => {
     if (!element) return;
     const observer = new IntersectionObserver((entries) => {
@@ -140,5 +149,5 @@ export function useCommitDescriptions({
     return () => observer.disconnect();
   };
 
-  return { descriptions: state.descriptions, lastIndex: state.wanted - 1, observeLast };
+  return { descriptions: state.descriptions, lastIndex: state.wanted - 1, observeLast, retry };
 }
