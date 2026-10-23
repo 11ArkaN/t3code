@@ -13,6 +13,7 @@ import {
   ChevronDownIcon,
   Columns2Icon,
   FolderTreeIcon,
+  GitCommitHorizontalIcon,
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
@@ -373,17 +374,21 @@ export default function DiffPanel({
           ? "commit"
           : "branch-range"),
   );
+  const selectedCommitSubject =
+    selectedCommitSha !== null && selectedGitSource?.headRef === selectedCommitSha
+      ? selectedGitSource.commitSubject
+      : undefined;
   const selectedGitScopeLabel =
     selectedCommitSha !== null
-      ? ((selectedGitSource?.headRef === selectedCommitSha
-          ? selectedGitSource.commitSubject
-          : undefined) ?? `Commit ${selectedCommitSha.slice(0, 7)}`)
+      ? (selectedCommitSubject ?? `Commit ${selectedCommitSha.slice(0, 7)}`)
       : selectedGitScope === "unstaged"
         ? "Uncommitted"
         : "Changes";
   const selectedScopeLabel =
     selectedRunId === null
-      ? selectedGitScopeLabel
+      ? selectedCommitSha !== null
+        ? (selectedCommitSubject ?? "Commit")
+        : selectedGitScopeLabel
       : selectedTurn?.runId === latestTurn?.runId
         ? "Latest turn"
         : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
@@ -722,6 +727,8 @@ export default function DiffPanel({
   const selectScopeValue = (value: string) => {
     if (value === "unstaged" || value === "branch") {
       selectGitScope(value);
+    } else if (value === selectedCommitValue) {
+      selectGitScope("branch");
     } else if (value.startsWith("commit:")) {
       if (routeThreadRef) {
         useDiffPanelStore.getState().selectCommit(routeThreadRef, value.slice("commit:".length));
@@ -740,10 +747,14 @@ export default function DiffPanel({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
-            className={selectedCommitUrl ? "min-w-0 max-w-full shrink" : "max-w-full"}
+            className="max-w-full"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
-            <span className="truncate">{selectedScopeLabel}</span>
+            {selectedCommitSha !== null ? (
+              <GitCommitHorizontalIcon className="size-3.5 shrink-0 opacity-70" />
+            ) : (
+              <span className="truncate">{selectedScopeLabel}</span>
+            )}
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -791,6 +802,10 @@ export default function DiffPanel({
                 >
                   {branchCommits.data?.commits.map((commit, index) => {
                     const description = commitDescriptions.descriptions.get(commit.sha);
+                    const commitUrl = gitHubCommitBrowserUrl(
+                      activeProject?.repositoryIdentity,
+                      commit.sha,
+                    );
                     return (
                       <DropdownMenuRadioItem
                         key={commit.sha}
@@ -804,6 +819,28 @@ export default function DiffPanel({
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="min-w-0 truncate">{commit.subject}</span>
+                          {commitUrl ? (
+                            <a
+                              href={commitUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open commit ${commit.sha.slice(0, 7)}`}
+                              className="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                              onClick={(event) => openPrLink(event, commitUrl)}
+                              onFocus={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.stopPropagation();
+                                }
+                              }}
+                            >
+                              {commit.sha.slice(0, 7)}
+                            </a>
+                          ) : (
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              {commit.sha.slice(0, 7)}
+                            </span>
+                          )}
                           <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
                             {formatRelativeTimeLabel(commit.committedAt)}
                           </span>
@@ -847,22 +884,34 @@ export default function DiffPanel({
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
-        {selectedCommitUrl && selectedCommitSha ? (
+        {selectedCommitSha !== null ? (
           <Tooltip>
             <TooltipTrigger
               render={
-                <a
-                  href={selectedCommitUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                  onClick={(event) => openPrLink(event, selectedCommitUrl)}
-                />
+                selectedCommitUrl ? (
+                  <a
+                    href={selectedCommitUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex min-w-0 items-center gap-2 text-xs underline decoration-muted-foreground/60 underline-offset-4 hover:decoration-foreground"
+                    onClick={(event) => openPrLink(event, selectedCommitUrl)}
+                  />
+                ) : (
+                  <span className="flex min-w-0 items-center gap-2 text-xs" />
+                )
               }
             >
-              {selectedCommitSha.slice(0, 7)}
+              <span className="truncate">{selectedScopeLabel}</span>
+              <span className="shrink-0 font-mono text-muted-foreground">
+                {selectedCommitSha.slice(0, 7)}
+              </span>
             </TooltipTrigger>
-            <TooltipPopup side="top">{selectedCommitUrl}</TooltipPopup>
+            <TooltipPopup side="top" className="max-w-80">
+              {selectedScopeLabel}
+              {selectedCommitUrl ? (
+                <span className="block font-mono text-muted-foreground">{selectedCommitUrl}</span>
+              ) : null}
+            </TooltipPopup>
           </Tooltip>
         ) : null}
         {selectedRunId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
