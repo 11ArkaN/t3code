@@ -46,7 +46,10 @@ vi.mock(import("../../state/server"), async (original) => {
 });
 vi.mock(import("../../state/shell"), async (original) => {
   const { Atom } = await import("effect/reactivity");
-  return { ...(await original()), allReachableShellsLiveAtom: Atom.make(false) };
+  return {
+    ...(await original()),
+    allReachableShellsLiveAtom: Atom.make(false).pipe(Atom.keepAlive),
+  };
 });
 vi.mock(import("../../state/entities"), async (original) => ({
   ...(await original()),
