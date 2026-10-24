@@ -5,7 +5,7 @@ import { AsyncResult } from "effect/reactivity";
 import { useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
 
-import { act, render } from "../../../test/render";
+import { act, render, type Screen } from "../../../test/render";
 
 const mocks = vi.hoisted(() => ({ allowed: true, generate: vi.fn() }));
 
@@ -82,6 +82,15 @@ function CommitListProbe({
   return <output aria-label="Commits">{snapshot?.join(", ")}</output>;
 }
 
+function clickMenuButton(screen: Screen, name: string) {
+  return act(() =>
+    screen
+      .getByRole("button", { name })
+      .element()
+      .dispatchEvent(new MouseEvent("click", { bubbles: true })),
+  );
+}
+
 function setup() {
   mocks.allowed = true;
   mocks.generate.mockReset();
@@ -146,15 +155,15 @@ it("prepares only the next ten after scrolling and keeps the open summaries fixe
   const test = setup();
   await using screen = await render(<Probe paginate />);
   await test.complete(0);
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Open menu");
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
   screen.getByLabelText("Commit rows").element().scrollTop = 216;
   await vi.waitFor(() => expect(mocks.generate).toHaveBeenCalledTimes(2));
   expect(mocks.generate.mock.calls[1]![0].input.shas).toEqual(shas.slice(10, 20));
   await test.complete(1);
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
-  await screen.getByRole("button", { name: "Close menu" }).click();
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Close menu");
+  await clickMenuButton(screen, "Open menu");
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("20");
   expect(mocks.generate).toHaveBeenCalledTimes(2);
 });
@@ -200,25 +209,25 @@ it("retries a failed batch only on menu reopening and preserves successful summa
   await test.complete(0);
   const changed = ["new-sha", "other-new-sha", ...shas];
   await screen.rerender(<Probe shas={changed} />);
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Open menu");
   await test.fail(1);
   await screen.rerender(<Probe shas={changed} />);
   await screen.rerender(<Probe visible={false} shas={changed} />);
   await screen.rerender(<Probe shas={changed} />);
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
   expect(mocks.generate).toHaveBeenCalledTimes(2);
-  await screen.getByRole("button", { name: "Close menu" }).click();
+  await clickMenuButton(screen, "Close menu");
   expect(mocks.generate).toHaveBeenCalledTimes(2);
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Open menu");
   expect(mocks.generate).toHaveBeenCalledTimes(3);
   expect(mocks.generate.mock.calls[2]![0].input.shas).toEqual(["new-sha", "other-new-sha"]);
-  await screen.getByRole("button", { name: "Close menu" }).click();
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Close menu");
+  await clickMenuButton(screen, "Open menu");
   expect(mocks.generate).toHaveBeenCalledTimes(3);
   await test.complete(2, "Retried summary");
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
-  await screen.getByRole("button", { name: "Close menu" }).click();
-  await screen.getByRole("button", { name: "Open menu" }).click();
+  await clickMenuButton(screen, "Close menu");
+  await clickMenuButton(screen, "Open menu");
   await expect.element(screen.getByText("Retried summary").first()).toBeVisible();
   await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("12");
   await expect.element(screen.getByRole("listitem").first()).toHaveTextContent("Prepared summary");
