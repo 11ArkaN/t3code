@@ -174,6 +174,17 @@ describe("parseCommitUrl", () => {
     });
   });
 
+  it.each([
+    `https://tenant.ghe.com/PingDotGG/T3Code/commit/${sha.toUpperCase()}`,
+    `https://tenant.ghe.com/pingdotgg/t3code/pull/19941/commits/${sha}`,
+  ])("reads a full Enterprise Cloud commit URL: %s", (url) => {
+    expect(definition.parseCommitUrl(new URL(url))).toEqual({
+      host: "tenant.ghe.com",
+      repository: "pingdotgg/t3code",
+      sha,
+    });
+  });
+
   it("normalizes the host of full SHA-256 commits to the repository key", () => {
     expect(
       definition.parseCommitUrl(
@@ -189,6 +200,9 @@ describe("parseCommitUrl", () => {
   it.each([
     `ftp://github.com/team/repo/commit/${sha}`,
     `https://github-evil.test/team/repo/commit/${sha}`,
+    `https://ghe.com/team/repo/commit/${sha}`,
+    `https://notghe.com/team/repo/commit/${sha}`,
+    `https://tenant.ghe.com.evil.test/team/repo/commit/${sha}`,
     `https://gitlab.com/team/repo/-/commit/${sha}`,
     `https://github.com/team/repo/pull/19941/commits`,
     `https://github.com/team/repo/pull/0/commits/${sha}`,
