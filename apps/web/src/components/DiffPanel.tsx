@@ -94,7 +94,7 @@ import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
 
 import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
-import { useCommitDescriptions } from "./diffs/useCommitDescriptions";
+import { useCommitDescriptions, useCommitMenuSnapshot } from "./diffs/useCommitDescriptions";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
@@ -342,7 +342,7 @@ export default function DiffPanel({
         })
       : null,
   );
-  const branchCommits = useEnvironmentQuery(
+  const branchCommitsQuery = useEnvironmentQuery(
     visible && isGitRepo && canReadFiles && activeThread && activeCwd
       ? reviewEnvironment.branchCommits({
           environmentId: activeThread.environmentId,
@@ -353,6 +353,16 @@ export default function DiffPanel({
         })
       : null,
   );
+  const branchCommits = {
+    ...branchCommitsQuery,
+    data: useCommitMenuSnapshot(
+      branchCommitsQuery.data,
+      commitMenuOpen,
+      visible && isGitRepo && canReadFiles && activeThread && activeCwd
+        ? JSON.stringify([activeThread.environmentId, activeThreadId, activeCwd, rememberedBaseRef])
+        : null,
+    ),
+  };
   const commitPreviewFailed =
     selectedCommitSha !== null && isGitCommandError(branchDiffPreview.failure);
   useEffect(() => {
@@ -410,7 +420,7 @@ export default function DiffPanel({
             .textGenerationModelSelection
         : null,
     ),
-    shas: branchCommits.data?.commits.map((commit) => commit.sha) ?? [],
+    shas: branchCommitsQuery.data?.commits.map((commit) => commit.sha) ?? [],
     enabled: isGitRepo && canReadFiles && !!serverConfig?.settings && !!activeProjectId,
     visible,
     open: commitMenuOpen,
@@ -889,7 +899,7 @@ export default function DiffPanel({
                       ? "Checking file access..."
                       : (fileAccess.error ?? "This connection cannot read local diffs.")}
                   </DropdownMenuItem>
-                ) : branchCommits.isPending ? (
+                ) : branchCommits.isPending && branchCommits.data === null ? (
                   <DropdownMenuItem disabled>Loading commits...</DropdownMenuItem>
                 ) : !branchCommits.data ? null : branchCommits.data.commits.length === 0 ? (
                   <DropdownMenuItem disabled>No commits on this branch.</DropdownMenuItem>

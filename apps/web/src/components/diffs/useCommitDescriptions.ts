@@ -34,6 +34,19 @@ const initialState = (scope: string | null): DescriptionState => ({
   failed: false,
 });
 
+export function useCommitMenuSnapshot<A>(data: A, open: boolean, scope: string | null): A {
+  const [snapshot, setSnapshot] = useState({ data, open, scope });
+  if (
+    snapshot.scope !== scope ||
+    snapshot.open !== open ||
+    (snapshot.data === null && data !== null)
+  ) {
+    setSnapshot({ data, open, scope });
+    return data;
+  }
+  return open ? snapshot.data : data;
+}
+
 export function useCommitDescriptions({
   environmentId,
   threadId,
@@ -149,5 +162,6 @@ export function useCommitDescriptions({
     return () => observer.disconnect();
   };
 
-  return { descriptions: state.descriptions, lastIndex: state.wanted - 1, observeLast, retry };
+  const descriptions = useCommitMenuSnapshot(state.descriptions, open, scope);
+  return { descriptions, lastIndex: state.wanted - 1, observeLast, retry };
 }
