@@ -389,7 +389,7 @@ describe("compact reasoning math", () => {
   });
 });
 
-it("renders T3 compaction in the working row and finishes with its reason and token delta", async () => {
+it("renders automatic compaction as one live divider that finishes with its reason and token delta", async () => {
   setup();
   const fixture = makeStreamingTimelineFixture();
   const prompt = fixture.visibleTurnItems[3]!;
@@ -446,11 +446,12 @@ it("renders T3 compaction in the working row and finishes with its reason and to
   container.style.cssText = "height: 1200px; width: 900px; display: flex; flex-direction: column;";
   await using screen = await render(ui(false), { container });
   await expect
-    .element(screen.getByText("Compacting before the cache expires…", { exact: true }).first())
+    .element(screen.getByRole("separator", { name: "Compacting before the cache expires…" }))
     .toBeVisible();
   expect(container.textContent).not.toContain("/compact");
   expect(container.textContent).not.toContain("Thinking");
-  expect(container.querySelectorAll('[role="separator"]')).toHaveLength(0);
+  expect(container.textContent).not.toContain("Working");
+  expect(container.querySelectorAll('[role="separator"]')).toHaveLength(1);
   await screen.rerender(ui(true));
   await expect
     .element(

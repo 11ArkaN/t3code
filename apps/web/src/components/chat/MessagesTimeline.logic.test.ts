@@ -536,7 +536,7 @@ describe("deriveMessagesTimelineRows", () => {
     },
   );
 
-  it("shows each compaction trigger as one working row, then a reasoned token divider", () => {
+  it("shows each compaction trigger as one live status, then a reasoned token divider", () => {
     const fixture = makeStreamingTimelineFixture();
     const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
     if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
@@ -573,21 +573,31 @@ describe("deriveMessagesTimelineRows", () => {
         supportsConversationRollback: false,
       });
 
-    for (const [reason, compacting, title] of [
+    // Only compacting on return holds a sent message back, so only it speaks through the working
+    // row; the others keep their live divider.
+    for (const [reason, live, title] of [
       [
         "beforeCacheExpires",
-        "Compacting before the cache expires…",
+        {
+          kind: "context-compaction",
+          active: true,
+          label: "Compacting before the cache expires…",
+        },
         "Context automatically compacted before cache expiry",
       ],
-      ["onReturn", "Compacting after being idle…", "Context compacted after being idle"],
-      [undefined, "Compacting context…", undefined],
+      [
+        "onReturn",
+        { kind: "working", compacting: "Compacting after being idle…" },
+        "Context compacted after being idle",
+      ],
+      [undefined, { kind: "context-compaction", active: true }, undefined],
     ] as const) {
       const prompt = compactPrompt(reason);
       for (const rows of [rowsFor([prompt]), rowsFor([prompt, compaction])]) {
         const liveRows = rows.slice(
           rows.findIndex((row) => row.id.includes("history-assistant")) + 1,
         );
-        expect(liveRows).toMatchObject([{ kind: "working", compacting }]);
+        expect(liveRows).toMatchObject([live]);
       }
       const completed = rowsFor(
         [

@@ -1645,26 +1645,27 @@ export function deriveMessagesTimelineRows(input: {
         !timelineEntryIsCompaction(entry) &&
         !(entry.kind === "message" && isCompactionCommandMessage(entry.message)),
     );
-  // A compaction T3 Code ran on its own, or one the turn exists for, owns the working row. A
-  // provider's mid-turn compaction keeps its live divider: the working row is often off screen.
+  const runningCompactionRunId =
+    activeRunIsCompaction && !compactionRunFinished ? unsettledRunId : null;
+  // Compacting on return holds back the message the user just sent, so the working row says why
+  // it is waiting. Any other compaction shows only its live divider, never both.
   const activeCompactionRunId =
-    activeRunIsCompaction && !compactionRunFinished
-      ? unsettledRunId
+    runningCompactionRunId !== null && compactionRuns.get(runningCompactionRunId) === "onReturn"
+      ? runningCompactionRunId
       : activeCompactionEntry?.entry.runId != null &&
           resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
         ? activeCompactionEntry.entry.runId
         : null;
   const compactingLabel = (() => {
     if (activeCompactionRunId === null) return undefined;
-    const reason = compactionRuns.get(activeCompactionRunId);
-    if (reason !== undefined) return IDLE_COMPACTING_LABELS[reason];
     const age = activeCompactionEntry
       ? resumeCompactionAgeByEntryId.get(activeCompactionEntry.id)
       : undefined;
-    return age ? `Compacting after ${age} idle…` : "Compacting context…";
+    return age ? `Compacting after ${age} idle…` : IDLE_COMPACTING_LABELS.onReturn;
   })();
   const appendWorkingRow = () => {
     if (compactionOnlyRunFinished) return;
+    if (runningCompactionRunId !== null && activeCompactionRunId === null) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -1761,6 +1762,7 @@ export function deriveMessagesTimelineRows(input: {
       const compaction = timelineEntry.entry.structuredPayload;
       const compactionRunId = timelineEntry.entry.runId;
       const title = compactionTitle(compactionRunId, timelineEntry.id);
+      const reason = compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
       const failed = compaction?.type === "compaction" && compaction.status === "failed";
       const failure = failed ? compaction.summary?.trim() || undefined : undefined;
       nextRows.push({
@@ -1770,7 +1772,7 @@ export function deriveMessagesTimelineRows(input: {
         ...(failed ? { failed: true } : {}),
         ...(failure ? { failure } : {}),
         createdAt: timelineEntry.createdAt,
-        label: timelineEntry.entry.label,
+        label: active && reason ? IDLE_COMPACTING_LABELS[reason] : timelineEntry.entry.label,
         tokenCounts:
           compaction?.type === "compaction" ? contextCompactionTokenCounts(compaction) : null,
         active,
@@ -2003,13 +2005,19 @@ export function deriveMessagesTimelineRows(input: {
       compactionRunId !== null && isCompactionCommandMessage(timelineEntry.message);
     if (compactionRun) {
       if (!compactedRunIds.has(compactionRunId) && compactionRunId !== activeCompactionRunId) {
+        const pending = compactionRunId === runningCompactionRunId;
+        const reason = compactionRuns.get(compactionRunId);
         nextRows.push({
           kind: "context-compaction",
           id: `compaction:${compactionRunId}`,
           createdAt: timelineEntry.createdAt,
-          label: "Context compaction",
+          label: pending
+            ? reason
+              ? IDLE_COMPACTING_LABELS[reason]
+              : "Compacting context"
+            : "Context compaction",
           tokenCounts: null,
-          active: false,
+          active: pending,
         });
       }
       continue;
