@@ -35,6 +35,8 @@ import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   AuthFilesystemReadScope,
+  isCompactionCommandMessage,
+  isIdleCompactionMessage,
   type OrchestrationMessageContext,
   ThreadId,
   type ChatAttachment,
@@ -1187,6 +1189,14 @@ function ThreadAutomationMessageRow(props: {
   );
 }
 
+function AutomaticCompactionNote() {
+  return (
+    <Text className="font-t3-medium text-xs text-foreground-muted opacity-70">
+      · Automatic before cache expiry
+    </Text>
+  );
+}
+
 function renderFeedEntry(
   info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<
@@ -1205,6 +1215,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
+    readonly automaticCompactionRunIds: ReadonlySet<RunId>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1366,7 +1377,11 @@ function renderFeedEntry(
         icon="arrow.down.right.and.arrow.up.left"
         iconColor={iconSubtleColor}
         active={active}
-      />
+      >
+        {entry.runId !== null && props.automaticCompactionRunIds.has(entry.runId) ? (
+          <AutomaticCompactionNote />
+        ) : null}
+      </ThreadContextDivider>
     );
   }
 
@@ -1402,6 +1417,20 @@ function renderFeedEntry(
           threadId={props.threadId}
           opening={props.workflowOpening}
         />
+      );
+    }
+    if (isCompactionCommandMessage(message)) {
+      // Stands in for the compaction item until the provider reports it.
+      const active = props.unsettledTurnId !== null && message.runId === props.unsettledTurnId;
+      return (
+        <ThreadContextDivider
+          label={active ? "Compacting context" : "Context compaction"}
+          icon="arrow.down.right.and.arrow.up.left"
+          iconColor={iconSubtleColor}
+          active={active}
+        >
+          {isIdleCompactionMessage(message) ? <AutomaticCompactionNote /> : null}
+        </ThreadContextDivider>
       );
     }
     if (isUser && presentation.attribution === "automation") {
@@ -2498,6 +2527,19 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
+  const automaticCompactionRunIds = useMemo(
+    () =>
+      new Set(
+        props.feed.flatMap((entry) =>
+          entry.type === "message" &&
+          entry.message.runId !== null &&
+          isIdleCompactionMessage(entry.message)
+            ? [entry.message.runId]
+            : [],
+        ),
+      ),
+    [props.feed],
+  );
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
@@ -2941,6 +2983,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
+            automaticCompactionRunIds,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,
@@ -3078,6 +3121,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             keyExtractor={(entry) => entry.id}
             getItemType={(entry) => {
               if (entry.type !== "message") return entry.type;
+              if (isCompactionCommandMessage(entry.message)) return "message:compaction";
               const { attribution } = resolveUserMessagePresentation(entry.message);
               return attribution === "automation" || attribution === "agent"
                 ? `message:${attribution}`

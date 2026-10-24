@@ -521,6 +521,53 @@ describe("deriveMessagesTimelineRows", () => {
     expect(computeStableMessagesTimelineRows(settledRows, stable).result).toEqual(settledRows);
   });
 
+  it("shows a compaction turn as one compaction row from the moment it starts", () => {
+    const fixture = makeStreamingTimelineFixture();
+    const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
+    if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
+      throw new Error("Expected live fixture items");
+    const compactPrompt = {
+      ...liveUser,
+      item: {
+        ...liveUser.item,
+        text: "/compact",
+        createdBy: "agent" as const,
+        creationSource: "server" as const,
+      },
+    };
+    const compaction = {
+      ...liveAssistant,
+      item: { ...liveAssistant.item, type: "compaction" as const, driver: null },
+    };
+    const rowsFor = (visibleTurnItems: OrchestrationV2ProjectedTurnItem[]) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+          visibleTurnItems: [history0!, history1!, history2!, ...visibleTurnItems],
+          optimisticMessages: [],
+        }),
+        isWorking: true,
+        runningRunId: fixture.runId,
+        activeTurnStartedAt: fixture.time(5),
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+
+    for (const rows of [rowsFor([compactPrompt]), rowsFor([compactPrompt, compaction])]) {
+      const liveRows = rows.slice(
+        rows.findIndex((row) => row.id.includes("history-assistant")) + 1,
+      );
+      expect(liveRows).toMatchObject([
+        {
+          kind: "context-compaction",
+          id: `compaction:${fixture.runId}`,
+          label: "Compacting context",
+          active: true,
+          automatic: true,
+        },
+      ]);
+    }
+  });
+
   it("only enables assistant copy for the terminal assistant message in a turn", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [

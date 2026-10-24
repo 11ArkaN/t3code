@@ -45,6 +45,8 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  isCompactionCommandMessage,
+  isIdleCompactionMessage,
   type MessageId,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
@@ -587,6 +589,8 @@ type MessagesTimelineRowContent =
       label: string;
       tokenCounts: ReturnType<typeof contextCompactionTokenCounts>;
       active: boolean;
+      /** T3 Code compacted an idle thread on its own; absent for mid-turn and typed compactions. */
+      automatic?: boolean;
     }
   | {
       kind: "message";
@@ -1572,7 +1576,28 @@ export function deriveMessagesTimelineRows(input: {
   const activeWorkEntryIds = new Set(
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
+  // A bare `/compact` turn is the compaction itself: one compaction row stands in for its prompt
+  // and working indicator, from the moment the turn starts.
+  const compactionRuns = new Map<RunId, { automatic: boolean; hasItem: boolean }>();
+  for (const entry of timelineEntries) {
+    if (
+      entry.kind === "message" &&
+      entry.message.runId !== null &&
+      isCompactionCommandMessage(entry.message)
+    ) {
+      compactionRuns.set(entry.message.runId, {
+        automatic: isIdleCompactionMessage(entry.message),
+        hasItem: false,
+      });
+    } else if (timelineEntryIsCompaction(entry) && entry.kind === "work" && entry.entry.runId) {
+      const run = compactionRuns.get(entry.entry.runId);
+      if (run) run.hasItem = true;
+    }
+  }
+  const activeRunIsCompaction =
+    input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
   const appendWorkingRow = () => {
+    if (activeRunIsCompaction) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -1580,7 +1605,7 @@ export function deriveMessagesTimelineRows(input: {
     });
   };
   let hasActivityRow = false;
-  let hasActiveCompaction = false;
+  let hasActiveCompaction = activeRunIsCompaction;
   const appendActiveWorkRows = () => {
     if (activeWorkRow === null) return;
     nextRows.push(activeWorkRow);
@@ -1660,9 +1685,13 @@ export function deriveMessagesTimelineRows(input: {
       const active = workEntryIsInActiveRun(timelineEntry.entry);
       hasActiveCompaction ||= active;
       const compaction = timelineEntry.entry.structuredPayload;
+      const compactionRunId = timelineEntry.entry.runId;
+      const compactionRun =
+        compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
       nextRows.push({
         kind: "context-compaction",
-        id: timelineEntry.id,
+        id: compactionRun ? `compaction:${compactionRunId}` : timelineEntry.id,
+        ...(compactionRun?.automatic ? { automatic: true } : {}),
         createdAt: timelineEntry.createdAt,
         label: timelineEntry.entry.label,
         tokenCounts:
@@ -1879,6 +1908,27 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: timelineEntry.createdAt,
         projectedItem: timelineEntry.projectedItem,
       });
+      continue;
+    }
+
+    const compactionRunId = timelineEntry.message.runId;
+    const compactionRun =
+      compactionRunId !== null && isCompactionCommandMessage(timelineEntry.message)
+        ? compactionRuns.get(compactionRunId)
+        : undefined;
+    if (compactionRun) {
+      if (!compactionRun.hasItem) {
+        const active = activeRunIsCompaction && compactionRunId === unsettledRunId;
+        nextRows.push({
+          kind: "context-compaction",
+          id: `compaction:${compactionRunId}`,
+          createdAt: timelineEntry.createdAt,
+          label: active ? "Compacting context" : "Context compaction",
+          tokenCounts: null,
+          active,
+          ...(compactionRun.automatic ? { automatic: true } : {}),
+        });
+      }
       continue;
     }
 
@@ -2268,7 +2318,12 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "context-compaction": {
       const bc = b as typeof a;
-      return a.createdAt === bc.createdAt && a.label === bc.label && a.active === bc.active;
+      return (
+        a.createdAt === bc.createdAt &&
+        a.label === bc.label &&
+        a.active === bc.active &&
+        a.automatic === bc.automatic
+      );
     }
 
     case "proposed-plan":
