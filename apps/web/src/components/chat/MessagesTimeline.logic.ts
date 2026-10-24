@@ -599,6 +599,9 @@ type MessagesTimelineRowContent =
       active: boolean;
       /** Replaces "Context compacted" when T3 Code compacted without being asked. */
       title?: string;
+      failed?: true;
+      /** The provider's reason, when a failed compaction gave one. */
+      failure?: string;
     }
   | {
       kind: "message";
@@ -1738,10 +1741,14 @@ export function deriveMessagesTimelineRows(input: {
       const compactionRun =
         compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
       const title = compactionTitle(compactionRunId);
+      const failed = compaction?.type === "compaction" && compaction.status === "failed";
+      const failure = failed ? compaction.summary?.trim() || undefined : undefined;
       nextRows.push({
         kind: "context-compaction",
         id: compactionRun ? `compaction:${compactionRunId}` : timelineEntry.id,
         ...(title ? { title } : {}),
+        ...(failed ? { failed: true } : {}),
+        ...(failure ? { failure } : {}),
         createdAt: timelineEntry.createdAt,
         label: timelineEntry.entry.label,
         tokenCounts:
@@ -2383,7 +2390,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.createdAt === bc.createdAt &&
         a.label === bc.label &&
         a.active === bc.active &&
-        a.title === bc.title
+        a.title === bc.title &&
+        a.failed === bc.failed &&
+        a.failure === bc.failure
       );
     }
 
