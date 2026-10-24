@@ -521,35 +521,45 @@ describe("deriveMessagesTimelineRows", () => {
     expect(computeStableMessagesTimelineRows(settledRows, stable).result).toEqual(settledRows);
   });
 
-  it("shows a running compaction turn as the working row alone", () => {
+  it("shows each compaction trigger as one working row, then a reasoned token divider", () => {
     const fixture = makeStreamingTimelineFixture();
     const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
     if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
       throw new Error("Expected live fixture items");
-    const compactPrompt = (idleCompaction: "beforeCacheExpires" | "onReturn") => ({
+    const compactPrompt = (idleCompaction: "beforeCacheExpires" | "onReturn" | undefined) => ({
       ...liveUser,
       item: { ...liveUser.item, text: "/compact", idleCompaction },
     });
     const compaction = {
       ...liveAssistant,
-      item: { ...liveAssistant.item, type: "compaction" as const, driver: null },
+      item: {
+        ...liveAssistant.item,
+        type: "compaction" as const,
+        driver: null,
+        beforeTokenCount: 899_000,
+      },
     };
-    const rowsFor = (visibleTurnItems: OrchestrationV2ProjectedTurnItem[]) =>
+    const rowsFor = (visibleTurnItems: OrchestrationV2ProjectedTurnItem[], isWorking = true) =>
       deriveMessagesTimelineRows({
         timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
           visibleTurnItems: [history0!, history1!, history2!, ...visibleTurnItems],
           optimisticMessages: [],
         }),
-        isWorking: true,
+        isWorking,
         runningRunId: fixture.runId,
         activeTurnStartedAt: fixture.time(5),
         turnDiffSummaries: [],
         supportsConversationRollback: false,
       });
 
-    for (const [reason, compacting] of [
-      ["beforeCacheExpires", "Compacting before the cache expires…"],
-      ["onReturn", "Compacting after being idle…"],
+    for (const [reason, compacting, title] of [
+      [
+        "beforeCacheExpires",
+        "Compacting before the cache expires…",
+        "Context automatically compacted before cache expiry",
+      ],
+      ["onReturn", "Compacting after being idle…", "Context compacted after being idle"],
+      [undefined, "Compacting context…", undefined],
     ] as const) {
       const prompt = compactPrompt(reason);
       for (const rows of [rowsFor([prompt]), rowsFor([prompt, compaction])]) {
@@ -558,6 +568,27 @@ describe("deriveMessagesTimelineRows", () => {
         );
         expect(liveRows).toMatchObject([{ kind: "working", compacting }]);
       }
+      const completed = rowsFor(
+        [
+          prompt,
+          {
+            ...compaction,
+            item: { ...compaction.item, status: "completed", afterTokenCount: 19_000 },
+          },
+        ],
+        false,
+      );
+      const liveRows = completed.slice(
+        completed.findIndex((row) => row.id.includes("history-assistant")) + 1,
+      );
+      expect(liveRows).toMatchObject([
+        {
+          kind: "context-compaction",
+          active: false,
+          tokenCounts: { before: "899K", after: "19K" },
+        },
+      ]);
+      expect(liveRows[0]?.kind === "context-compaction" ? liveRows[0].title : null).toBe(title);
     }
   });
 
