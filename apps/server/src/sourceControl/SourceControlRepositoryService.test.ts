@@ -383,6 +383,39 @@ it.effect.each([
   }),
 );
 
+it.effect("keeps a query token out of a failed clone's error text", () =>
+  Effect.gen(function* () {
+    const error = yield* Effect.flip(
+      cloneInTemporaryDirectory(
+        {
+          execute: (input) =>
+            Effect.gen(function* () {
+              // Git quotes the URL it was given, query included, and appends a slash.
+              yield* (
+                input.progress?.onStderrLine?.(
+                  "fatal: unable to access 'https://github.com/octocat/t3code.git?access_token=s3cret/': Could not resolve host: github.com",
+                ) ?? Effect.void
+              );
+              return yield* new GitCommandError({
+                operation: input.operation,
+                command: "git",
+                cwd: input.cwd,
+                detail: "Git command exited with a non-zero status.",
+                exitCode: 128,
+              });
+            }),
+        },
+        { remoteUrl: "https://github.com/octocat/t3code.git?access_token=s3cret" },
+      ),
+    );
+
+    assert.strictEqual(
+      error.detail,
+      "fatal: unable to access 'https://github.com/octocat/t3code.git': Could not resolve host: github.com",
+    );
+  }),
+);
+
 it.effect("strips embedded credentials from the remote URL it reports", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

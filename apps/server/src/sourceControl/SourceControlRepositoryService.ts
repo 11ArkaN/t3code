@@ -138,9 +138,12 @@ function redactRemoteUrl(remoteUrl: string): string {
 // Userinfo may itself contain `@`; everything up to the last one before the
 // host boundary goes.
 const URL_WITH_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
+// A query is a token, as in redactRemoteUrl. Git quotes the URL and appends a
+// `/`, so the query runs to the closing quote or whitespace.
+const URL_QUERY = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?'"]*)\?[^\s'"]*/gi;
 
 function redactUrlCredentials(text: string): string {
-  return text.replace(URL_WITH_USERINFO, "$1");
+  return text.replace(URL_WITH_USERINFO, "$1").replace(URL_QUERY, "$1");
 }
 
 /**
