@@ -1219,7 +1219,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
-    readonly compactionTitleByRunId: ReadonlyMap<RunId, string>;
+    readonly compactionLabelsByRunId: ReadonlyMap<RunId, { title: string; compacting: string }>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1376,6 +1376,8 @@ function renderFeedEntry(
       props.unsettledTurnId !== null &&
       entry.runId === props.unsettledTurnId &&
       item.status === "running";
+    const labels =
+      entry.runId === null ? undefined : props.compactionLabelsByRunId.get(entry.runId);
     const failure =
       item.type === "compaction" && item.status === "failed" ? item.summary?.trim() : undefined;
     return (
@@ -1383,10 +1385,9 @@ function renderFeedEntry(
         label={
           failure
             ? `${label} · ${failure}`
-            : compactionLabel(
-                label,
-                entry.runId === null ? undefined : props.compactionTitleByRunId.get(entry.runId),
-              )
+            : active && labels
+              ? labels.compacting
+              : compactionLabel(label, labels?.title)
         }
         icon={
           item.status === "failed" ? "exclamationmark.circle" : "arrow.down.right.and.arrow.up.left"
@@ -2545,22 +2546,29 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
-  const compactionTitleByRunId = useMemo(() => {
-    const titles = new Map<RunId, string>();
+  const compactionLabelsByRunId = useMemo(() => {
+    const labels = new Map<RunId, { title: string; compacting: string }>();
     for (const entry of props.feed) {
       const reason = entry.type === "message" ? idleCompactionOf(entry.message) : undefined;
       if (entry.type === "message" && entry.message.runId !== null && reason !== undefined) {
-        titles.set(entry.message.runId, IDLE_COMPACTION_TITLES[reason]);
+        labels.set(entry.message.runId, {
+          title: IDLE_COMPACTION_TITLES[reason],
+          compacting: IDLE_COMPACTING_LABELS[reason],
+        });
       } else if (entry.type === "activity-group" && entry.runId !== null) {
         for (const activity of entry.activities) {
           const age = activity.workEntry.questionAnswer
             ? claudeResumeCompactionAge(activity.workEntry.questionAnswer)
             : null;
-          if (age !== null) titles.set(entry.runId, `Context compacted after ${age} idle`);
+          if (age !== null)
+            labels.set(entry.runId, {
+              title: `Context compacted after ${age} idle`,
+              compacting: `Compacting after ${age} idle…`,
+            });
         }
       }
     }
-    return titles;
+    return labels;
   }, [props.feed]);
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
@@ -3005,7 +3013,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
-            compactionTitleByRunId,
+            compactionLabelsByRunId,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,

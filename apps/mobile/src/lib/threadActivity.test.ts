@@ -75,6 +75,45 @@ it("keeps historical plan detail accessible from its paged turn item", () => {
   expect(presented[2]).toMatchObject({ activities: [{ projectedItem: { item } }] });
 });
 
+it("shows a compact command as one mobile divider before, during, and after compaction", () => {
+  const startedAt = "2026-06-20T00:00:01.000Z";
+  const prompt = projected({ ...userMessage(), text: "/compact", idleCompaction: "onReturn" }, 0);
+  const latestRun = { runId, status: "running" as const, startedAt, completedAt: null };
+  const present = (items: OrchestrationV2ProjectedTurnItem[]) =>
+    deriveThreadFeedPresentation(
+      buildThreadFeed(items),
+      latestRun,
+      new Set(),
+      new Set(),
+      startedAt,
+    );
+
+  const waiting = present([prompt]);
+  expect(waiting.map((entry) => entry.type)).toEqual(["message"]);
+  expect(waiting[0]?.type === "message" ? waiting[0].message.idleCompaction : null).toBe(
+    "onReturn",
+  );
+  for (const status of ["running", "completed", "failed"] as const) {
+    const compaction = projected(
+      {
+        ...base("compaction", "2026-06-20T00:00:02.000Z", 1),
+        type: "compaction",
+        driver: ProviderDriverKind.make("claude"),
+        status,
+        beforeTokenCount: 100_000,
+        ...(status === "completed" ? { afterTokenCount: 20_000 } : {}),
+        ...(status === "failed" ? { summary: "Not enough messages to compact." } : {}),
+      },
+      1,
+    );
+    const rows = present([prompt, compaction]);
+    expect(rows.map((entry) => entry.type)).toEqual(["activity-group"]);
+    expect(
+      rows[0]?.type === "activity-group" ? rows[0].activities[0]?.projectedItem.item : null,
+    ).toMatchObject({ type: "compaction", status });
+  }
+});
+
 function base(id: string, updatedAt: string, ordinal: number) {
   const timestamp = DateTime.makeUnsafe(updatedAt);
   return {

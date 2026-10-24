@@ -1590,10 +1590,7 @@ export function deriveMessagesTimelineRows(input: {
   // A bare `/compact` turn is the compaction itself: one compaction row stands in for its prompt
   // and working indicator, from the moment the turn starts. Likewise an answered "compact before
   // continuing?" question folds into the compaction it asked for.
-  const compactionRuns = new Map<
-    RunId,
-    { reason: OrchestrationV2IdleCompaction | undefined; hasItem: boolean }
-  >();
+  const compactionRuns = new Map<RunId, OrchestrationV2IdleCompaction | undefined>();
   const compactedRunIds = new Set<RunId>();
   const resumeCompactionAgeByRunId = new Map<RunId, string>();
   for (const entry of timelineEntries) {
@@ -1602,15 +1599,10 @@ export function deriveMessagesTimelineRows(input: {
       entry.message.runId !== null &&
       isCompactionCommandMessage(entry.message)
     ) {
-      compactionRuns.set(entry.message.runId, {
-        reason: idleCompactionOf(entry.message),
-        hasItem: false,
-      });
+      compactionRuns.set(entry.message.runId, idleCompactionOf(entry.message));
     } else if (entry.kind === "work" && entry.entry.runId) {
       if (timelineEntryIsCompaction(entry)) {
         compactedRunIds.add(entry.entry.runId);
-        const run = compactionRuns.get(entry.entry.runId);
-        if (run) run.hasItem = true;
       }
       const age = entry.entry.questionAnswer
         ? claudeResumeCompactionAge(entry.entry.questionAnswer)
@@ -1620,7 +1612,7 @@ export function deriveMessagesTimelineRows(input: {
   }
   const compactionTitle = (runId: RunId | null | undefined) => {
     if (runId == null) return undefined;
-    const reason = compactionRuns.get(runId)?.reason;
+    const reason = compactionRuns.get(runId);
     if (reason !== undefined) return IDLE_COMPACTION_TITLES[reason];
     const age = resumeCompactionAgeByRunId.get(runId);
     return age ? `Context compacted after ${age} idle` : undefined;
@@ -1643,7 +1635,7 @@ export function deriveMessagesTimelineRows(input: {
       : null;
   const compactingLabel = (() => {
     if (activeCompactionRunId === null) return undefined;
-    const reason = compactionRuns.get(activeCompactionRunId)?.reason;
+    const reason = compactionRuns.get(activeCompactionRunId);
     if (reason !== undefined) return IDLE_COMPACTING_LABELS[reason];
     const age = resumeCompactionAgeByRunId.get(activeCompactionRunId);
     return age ? `Compacting after ${age} idle…` : "Compacting context…";
@@ -1738,8 +1730,7 @@ export function deriveMessagesTimelineRows(input: {
       if (active && timelineEntry.entry.runId === activeCompactionRunId) continue;
       const compaction = timelineEntry.entry.structuredPayload;
       const compactionRunId = timelineEntry.entry.runId;
-      const compactionRun =
-        compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
+      const compactionRun = compactionRunId != null && compactionRuns.has(compactionRunId);
       const title = compactionTitle(compactionRunId);
       const failed = compaction?.type === "compaction" && compaction.status === "failed";
       const failure = failed ? compaction.summary?.trim() || undefined : undefined;
@@ -1980,11 +1971,9 @@ export function deriveMessagesTimelineRows(input: {
 
     const compactionRunId = timelineEntry.message.runId;
     const compactionRun =
-      compactionRunId !== null && isCompactionCommandMessage(timelineEntry.message)
-        ? compactionRuns.get(compactionRunId)
-        : undefined;
+      compactionRunId !== null && isCompactionCommandMessage(timelineEntry.message);
     if (compactionRun) {
-      if (!compactionRun.hasItem && compactionRunId !== activeCompactionRunId) {
+      if (!compactedRunIds.has(compactionRunId) && compactionRunId !== activeCompactionRunId) {
         nextRows.push({
           kind: "context-compaction",
           id: `compaction:${compactionRunId}`,
@@ -1992,7 +1981,6 @@ export function deriveMessagesTimelineRows(input: {
           label: "Context compaction",
           tokenCounts: null,
           active: false,
-          ...(compactionRun.reason ? { title: IDLE_COMPACTION_TITLES[compactionRun.reason] } : {}),
         });
       }
       continue;

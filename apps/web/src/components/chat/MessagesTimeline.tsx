@@ -1341,6 +1341,10 @@ function ContextCompactionTimelineRow({
 }: {
   row: Extract<TimelineRow, { kind: "context-compaction" }>;
 }) {
+  const label =
+    row.title && row.label.startsWith("Context compacted")
+      ? row.title + row.label.slice("Context compacted".length)
+      : row.label;
   const content = (
     <span className="flex min-w-0 items-center gap-1.5">
       {row.failed ? (
@@ -1355,7 +1359,7 @@ function ContextCompactionTimelineRow({
           {row.tokenCounts.after} tokens
         </>
       ) : (
-        row.label
+        label
       )}
       {row.failure ? (
         <span className="min-w-0 truncate opacity-80">&middot; {row.failure}</span>
@@ -1365,13 +1369,7 @@ function ContextCompactionTimelineRow({
   return (
     <div
       role="separator"
-      aria-label={
-        row.title && row.tokenCounts
-          ? `${row.title} ${row.tokenCounts.before} → ${row.tokenCounts.after} tokens`
-          : row.failure
-            ? `${row.label}: ${row.failure}`
-            : row.label
-      }
+      aria-label={row.failure ? `${label}: ${row.failure}` : label}
       className={cn(
         "mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-xs",
         row.failed ? "text-destructive" : "text-muted-foreground",

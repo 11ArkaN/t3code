@@ -354,7 +354,7 @@ export function isContextCompactionActivityGroup(entry: ThreadFeedActivityGroup)
   );
 }
 
-export function isResumeCompactionAnswerGroup(entry: ThreadFeedActivityGroup): boolean {
+function isResumeCompactionAnswerGroup(entry: ThreadFeedActivityGroup): boolean {
   return entry.activities.every((activity) => {
     const answer = activity.workEntry.questionAnswer;
     return answer !== undefined && claudeResumeCompactionAge(answer) !== null;
