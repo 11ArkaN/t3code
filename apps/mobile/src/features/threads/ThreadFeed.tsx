@@ -30,7 +30,6 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import {
   IDLE_COMPACTING_LABELS,
-  IDLE_COMPACTION_TITLES,
   resolveUserMessagePresentation,
 } from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -52,7 +51,6 @@ import {
   type ScheduledTaskId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
-import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref, resolveThreadLinkRef } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -203,6 +201,7 @@ import {
 } from "../../lib/markdownLinks";
 import {
   createThreadFeedCache,
+  threadFeedCompactionLabels,
   failedFeedRunIds,
   deriveThreadFeedPresentation,
   threadFeedRunIsUnsettled,
@@ -1222,7 +1221,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
-    readonly compactionLabelsByRunId: ReadonlyMap<RunId, { title: string; compacting: string }>;
+    readonly compactionLabelsByEntryId: ReadonlyMap<string, { title: string; compacting: string }>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1379,8 +1378,7 @@ function renderFeedEntry(
       props.unsettledTurnId !== null &&
       entry.runId === props.unsettledTurnId &&
       item.status === "running";
-    const labels =
-      entry.runId === null ? undefined : props.compactionLabelsByRunId.get(entry.runId);
+    const labels = props.compactionLabelsByEntryId.get(entry.id);
     const failure =
       item.type === "compaction" && item.status === "failed" ? item.summary?.trim() : undefined;
     return (
@@ -2549,30 +2547,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
-  const compactionLabelsByRunId = useMemo(() => {
-    const labels = new Map<RunId, { title: string; compacting: string }>();
-    for (const entry of props.feed) {
-      const reason = entry.type === "message" ? idleCompactionOf(entry.message) : undefined;
-      if (entry.type === "message" && entry.message.runId !== null && reason !== undefined) {
-        labels.set(entry.message.runId, {
-          title: IDLE_COMPACTION_TITLES[reason],
-          compacting: IDLE_COMPACTING_LABELS[reason],
-        });
-      } else if (entry.type === "activity-group" && entry.runId !== null) {
-        for (const activity of entry.activities) {
-          const age = activity.workEntry.questionAnswer
-            ? claudeResumeCompactionAge(activity.workEntry.questionAnswer)
-            : null;
-          if (age !== null)
-            labels.set(entry.runId, {
-              title: `Context compacted after ${age} idle`,
-              compacting: `Compacting after ${age} idle…`,
-            });
-        }
-      }
-    }
-    return labels;
-  }, [props.feed]);
+  const compactionLabelsByEntryId = useMemo(
+    () => threadFeedCompactionLabels(props.feed),
+    [props.feed],
+  );
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
@@ -3016,7 +2994,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
-            compactionLabelsByRunId,
+            compactionLabelsByEntryId,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,

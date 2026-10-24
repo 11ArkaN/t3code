@@ -24,6 +24,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildThreadFeed,
+  threadFeedCompactionLabels,
   createThreadFeedCache,
   deriveThreadFeedPresentation,
   type ThreadFeedCache,
@@ -111,6 +112,60 @@ it("shows a compact command as one mobile divider before, during, and after comp
     expect(
       rows[0]?.type === "activity-group" ? rows[0].activities[0]?.projectedItem.item : null,
     ).toMatchObject({ type: "compaction", status });
+  }
+});
+
+it("binds a persisted resume answer only to the next compaction in its run", () => {
+  const requestId = RuntimeRequestId.make("resume-compaction");
+  const question = projected(
+    {
+      ...base("resume-question", "2026-06-20T00:00:02.000Z", 1),
+      type: "user_input_request",
+      requestId,
+      questions: [],
+      questionAnswer: {
+        requestId,
+        questionTextById: {
+          resume:
+            "This session is 2h 10m old and uses 200,000 tokens. Compact it before continuing?",
+        },
+        answers: { resume: "Compact and continue" },
+        attachmentsByQuestionId: {},
+      },
+    },
+    1,
+  );
+  const compaction = (id: string, position: number, status: "running" | "completed") =>
+    projected(
+      {
+        ...base(id, `2026-06-20T00:00:0${position + 1}.000Z`, position),
+        type: "compaction",
+        driver: ProviderDriverKind.make("claude"),
+        status,
+        beforeTokenCount: 200_000,
+      },
+      position,
+    );
+  for (const status of ["running", "completed"] as const) {
+    // Rebuild from persisted items, without a live question or prior feed cache.
+    const feed = buildThreadFeed([
+      projected(userMessage(), 0),
+      question,
+      compaction("resume-compact", 2, "completed"),
+      compaction("auto-compact", 3, status),
+    ]);
+    const labels = threadFeedCompactionLabels(feed);
+    const compactRows = feed.filter(
+      (entry) =>
+        entry.type === "activity-group" &&
+        entry.activities[0]?.projectedItem.item.type === "compaction",
+    );
+    expect(compactRows).toHaveLength(2);
+    expect(labels.get(compactRows[0]!.id)).toEqual({
+      title: "Context compacted after 2h 10m idle",
+      compacting: "Compacting after 2h 10m idle…",
+    });
+    expect(labels.get(compactRows[1]!.id)).toBeUndefined();
   }
 });
 
