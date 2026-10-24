@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   openInApp: true,
   threadExists: true,
   repositoryKey: "github.com/pingdotgg/t3code",
+  provider: "github",
   projectEnvironmentId: "local",
   worktreePath: null as string | null,
   previewCache: new Map<string, Promise<AtomCommandResult<ReviewDiffPreviewResult, unknown>>>(),
@@ -88,7 +89,7 @@ function project() {
     environmentId: EnvironmentId.make(state.projectEnvironmentId),
     workspaceRoot: "/workspace/project",
     repositoryIdentity: {
-      provider: "github",
+      provider: state.provider,
       canonicalKey: state.repositoryKey,
       displayName: state.repositoryKey.split("/").slice(1).join("/"),
       locator: { remoteUrl: `https://${state.repositoryKey}.git` },
@@ -142,6 +143,7 @@ beforeEach(() => {
   state.openInApp = true;
   state.threadExists = true;
   state.repositoryKey = "github.com/pingdotgg/t3code";
+  state.provider = "github";
   state.projectEnvironmentId = "local";
   state.worktreePath = null;
   state.previewCache.clear();
@@ -204,11 +206,13 @@ describe("commit link opening", () => {
     "preference off",
     "missing thread",
     "wrong repository",
+    "wrong provider",
     "wrong host",
     "wrong environment",
   ])("falls back without changing either panel for %s", (scenario) => {
     if (scenario === "preference off") state.openInApp = false;
     if (scenario === "missing thread") state.threadExists = false;
+    if (scenario === "wrong provider") state.provider = "gitlab";
     if (scenario === "wrong repository") state.repositoryKey = "github.com/pingdotgg/other";
     if (scenario === "wrong host") state.repositoryKey = "github.internal/pingdotgg/t3code";
     if (scenario === "wrong environment") state.projectEnvironmentId = "remote";
@@ -279,7 +283,7 @@ describe("commit link opening", () => {
     },
   );
 
-  it.each(["missing", "off branch", "no commit source"])(
+  it.each(["missing", "off branch", "no commit source", "different commit source"])(
     "opens the original %s commit URL externally without changing the current panel",
     async (scenario) => {
       const preview = deferred<AtomCommandResult<ReviewDiffPreviewResult, unknown>>();
@@ -299,8 +303,12 @@ describe("commit link opening", () => {
       expect(useDiffPanelStore.getState().byThreadKey).toBe(selection);
 
       preview.resolve(
-        scenario === "no commit source"
-          ? AsyncResult.success({ ...previewResult(), sources: [] })
+        scenario === "no commit source" || scenario === "different commit source"
+          ? AsyncResult.success(
+              scenario === "no commit source"
+                ? { ...previewResult(), sources: [] }
+                : previewResult("6".repeat(40)),
+            )
           : AsyncResult.failure(
               Cause.fail(
                 new GitCommandError({

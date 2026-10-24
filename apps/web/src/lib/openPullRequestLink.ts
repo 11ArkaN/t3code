@@ -1,15 +1,16 @@
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent } from "react";
 
-import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import {
-  parseChangeRequestUrl,
-  parseCommitUrl,
+  findProjectForChangeRequest,
+  resolvePullRequestPreviewTarget,
+} from "@t3tools/client-runtime/change-request-links";
+import {
+  sourceControlClients,
   type ChangeRequestLink,
-} from "@t3tools/shared/changeRequestUrl";
-import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+} from "@t3tools/client-runtime/source-control-clients";
 
 import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
@@ -29,58 +30,7 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { reviewEnvironment } from "../state/review";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
-export {
-  parseChangeRequestUrl,
-  type ChangeRequestLink,
-  gitHubCommitBrowserUrl,
-  gitHubPullRequestBrowserUrl,
-  pullRequestCandidateUrlFromReferenceAutolink,
-  matchesLinkedPullRequestUrl,
-  changeRequestRepositoryUrl,
-} from "@t3tools/shared/changeRequestUrl";
-
-export function findProjectForChangeRequest(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): EnvironmentProject | undefined {
-  return projects.find((project) => {
-    const identity = project.repositoryIdentity;
-    return (
-      identity?.provider !== undefined &&
-      sourceControlClients.get(identity.provider).isChangeRequestInRepository(identity, link)
-    );
-  });
-}
-
-export function resolvePullRequestPreviewTarget({
-  environmentId,
-  projects,
-  pullRequestsEnabled,
-  url,
-}: {
-  environmentId: EnvironmentId | null;
-  projects: ReadonlyArray<EnvironmentProject>;
-  pullRequestsEnabled: boolean;
-  url: string;
-}): { environmentId: EnvironmentId; input: PullRequestRef } | null {
-  if (!pullRequestsEnabled || environmentId === null) return null;
-  const parsed = parseChangeRequestUrl(url);
-  if (parsed === null) return null;
-  const project = findProjectForChangeRequest(
-    projects.filter((candidate) => candidate.environmentId === environmentId),
-    parsed,
-  );
-  if (project === undefined) return null;
-  return {
-    environmentId,
-    input: {
-      projectId: project.id,
-      host: parsed.authority ?? parsed.host,
-      repository: sourceControlRepositorySelector(project.repositoryIdentity) ?? parsed.repository,
-      number: parsed.number,
-    },
-  };
-}
+export { projectCommitUrl as gitHubCommitBrowserUrl } from "@t3tools/client-runtime/change-request-links";
 
 export function usePullRequestPreviewTarget(environmentId: EnvironmentId | null, url: string) {
   const projects = useProjects();
@@ -108,7 +58,7 @@ export function findProjectOnChangeRequestHost(
   });
 }
 
-export function shouldOpenPullRequestExternally(
+function shouldOpenPullRequestExternally(
   event: Pick<MouseEvent<HTMLElement>, "metaKey" | "ctrlKey"> &
     Partial<Pick<MouseEvent<HTMLElement>, "button">>,
 ): boolean {
@@ -146,8 +96,8 @@ export function useOpenChangeRequestLink(
     const allProjects = readProjects();
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
-    const commit = parseCommitUrl(targetUrl);
-    if (commit !== null) {
+    const commit = sourceControlClients.parseCommitUrl(targetUrl)?.link;
+    if (commit !== undefined) {
       const thread = resolvedThreadRef ? readThreadShell(resolvedThreadRef) : null;
       if (!thread || !resolvedThreadRef) return false;
       const project = readProject({
@@ -206,8 +156,8 @@ export function useOpenChangeRequestLink(
         .catch((error: unknown) => console.error(error));
       return true;
     }
-    const parsed = parseChangeRequestUrl(targetUrl);
-    if (parsed === null) return false;
+    const parsed = sourceControlClients.parseChangeRequestUrl(targetUrl)?.link;
+    if (parsed === undefined) return false;
     const reads = (environmentId: string) =>
       serverConfigs.get(environmentId as EnvironmentId)?.environment.capabilities.pullRequests ===
       true;
@@ -242,7 +192,8 @@ export function useOpenChangeRequestLink(
     const repository =
       serverConfigs.get(project.environmentId)?.environment.capabilities.threadPullRequests === true
         ? parsed.repository
-        : (sourceControlRepositorySelector(project.repositoryIdentity) ?? parsed.repository);
+        : (sourceControlClients.repositorySelector(project.repositoryIdentity) ??
+          parsed.repository);
     event.preventDefault();
     event.stopPropagation();
     if (resolvedPanelRef) {
