@@ -562,6 +562,12 @@ describe("deriveMessagesTimelineRows", () => {
         }),
         isWorking,
         runningRunId: fixture.runId,
+        latestRun: {
+          runId: fixture.runId,
+          status: isWorking ? "running" : "completed",
+          startedAt: fixture.time(5),
+          completedAt: isWorking ? null : fixture.time(9),
+        },
         activeTurnStartedAt: fixture.time(5),
         turnDiffSummaries: [],
         supportsConversationRollback: false,
@@ -604,6 +610,25 @@ describe("deriveMessagesTimelineRows", () => {
         },
       ]);
       expect(liveRows[0]?.kind === "context-compaction" ? liveRows[0].title : null).toBe(title);
+      const terminalCompaction = {
+        ...compaction,
+        item: { ...compaction.item, status: "completed" as const, afterTokenCount: 19_000 },
+      };
+      const finishingRows = rowsFor([prompt, terminalCompaction]);
+      const finishingLiveRows = finishingRows.slice(
+        finishingRows.findIndex((row) => row.id.includes("history-assistant")) + 1,
+      );
+      expect(finishingLiveRows).toEqual(liveRows);
+      const continuingRows = rowsFor([
+        prompt,
+        terminalCompaction,
+        { ...liveAssistant, item: { ...liveAssistant.item, id: TurnItemId.make("continued") } },
+      ]);
+      expect(continuingRows.filter((row) => row.kind === "context-compaction")).toHaveLength(1);
+      expect(continuingRows.filter((row) => row.kind === "working")).toMatchObject([
+        { kind: "working" },
+      ]);
+      expect(continuingRows.some((row) => row.kind === "working" && row.compacting)).toBe(false);
       const retries = rowsFor(
         [
           prompt,

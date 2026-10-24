@@ -1624,22 +1624,36 @@ export function deriveMessagesTimelineRows(input: {
     const age = resumeCompactionAgeByEntryId.get(entryId);
     return age ? `Context compacted after ${age} idle` : undefined;
   };
-  const activeRunIsCompaction =
-    input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
   const activeCompactionEntry = timelineEntries.find(
     (entry): entry is Extract<TimelineEntry, { kind: "work" }> =>
       timelineEntryIsCompaction(entry) &&
       entry.kind === "work" &&
       workEntryIsInActiveRun(entry.entry),
   );
+  const activeRunIsCompaction =
+    input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
+  // The item can finish before its run settles; only other work should keep activity visible.
+  const compactionRunFinished =
+    activeRunIsCompaction &&
+    compactedRunIds.has(unsettledRunId) &&
+    activeCompactionEntry === undefined;
+  const compactionOnlyRunFinished =
+    compactionRunFinished &&
+    !timelineEntries.some(
+      (entry) =>
+        timelineEntryRunId(entry) === unsettledRunId &&
+        !timelineEntryIsCompaction(entry) &&
+        !(entry.kind === "message" && isCompactionCommandMessage(entry.message)),
+    );
   // A compaction T3 Code ran on its own, or one the turn exists for, owns the working row. A
   // provider's mid-turn compaction keeps its live divider: the working row is often off screen.
-  const activeCompactionRunId = activeRunIsCompaction
-    ? unsettledRunId
-    : activeCompactionEntry?.entry.runId != null &&
-        resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
-      ? activeCompactionEntry.entry.runId
-      : null;
+  const activeCompactionRunId =
+    activeRunIsCompaction && !compactionRunFinished
+      ? unsettledRunId
+      : activeCompactionEntry?.entry.runId != null &&
+          resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
+        ? activeCompactionEntry.entry.runId
+        : null;
   const compactingLabel = (() => {
     if (activeCompactionRunId === null) return undefined;
     const reason = compactionRuns.get(activeCompactionRunId);
@@ -1650,6 +1664,7 @@ export function deriveMessagesTimelineRows(input: {
     return age ? `Compacting after ${age} idle…` : "Compacting context…";
   })();
   const appendWorkingRow = () => {
+    if (compactionOnlyRunFinished) return;
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -1658,7 +1673,8 @@ export function deriveMessagesTimelineRows(input: {
     });
   };
   let hasActivityRow = false;
-  const hasActiveCompaction = activeCompactionEntry !== undefined || activeRunIsCompaction;
+  const hasActiveCompaction =
+    activeCompactionEntry !== undefined || (activeRunIsCompaction && !compactionRunFinished);
   const appendActiveWorkRows = () => {
     if (activeWorkRow === null) return;
     nextRows.push(activeWorkRow);
@@ -2086,6 +2102,7 @@ export function deriveMessagesTimelineRows(input: {
     input.latestRun?.turnEnded !== true &&
     !setupOwnsWorkingSlot &&
     !hasActiveCompaction &&
+    !compactionOnlyRunFinished &&
     (!hasActivityRow || latestToolFailed)
   ) {
     const failedGroupAnchor = latestToolFailed ? activeWorkAnchor : undefined;
