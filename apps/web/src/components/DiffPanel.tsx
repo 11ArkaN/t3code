@@ -759,6 +759,7 @@ export default function DiffPanel({
           <div
             className={cn(
               "flex min-w-0 max-w-full items-center",
+              selectedCommitSha === null && "shrink-0",
               selectedCommitSha !== null &&
                 "h-7 gap-1 rounded-md bg-secondary px-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/90 has-data-popup-open:bg-secondary/80 sm:h-6 sm:text-xs",
             )}
