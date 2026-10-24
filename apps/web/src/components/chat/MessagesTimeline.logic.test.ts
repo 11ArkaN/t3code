@@ -562,10 +562,59 @@ describe("deriveMessagesTimelineRows", () => {
           id: `compaction:${fixture.runId}`,
           label: "Compacting context",
           active: true,
-          automatic: true,
+          note: "Automatic before cache expiry",
         },
       ]);
     }
+  });
+
+  it("folds an answered compact-on-return question into its compaction row", () => {
+    const fixture = makeStreamingTimelineFixture();
+    const [history0, history1, history2, liveUser, liveWork, liveAssistant] =
+      fixture.visibleTurnItems;
+    if (liveWork?.item.type !== "dynamic_tool" || liveAssistant?.item.type !== "assistant_message")
+      throw new Error("Expected live fixture items");
+    const { toolName: _toolName, input: _input, output: _output, ...workBase } = liveWork.item;
+    const question =
+      "This session is 1h 5m old and uses 412,000 tokens. Compact it before continuing?";
+    const requestId = RuntimeRequestId.make("resume-compaction");
+    const answered = {
+      ...liveWork,
+      item: {
+        ...workBase,
+        type: "user_input_request" as const,
+        requestId,
+        questions: [],
+        questionAnswer: {
+          requestId,
+          questionTextById: { resume: question },
+          answers: { resume: "Compact and continue" },
+          attachmentsByQuestionId: {},
+        },
+      },
+    };
+    const compaction = {
+      ...liveAssistant,
+      item: {
+        ...liveAssistant.item,
+        type: "compaction" as const,
+        status: "completed" as const,
+        driver: null,
+      },
+    };
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+        visibleTurnItems: [history0!, history1!, history2!, liveUser!, answered, compaction],
+        optimisticMessages: [],
+      }),
+      isWorking: false,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    });
+    const liveRows = rows.slice(rows.findIndex((row) => row.id.includes("live-user")) + 1);
+    expect(liveRows).toMatchObject([
+      { kind: "context-compaction", note: "On return after 1h 5m idle" },
+    ]);
   });
 
   it("only enables assistant copy for the terminal assistant message in a turn", () => {

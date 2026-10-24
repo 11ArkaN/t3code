@@ -8,6 +8,7 @@ import {
   collectAssistantCitations,
 } from "@t3tools/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
+import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
 import type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
 import {
@@ -589,8 +590,8 @@ type MessagesTimelineRowContent =
       label: string;
       tokenCounts: ReturnType<typeof contextCompactionTokenCounts>;
       active: boolean;
-      /** T3 Code compacted an idle thread on its own; absent for mid-turn and typed compactions. */
-      automatic?: boolean;
+      /** Why T3 Code compacted without being asked; absent for typed and provider compactions. */
+      note?: string;
     }
   | {
       kind: "message";
@@ -1577,8 +1578,11 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   // A bare `/compact` turn is the compaction itself: one compaction row stands in for its prompt
-  // and working indicator, from the moment the turn starts.
-  const compactionRuns = new Map<RunId, { automatic: boolean; hasItem: boolean }>();
+  // and working indicator, from the moment the turn starts. Likewise an answered "compact before
+  // continuing?" question folds into the compaction it asked for.
+  const compactionRuns = new Map<RunId, { note: string | undefined; hasItem: boolean }>();
+  const compactedRunIds = new Set<RunId>();
+  const resumeCompactionAgeByRunId = new Map<RunId, string>();
   for (const entry of timelineEntries) {
     if (
       entry.kind === "message" &&
@@ -1586,14 +1590,26 @@ export function deriveMessagesTimelineRows(input: {
       isCompactionCommandMessage(entry.message)
     ) {
       compactionRuns.set(entry.message.runId, {
-        automatic: isIdleCompactionMessage(entry.message),
+        note: isIdleCompactionMessage(entry.message) ? "Automatic before cache expiry" : undefined,
         hasItem: false,
       });
-    } else if (timelineEntryIsCompaction(entry) && entry.kind === "work" && entry.entry.runId) {
-      const run = compactionRuns.get(entry.entry.runId);
-      if (run) run.hasItem = true;
+    } else if (entry.kind === "work" && entry.entry.runId) {
+      if (timelineEntryIsCompaction(entry)) {
+        compactedRunIds.add(entry.entry.runId);
+        const run = compactionRuns.get(entry.entry.runId);
+        if (run) run.hasItem = true;
+      }
+      const age = entry.entry.questionAnswer
+        ? claudeResumeCompactionAge(entry.entry.questionAnswer)
+        : null;
+      if (age !== null) resumeCompactionAgeByRunId.set(entry.entry.runId, age);
     }
   }
+  const compactionNote = (runId: RunId | null | undefined) => {
+    if (runId == null) return undefined;
+    const age = resumeCompactionAgeByRunId.get(runId);
+    return compactionRuns.get(runId)?.note ?? (age ? `On return after ${age} idle` : undefined);
+  };
   const activeRunIsCompaction =
     input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
   const appendWorkingRow = () => {
@@ -1688,16 +1704,27 @@ export function deriveMessagesTimelineRows(input: {
       const compactionRunId = timelineEntry.entry.runId;
       const compactionRun =
         compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
+      const note = compactionNote(compactionRunId);
       nextRows.push({
         kind: "context-compaction",
         id: compactionRun ? `compaction:${compactionRunId}` : timelineEntry.id,
-        ...(compactionRun?.automatic ? { automatic: true } : {}),
+        ...(note ? { note } : {}),
         createdAt: timelineEntry.createdAt,
         label: timelineEntry.entry.label,
         tokenCounts:
           compaction?.type === "compaction" ? contextCompactionTokenCounts(compaction) : null,
         active,
       });
+      continue;
+    }
+
+    if (
+      timelineEntry.kind === "work" &&
+      timelineEntry.entry.runId != null &&
+      compactedRunIds.has(timelineEntry.entry.runId) &&
+      timelineEntry.entry.questionAnswer !== undefined &&
+      claudeResumeCompactionAge(timelineEntry.entry.questionAnswer) !== null
+    ) {
       continue;
     }
 
@@ -1926,7 +1953,7 @@ export function deriveMessagesTimelineRows(input: {
           label: active ? "Compacting context" : "Context compaction",
           tokenCounts: null,
           active,
-          ...(compactionRun.automatic ? { automatic: true } : {}),
+          ...(compactionRun.note ? { note: compactionRun.note } : {}),
         });
       }
       continue;
@@ -2322,7 +2349,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.createdAt === bc.createdAt &&
         a.label === bc.label &&
         a.active === bc.active &&
-        a.automatic === bc.automatic
+        a.note === bc.note
       );
     }
 

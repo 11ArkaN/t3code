@@ -1348,9 +1348,7 @@ function ContextCompactionTimelineRow({
       ) : (
         row.label
       )}
-      {row.automatic ? (
-        <span className="opacity-70">&middot; Automatic before cache expiry</span>
-      ) : null}
+      {row.note ? <span className="opacity-70">&middot; {row.note}</span> : null}
     </span>
   );
   return (

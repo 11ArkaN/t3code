@@ -49,6 +49,7 @@ import {
   type ScheduledTaskId,
 } from "@t3tools/contracts";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
+import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { parseThreadLinkHref, resolveThreadLinkRef } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -1189,11 +1190,9 @@ function ThreadAutomationMessageRow(props: {
   );
 }
 
-function AutomaticCompactionNote() {
-  return (
-    <Text className="font-t3-medium text-xs text-foreground-muted opacity-70">
-      · Automatic before cache expiry
-    </Text>
+function CompactionNote(props: { readonly note: string | undefined }) {
+  return props.note === undefined ? null : (
+    <Text className="font-t3-medium text-xs text-foreground-muted opacity-70">· {props.note}</Text>
   );
 }
 
@@ -1215,7 +1214,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
-    readonly automaticCompactionRunIds: ReadonlySet<RunId>;
+    readonly compactionNoteByRunId: ReadonlyMap<RunId, string>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1378,9 +1377,9 @@ function renderFeedEntry(
         iconColor={iconSubtleColor}
         active={active}
       >
-        {entry.runId !== null && props.automaticCompactionRunIds.has(entry.runId) ? (
-          <AutomaticCompactionNote />
-        ) : null}
+        <CompactionNote
+          note={entry.runId === null ? undefined : props.compactionNoteByRunId.get(entry.runId)}
+        />
       </ThreadContextDivider>
     );
   }
@@ -1429,7 +1428,9 @@ function renderFeedEntry(
           iconColor={iconSubtleColor}
           active={active}
         >
-          {isIdleCompactionMessage(message) ? <AutomaticCompactionNote /> : null}
+          <CompactionNote
+            note={isIdleCompactionMessage(message) ? "Automatic before cache expiry" : undefined}
+          />
         </ThreadContextDivider>
       );
     }
@@ -2527,19 +2528,26 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
-  const automaticCompactionRunIds = useMemo(
-    () =>
-      new Set(
-        props.feed.flatMap((entry) =>
-          entry.type === "message" &&
-          entry.message.runId !== null &&
-          isIdleCompactionMessage(entry.message)
-            ? [entry.message.runId]
-            : [],
-        ),
-      ),
-    [props.feed],
-  );
+  const compactionNoteByRunId = useMemo(() => {
+    const notes = new Map<RunId, string>();
+    for (const entry of props.feed) {
+      if (
+        entry.type === "message" &&
+        entry.message.runId !== null &&
+        isIdleCompactionMessage(entry.message)
+      ) {
+        notes.set(entry.message.runId, "Automatic before cache expiry");
+      } else if (entry.type === "activity-group" && entry.runId !== null) {
+        for (const activity of entry.activities) {
+          const age = activity.workEntry.questionAnswer
+            ? claudeResumeCompactionAge(activity.workEntry.questionAnswer)
+            : null;
+          if (age !== null) notes.set(entry.runId, `On return after ${age} idle`);
+        }
+      }
+    }
+    return notes;
+  }, [props.feed]);
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
   // even when the final message update arrives before the turn settles.
@@ -2983,7 +2991,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
-            automaticCompactionRunIds,
+            compactionNoteByRunId,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,
