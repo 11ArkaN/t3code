@@ -11,10 +11,10 @@ export const IDLE_COMPACTING_LABELS = {
   onReturn: "Compacting after being idle…",
 } satisfies Record<OrchestrationV2IdleCompaction, string>;
 
-/** Beside the finished compaction, saying why T3 Code compacted. */
-export const IDLE_COMPACTION_NOTES = {
-  beforeCacheExpires: "Automatic before cache expiry",
-  onReturn: "After being idle",
+/** Leads the finished compaction's token counts, in place of "Context compacted". */
+export const IDLE_COMPACTION_TITLES = {
+  beforeCacheExpires: "Context automatically compacted before cache expiry",
+  onReturn: "Context compacted after being idle",
 } satisfies Record<OrchestrationV2IdleCompaction, string>;
 
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;

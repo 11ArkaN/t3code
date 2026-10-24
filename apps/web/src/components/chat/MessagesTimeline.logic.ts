@@ -11,7 +11,7 @@ import { shallow } from "zustand/vanilla/shallow";
 import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
 import {
   IDLE_COMPACTING_LABELS,
-  IDLE_COMPACTION_NOTES,
+  IDLE_COMPACTION_TITLES,
 } from "@t3tools/client-runtime/user-message";
 import type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
@@ -597,8 +597,8 @@ type MessagesTimelineRowContent =
       label: string;
       tokenCounts: ReturnType<typeof contextCompactionTokenCounts>;
       active: boolean;
-      /** Why T3 Code compacted without being asked; absent for typed and provider compactions. */
-      note?: string;
+      /** Replaces "Context compacted" when T3 Code compacted without being asked. */
+      title?: string;
     }
   | {
       kind: "message";
@@ -1615,12 +1615,12 @@ export function deriveMessagesTimelineRows(input: {
       if (age !== null) resumeCompactionAgeByRunId.set(entry.entry.runId, age);
     }
   }
-  const compactionNote = (runId: RunId | null | undefined) => {
+  const compactionTitle = (runId: RunId | null | undefined) => {
     if (runId == null) return undefined;
     const reason = compactionRuns.get(runId)?.reason;
-    if (reason !== undefined) return IDLE_COMPACTION_NOTES[reason];
+    if (reason !== undefined) return IDLE_COMPACTION_TITLES[reason];
     const age = resumeCompactionAgeByRunId.get(runId);
-    return age ? `After ${age} idle` : undefined;
+    return age ? `Context compacted after ${age} idle` : undefined;
   };
   const activeRunIsCompaction =
     input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
@@ -1737,11 +1737,11 @@ export function deriveMessagesTimelineRows(input: {
       const compactionRunId = timelineEntry.entry.runId;
       const compactionRun =
         compactionRunId == null ? undefined : compactionRuns.get(compactionRunId);
-      const note = compactionNote(compactionRunId);
+      const title = compactionTitle(compactionRunId);
       nextRows.push({
         kind: "context-compaction",
         id: compactionRun ? `compaction:${compactionRunId}` : timelineEntry.id,
-        ...(note ? { note } : {}),
+        ...(title ? { title } : {}),
         createdAt: timelineEntry.createdAt,
         label: timelineEntry.entry.label,
         tokenCounts:
@@ -1985,7 +1985,7 @@ export function deriveMessagesTimelineRows(input: {
           label: "Context compaction",
           tokenCounts: null,
           active: false,
-          ...(compactionRun.reason ? { note: IDLE_COMPACTION_NOTES[compactionRun.reason] } : {}),
+          ...(compactionRun.reason ? { title: IDLE_COMPACTION_TITLES[compactionRun.reason] } : {}),
         });
       }
       continue;
@@ -2383,7 +2383,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.createdAt === bc.createdAt &&
         a.label === bc.label &&
         a.active === bc.active &&
-        a.note === bc.note
+        a.title === bc.title
       );
     }
 

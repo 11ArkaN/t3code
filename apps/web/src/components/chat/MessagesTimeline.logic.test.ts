@@ -618,7 +618,7 @@ describe("deriveMessagesTimelineRows", () => {
       { kind: "working", compacting: "Compacting after 1h 5m idle…" },
     ]);
     expect(liveRows("completed")).toMatchObject([
-      { kind: "context-compaction", note: "After 1h 5m idle" },
+      { kind: "context-compaction", title: "Context compacted after 1h 5m idle" },
     ]);
   });
 

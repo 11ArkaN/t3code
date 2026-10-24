@@ -1346,20 +1346,23 @@ function ContextCompactionTimelineRow({
       <Minimize2Icon aria-hidden="true" className="size-3" />
       {row.tokenCounts ? (
         <>
-          Context compacted {row.tokenCounts.before}
+          {row.title ?? "Context compacted"} {row.tokenCounts.before}
           <ArrowRightIcon aria-hidden="true" className="size-3" />
           {row.tokenCounts.after} tokens
         </>
       ) : (
         row.label
       )}
-      {row.note ? <span className="opacity-70">&middot; {row.note}</span> : null}
     </span>
   );
   return (
     <div
       role="separator"
-      aria-label={row.label}
+      aria-label={
+        row.title && row.tokenCounts
+          ? `${row.title} ${row.tokenCounts.before} → ${row.tokenCounts.after} tokens`
+          : row.label
+      }
       className="mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs"
     >
       <span className="h-px flex-1 bg-border/70" />

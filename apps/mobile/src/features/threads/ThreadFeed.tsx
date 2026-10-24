@@ -29,7 +29,8 @@ import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import {
-  IDLE_COMPACTION_NOTES,
+  IDLE_COMPACTING_LABELS,
+  IDLE_COMPACTION_TITLES,
   resolveUserMessagePresentation,
 } from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
@@ -1193,15 +1194,11 @@ function ThreadAutomationMessageRow(props: {
   );
 }
 
-function idleCompactionNote(message: Parameters<typeof idleCompactionOf>[0]) {
-  const reason = idleCompactionOf(message);
-  return reason === undefined ? undefined : IDLE_COMPACTION_NOTES[reason];
-}
-
-function CompactionNote(props: { readonly note: string | undefined }) {
-  return props.note === undefined ? null : (
-    <Text className="font-t3-medium text-xs text-foreground-muted opacity-70">· {props.note}</Text>
-  );
+/** Leads with why T3 Code compacted, when it did so without being asked. */
+function compactionLabel(label: string, title: string | undefined) {
+  return title !== undefined && label.startsWith("Context compacted")
+    ? title + label.slice("Context compacted".length)
+    : label;
 }
 
 function renderFeedEntry(
@@ -1222,7 +1219,7 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
-    readonly compactionNoteByRunId: ReadonlyMap<RunId, string>;
+    readonly compactionTitleByRunId: ReadonlyMap<RunId, string>;
     readonly failedRunIds: ReadonlySet<RunId>;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey?: string) => void;
@@ -1380,15 +1377,14 @@ function renderFeedEntry(
       entry.activities[0]!.projectedItem.item.status === "running";
     return (
       <ThreadContextDivider
-        label={label}
+        label={compactionLabel(
+          label,
+          entry.runId === null ? undefined : props.compactionTitleByRunId.get(entry.runId),
+        )}
         icon="arrow.down.right.and.arrow.up.left"
         iconColor={iconSubtleColor}
         active={active}
-      >
-        <CompactionNote
-          note={entry.runId === null ? undefined : props.compactionNoteByRunId.get(entry.runId)}
-        />
-      </ThreadContextDivider>
+      />
     );
   }
 
@@ -1429,15 +1425,20 @@ function renderFeedEntry(
     if (isCompactionCommandMessage(message)) {
       // Stands in for the compaction item until the provider reports it.
       const active = props.unsettledTurnId !== null && message.runId === props.unsettledTurnId;
+      const reason = idleCompactionOf(message);
       return (
         <ThreadContextDivider
-          label={active ? "Compacting context" : "Context compaction"}
+          label={
+            !active
+              ? "Context compaction"
+              : reason === undefined
+                ? "Compacting context"
+                : IDLE_COMPACTING_LABELS[reason]
+          }
           icon="arrow.down.right.and.arrow.up.left"
           iconColor={iconSubtleColor}
           active={active}
-        >
-          <CompactionNote note={idleCompactionNote(message)} />
-        </ThreadContextDivider>
+        />
       );
     }
     if (isUser && presentation.attribution === "automation") {
@@ -2534,22 +2535,22 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const reviewCommentColors = useReviewCommentColors();
   const unsettledTurnId = threadFeedRunIsUnsettled(props.latestRun) ? props.latestRun.runId : null;
-  const compactionNoteByRunId = useMemo(() => {
-    const notes = new Map<RunId, string>();
+  const compactionTitleByRunId = useMemo(() => {
+    const titles = new Map<RunId, string>();
     for (const entry of props.feed) {
-      const note = entry.type === "message" ? idleCompactionNote(entry.message) : undefined;
-      if (entry.type === "message" && entry.message.runId !== null && note !== undefined) {
-        notes.set(entry.message.runId, note);
+      const reason = entry.type === "message" ? idleCompactionOf(entry.message) : undefined;
+      if (entry.type === "message" && entry.message.runId !== null && reason !== undefined) {
+        titles.set(entry.message.runId, IDLE_COMPACTION_TITLES[reason]);
       } else if (entry.type === "activity-group" && entry.runId !== null) {
         for (const activity of entry.activities) {
           const age = activity.workEntry.questionAnswer
             ? claudeResumeCompactionAge(activity.workEntry.questionAnswer)
             : null;
-          if (age !== null) notes.set(entry.runId, `After ${age} idle`);
+          if (age !== null) titles.set(entry.runId, `Context compacted after ${age} idle`);
         }
       }
     }
-    return notes;
+    return titles;
   }, [props.feed]);
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Include turn completion so unchanged message rows reveal their footer and spacing
@@ -2994,7 +2995,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
-            compactionNoteByRunId,
+            compactionTitleByRunId,
             failedRunIds,
             onCopyWorkRow,
             onToggleWorkGroup,
