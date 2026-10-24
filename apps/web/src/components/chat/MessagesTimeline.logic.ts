@@ -1592,7 +1592,8 @@ export function deriveMessagesTimelineRows(input: {
   // continuing?" question folds into the compaction it asked for.
   const compactionRuns = new Map<RunId, OrchestrationV2IdleCompaction | undefined>();
   const compactedRunIds = new Set<RunId>();
-  const resumeCompactionAgeByRunId = new Map<RunId, string>();
+  const pendingResumeCompactionAgeByRunId = new Map<RunId, string>();
+  const resumeCompactionAgeByEntryId = new Map<string, string>();
   for (const entry of timelineEntries) {
     if (
       entry.kind === "message" &&
@@ -1603,18 +1604,23 @@ export function deriveMessagesTimelineRows(input: {
     } else if (entry.kind === "work" && entry.entry.runId) {
       if (timelineEntryIsCompaction(entry)) {
         compactedRunIds.add(entry.entry.runId);
+        const age = pendingResumeCompactionAgeByRunId.get(entry.entry.runId);
+        if (age !== undefined) {
+          resumeCompactionAgeByEntryId.set(entry.id, age);
+          pendingResumeCompactionAgeByRunId.delete(entry.entry.runId);
+        }
       }
       const age = entry.entry.questionAnswer
         ? claudeResumeCompactionAge(entry.entry.questionAnswer)
         : null;
-      if (age !== null) resumeCompactionAgeByRunId.set(entry.entry.runId, age);
+      if (age !== null) pendingResumeCompactionAgeByRunId.set(entry.entry.runId, age);
     }
   }
-  const compactionTitle = (runId: RunId | null | undefined) => {
+  const compactionTitle = (runId: RunId | null | undefined, entryId: string) => {
     if (runId == null) return undefined;
     const reason = compactionRuns.get(runId);
     if (reason !== undefined) return IDLE_COMPACTION_TITLES[reason];
-    const age = resumeCompactionAgeByRunId.get(runId);
+    const age = resumeCompactionAgeByEntryId.get(entryId);
     return age ? `Context compacted after ${age} idle` : undefined;
   };
   const activeRunIsCompaction =
@@ -1630,14 +1636,16 @@ export function deriveMessagesTimelineRows(input: {
   const activeCompactionRunId = activeRunIsCompaction
     ? unsettledRunId
     : activeCompactionEntry?.entry.runId != null &&
-        resumeCompactionAgeByRunId.has(activeCompactionEntry.entry.runId)
+        resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
       ? activeCompactionEntry.entry.runId
       : null;
   const compactingLabel = (() => {
     if (activeCompactionRunId === null) return undefined;
     const reason = compactionRuns.get(activeCompactionRunId);
     if (reason !== undefined) return IDLE_COMPACTING_LABELS[reason];
-    const age = resumeCompactionAgeByRunId.get(activeCompactionRunId);
+    const age = activeCompactionEntry
+      ? resumeCompactionAgeByEntryId.get(activeCompactionEntry.id)
+      : undefined;
     return age ? `Compacting after ${age} idle…` : "Compacting context…";
   })();
   const appendWorkingRow = () => {
@@ -1727,16 +1735,20 @@ export function deriveMessagesTimelineRows(input: {
       timelineEntry.entry.sourceActivityKind === "context-compaction"
     ) {
       const active = workEntryIsInActiveRun(timelineEntry.entry);
-      if (active && timelineEntry.entry.runId === activeCompactionRunId) continue;
+      if (
+        active &&
+        activeCompactionRunId !== null &&
+        timelineEntry.entry.runId === activeCompactionRunId
+      )
+        continue;
       const compaction = timelineEntry.entry.structuredPayload;
       const compactionRunId = timelineEntry.entry.runId;
-      const compactionRun = compactionRunId != null && compactionRuns.has(compactionRunId);
-      const title = compactionTitle(compactionRunId);
+      const title = compactionTitle(compactionRunId, timelineEntry.id);
       const failed = compaction?.type === "compaction" && compaction.status === "failed";
       const failure = failed ? compaction.summary?.trim() || undefined : undefined;
       nextRows.push({
         kind: "context-compaction",
-        id: compactionRun ? `compaction:${compactionRunId}` : timelineEntry.id,
+        id: timelineEntry.id,
         ...(title ? { title } : {}),
         ...(failed ? { failed: true } : {}),
         ...(failure ? { failure } : {}),
