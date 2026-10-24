@@ -28,7 +28,10 @@ import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
-import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
+import {
+  IDLE_COMPACTION_NOTES,
+  resolveUserMessagePresentation,
+} from "@t3tools/client-runtime/user-message";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
@@ -36,7 +39,7 @@ import type { WorkflowOpening } from "@t3tools/client-runtime/state/subagentRunt
 import {
   AuthFilesystemReadScope,
   isCompactionCommandMessage,
-  isIdleCompactionMessage,
+  idleCompactionOf,
   type OrchestrationMessageContext,
   ThreadId,
   type ChatAttachment,
@@ -1190,6 +1193,11 @@ function ThreadAutomationMessageRow(props: {
   );
 }
 
+function idleCompactionNote(message: Parameters<typeof idleCompactionOf>[0]) {
+  const reason = idleCompactionOf(message);
+  return reason === undefined ? undefined : IDLE_COMPACTION_NOTES[reason];
+}
+
 function CompactionNote(props: { readonly note: string | undefined }) {
   return props.note === undefined ? null : (
     <Text className="font-t3-medium text-xs text-foreground-muted opacity-70">· {props.note}</Text>
@@ -1428,9 +1436,7 @@ function renderFeedEntry(
           iconColor={iconSubtleColor}
           active={active}
         >
-          <CompactionNote
-            note={isIdleCompactionMessage(message) ? "Automatic before cache expiry" : undefined}
-          />
+          <CompactionNote note={idleCompactionNote(message)} />
         </ThreadContextDivider>
       );
     }
@@ -2531,18 +2537,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const compactionNoteByRunId = useMemo(() => {
     const notes = new Map<RunId, string>();
     for (const entry of props.feed) {
-      if (
-        entry.type === "message" &&
-        entry.message.runId !== null &&
-        isIdleCompactionMessage(entry.message)
-      ) {
-        notes.set(entry.message.runId, "Automatic before cache expiry");
+      const note = entry.type === "message" ? idleCompactionNote(entry.message) : undefined;
+      if (entry.type === "message" && entry.message.runId !== null && note !== undefined) {
+        notes.set(entry.message.runId, note);
       } else if (entry.type === "activity-group" && entry.runId !== null) {
         for (const activity of entry.activities) {
           const age = activity.workEntry.questionAnswer
             ? claudeResumeCompactionAge(activity.workEntry.questionAnswer)
             : null;
-          if (age !== null) notes.set(entry.runId, `On return after ${age} idle`);
+          if (age !== null) notes.set(entry.runId, `After ${age} idle`);
         }
       }
     }

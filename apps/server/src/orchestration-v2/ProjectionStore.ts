@@ -43,7 +43,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   IDLE_COMPACTION_TEXT,
-  isIdleCompactionMessage,
+  idleCompactionOf,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
@@ -1640,7 +1640,8 @@ export function threadShellFromProjection(
     latestRunSilent:
       latestRun != null &&
       projection.messages.some(
-        (message) => message.id === latestRun.userMessageId && isIdleCompactionMessage(message),
+        (message) =>
+          message.id === latestRun.userMessageId && idleCompactionOf(message) !== undefined,
       ),
     activeRunId: activeRun?.id ?? null,
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
@@ -5695,14 +5696,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE stop_request.thread_id = t.thread_id AND stop_request.run_id = presented.run_id
                   AND stop_request.type = 'run_interrupt_request'
               ) AS latest_run_stop_requested,
-              -- Mirrors isIdleCompactionMessage.
+              -- Mirrors idleCompactionOf.
               EXISTS (
                 SELECT 1 FROM orchestration_v2_projection_messages prompt
                 WHERE prompt.message_id = json_extract(presented.payload_json, '$.userMessageId')
                   AND prompt.role = 'user'
-                  AND json_extract(prompt.payload_json, '$.createdBy') = 'agent'
-                  AND json_extract(prompt.payload_json, '$.creationSource') = 'server'
                   AND json_extract(prompt.payload_json, '$.text') = ${IDLE_COMPACTION_TEXT}
+                  AND (
+                    json_extract(prompt.payload_json, '$.idleCompaction') IS NOT NULL
+                    OR (
+                      json_extract(prompt.payload_json, '$.createdBy') = 'agent'
+                      AND json_extract(prompt.payload_json, '$.creationSource') = 'server'
+                    )
+                  )
               ) AS latest_run_silent,
               active.run_id AS active_run_id,
               active.status AS active_run_status,

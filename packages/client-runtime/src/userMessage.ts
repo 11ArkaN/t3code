@@ -1,8 +1,21 @@
 import {
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2IdleCompaction,
   ScheduledTaskId,
 } from "@t3tools/contracts";
+
+/** The working row while T3 Code's own compaction runs. */
+export const IDLE_COMPACTING_LABELS = {
+  beforeCacheExpires: "Compacting before the cache expires…",
+  onReturn: "Compacting after being idle…",
+} satisfies Record<OrchestrationV2IdleCompaction, string>;
+
+/** Beside the finished compaction, saying why T3 Code compacted. */
+export const IDLE_COMPACTION_NOTES = {
+  beforeCacheExpires: "Automatic before cache expiry",
+  onReturn: "After being idle",
+} satisfies Record<OrchestrationV2IdleCompaction, string>;
 
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;
 const LEGACY_AUTOMATION_MESSAGE_ID = /^scheduled-task-message:(.+):\d+:(?:scheduled|manual)$/;

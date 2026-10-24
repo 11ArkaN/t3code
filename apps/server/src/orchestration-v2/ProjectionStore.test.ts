@@ -2880,11 +2880,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
   );
 
   it.effect.each([
-    ["T3 Code's idle compaction", "agent", "server", true],
-    ["a typed /compact", "user", "web", false],
+    ["T3 Code's idle compaction", "agent", "server", undefined, true],
+    ["compacting on return", "user", "web", "onReturn", true],
+    ["a typed /compact", "user", "mobile", undefined, false],
   ] as const)(
     "marks the shell's latest run silent only for %s",
-    ([, createdBy, creationSource, silent]) =>
+    ([, createdBy, creationSource, idleCompaction, silent]) =>
       Effect.gen(function* () {
         const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
         const now = yield* DateTime.now;
@@ -2928,6 +2929,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           payload: {
             createdBy,
             creationSource,
+            ...(idleCompaction === undefined ? {} : { idleCompaction }),
             id: messageId,
             threadId,
             runId,

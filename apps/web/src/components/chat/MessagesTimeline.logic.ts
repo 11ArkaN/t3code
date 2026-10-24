@@ -9,6 +9,10 @@ import {
 } from "@t3tools/shared/assistantCitations";
 import { shallow } from "zustand/vanilla/shallow";
 import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
+import {
+  IDLE_COMPACTING_LABELS,
+  IDLE_COMPACTION_NOTES,
+} from "@t3tools/client-runtime/user-message";
 import type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
 import { renderCodexDirectivesForCopy } from "@t3tools/shared/codexMarkdownDirectives";
 import {
@@ -46,9 +50,10 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import {
+  idleCompactionOf,
   isCompactionCommandMessage,
-  isIdleCompactionMessage,
   type MessageId,
+  type OrchestrationV2IdleCompaction,
   type WorktreeSetupSnapshot,
   type OrchestrationV2ProjectedTurnItem,
   type RunAttemptId,
@@ -1582,7 +1587,10 @@ export function deriveMessagesTimelineRows(input: {
   // A bare `/compact` turn is the compaction itself: one compaction row stands in for its prompt
   // and working indicator, from the moment the turn starts. Likewise an answered "compact before
   // continuing?" question folds into the compaction it asked for.
-  const compactionRuns = new Map<RunId, { note: string | undefined; hasItem: boolean }>();
+  const compactionRuns = new Map<
+    RunId,
+    { reason: OrchestrationV2IdleCompaction | undefined; hasItem: boolean }
+  >();
   const compactedRunIds = new Set<RunId>();
   const resumeCompactionAgeByRunId = new Map<RunId, string>();
   for (const entry of timelineEntries) {
@@ -1592,7 +1600,7 @@ export function deriveMessagesTimelineRows(input: {
       isCompactionCommandMessage(entry.message)
     ) {
       compactionRuns.set(entry.message.runId, {
-        note: isIdleCompactionMessage(entry.message) ? "Automatic before cache expiry" : undefined,
+        reason: idleCompactionOf(entry.message),
         hasItem: false,
       });
     } else if (entry.kind === "work" && entry.entry.runId) {
@@ -1609,8 +1617,10 @@ export function deriveMessagesTimelineRows(input: {
   }
   const compactionNote = (runId: RunId | null | undefined) => {
     if (runId == null) return undefined;
+    const reason = compactionRuns.get(runId)?.reason;
+    if (reason !== undefined) return IDLE_COMPACTION_NOTES[reason];
     const age = resumeCompactionAgeByRunId.get(runId);
-    return compactionRuns.get(runId)?.note ?? (age ? `On return after ${age} idle` : undefined);
+    return age ? `After ${age} idle` : undefined;
   };
   const activeRunIsCompaction =
     input.isWorking && unsettledRunId !== null && compactionRuns.has(unsettledRunId);
@@ -1630,8 +1640,8 @@ export function deriveMessagesTimelineRows(input: {
       : null;
   const compactingLabel = (() => {
     if (activeCompactionRunId === null) return undefined;
-    if (compactionRuns.get(activeCompactionRunId)?.note)
-      return "Compacting before the cache expires…";
+    const reason = compactionRuns.get(activeCompactionRunId)?.reason;
+    if (reason !== undefined) return IDLE_COMPACTING_LABELS[reason];
     const age = resumeCompactionAgeByRunId.get(activeCompactionRunId);
     return age ? `Compacting after ${age} idle…` : "Compacting context…";
   })();
@@ -1975,7 +1985,7 @@ export function deriveMessagesTimelineRows(input: {
           label: "Context compaction",
           tokenCounts: null,
           active: false,
-          ...(compactionRun.note ? { note: compactionRun.note } : {}),
+          ...(compactionRun.reason ? { note: IDLE_COMPACTION_NOTES[compactionRun.reason] } : {}),
         });
       }
       continue;

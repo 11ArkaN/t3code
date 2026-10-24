@@ -526,15 +526,10 @@ describe("deriveMessagesTimelineRows", () => {
     const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
     if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
       throw new Error("Expected live fixture items");
-    const compactPrompt = {
+    const compactPrompt = (idleCompaction: "beforeCacheExpires" | "onReturn") => ({
       ...liveUser,
-      item: {
-        ...liveUser.item,
-        text: "/compact",
-        createdBy: "agent" as const,
-        creationSource: "server" as const,
-      },
-    };
+      item: { ...liveUser.item, text: "/compact", idleCompaction },
+    });
     const compaction = {
       ...liveAssistant,
       item: { ...liveAssistant.item, type: "compaction" as const, driver: null },
@@ -552,13 +547,17 @@ describe("deriveMessagesTimelineRows", () => {
         supportsConversationRollback: false,
       });
 
-    for (const rows of [rowsFor([compactPrompt]), rowsFor([compactPrompt, compaction])]) {
-      const liveRows = rows.slice(
-        rows.findIndex((row) => row.id.includes("history-assistant")) + 1,
-      );
-      expect(liveRows).toMatchObject([
-        { kind: "working", compacting: "Compacting before the cache expires…" },
-      ]);
+    for (const [reason, compacting] of [
+      ["beforeCacheExpires", "Compacting before the cache expires…"],
+      ["onReturn", "Compacting after being idle…"],
+    ] as const) {
+      const prompt = compactPrompt(reason);
+      for (const rows of [rowsFor([prompt]), rowsFor([prompt, compaction])]) {
+        const liveRows = rows.slice(
+          rows.findIndex((row) => row.id.includes("history-assistant")) + 1,
+        );
+        expect(liveRows).toMatchObject([{ kind: "working", compacting }]);
+      }
     }
   });
 
@@ -619,7 +618,7 @@ describe("deriveMessagesTimelineRows", () => {
       { kind: "working", compacting: "Compacting after 1h 5m idle…" },
     ]);
     expect(liveRows("completed")).toMatchObject([
-      { kind: "context-compaction", note: "On return after 1h 5m idle" },
+      { kind: "context-compaction", note: "After 1h 5m idle" },
     ]);
   });
 

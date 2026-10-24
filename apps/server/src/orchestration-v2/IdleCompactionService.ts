@@ -75,6 +75,7 @@ export const make = Effect.gen(function* () {
           attachments: [],
           createdBy: "agent",
           creationSource: "server",
+          idleCompaction: "beforeCacheExpires",
           dispatchMode: { type: "start_immediately" },
         });
         return;
