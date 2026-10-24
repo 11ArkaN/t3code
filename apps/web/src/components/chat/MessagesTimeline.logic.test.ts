@@ -521,7 +521,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(computeStableMessagesTimelineRows(settledRows, stable).result).toEqual(settledRows);
   });
 
-  it("shows a compaction turn as one compaction row from the moment it starts", () => {
+  it("shows a running compaction turn as the working row alone", () => {
     const fixture = makeStreamingTimelineFixture();
     const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
     if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
@@ -557,13 +557,7 @@ describe("deriveMessagesTimelineRows", () => {
         rows.findIndex((row) => row.id.includes("history-assistant")) + 1,
       );
       expect(liveRows).toMatchObject([
-        {
-          kind: "context-compaction",
-          id: `compaction:${fixture.runId}`,
-          label: "Compacting context",
-          active: true,
-          note: "Automatic before cache expiry",
-        },
+        { kind: "working", compacting: "Compacting before the cache expires…" },
       ]);
     }
   });
@@ -593,26 +587,38 @@ describe("deriveMessagesTimelineRows", () => {
         },
       },
     };
-    const compaction = {
+    const assistantItem = liveAssistant.item;
+    const compactionAt = (status: "running" | "completed") => ({
       ...liveAssistant,
-      item: {
-        ...liveAssistant.item,
-        type: "compaction" as const,
-        status: "completed" as const,
-        driver: null,
-      },
-    };
-    const rows = deriveMessagesTimelineRows({
-      timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
-        visibleTurnItems: [history0!, history1!, history2!, liveUser!, answered, compaction],
-        optimisticMessages: [],
-      }),
-      isWorking: false,
-      turnDiffSummaries: [],
-      supportsConversationRollback: false,
+      item: { ...assistantItem, type: "compaction" as const, status, driver: null },
     });
-    const liveRows = rows.slice(rows.findIndex((row) => row.id.includes("live-user")) + 1);
-    expect(liveRows).toMatchObject([
+    const rowsFor = (status: "running" | "completed") =>
+      deriveMessagesTimelineRows({
+        timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+          visibleTurnItems: [
+            history0!,
+            history1!,
+            history2!,
+            liveUser!,
+            answered,
+            compactionAt(status),
+          ],
+          optimisticMessages: [],
+        }),
+        isWorking: status === "running",
+        runningRunId: fixture.runId,
+        activeTurnStartedAt: fixture.time(5),
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      });
+    const liveRows = (status: "running" | "completed") => {
+      const rows = rowsFor(status);
+      return rows.slice(rows.findIndex((row) => row.id.includes("live-user")) + 1);
+    };
+    expect(liveRows("running")).toMatchObject([
+      { kind: "working", compacting: "Compacting after 1h 5m idle…" },
+    ]);
+    expect(liveRows("completed")).toMatchObject([
       { kind: "context-compaction", note: "On return after 1h 5m idle" },
     ]);
   });
