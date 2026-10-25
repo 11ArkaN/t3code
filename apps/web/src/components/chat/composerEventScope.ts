@@ -62,10 +62,8 @@ export function chatViewOf(target: EventTarget | null): string | null {
 
 /**
  * Whether a window-level composer shortcut from `target` is for the composer
- * containing `own`. A side chat renders a second chat view inside the host's,
- * so only one composer may act. A key pressed in a side chat goes to its
- * composer; one pressed anywhere else goes to the composer on screen, which is
- * the side chat's while it has the host's composer (the host's is hidden then).
+ * containing `own`. A key in a side chat goes to its composer; any other key goes
+ * to the composer on screen, the side chat's while it has the host's (hidden) one.
  */
 export function composerTakesShortcut(target: EventTarget | null, own: Element | null): boolean {
   if (own === null) return false;
