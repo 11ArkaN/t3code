@@ -1,10 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { FetchHttpClient } from "effect/http";
 
-import { NativeClientError, prebuildAndroid } from "./mobile-native-client.ts";
+import { NativeClientError, prebuildAndroid, resolveArtifact } from "./mobile-native-client.ts";
 
 const caches = [".gradle/history", "app/.cxx/object"];
 
@@ -58,6 +61,23 @@ it.layer(NodeServices.layer)("prebuildAndroid", (it) => {
 
       assert.strictEqual(error, failure);
       yield* assertCachesRestored;
+    }),
+  );
+});
+
+it.layer(Layer.merge(NodeServices.layer, FetchHttpClient.layer))("resolveArtifact", (it) => {
+  it.effect("fails with a next step when nothing is cached and this machine cannot build", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "native-client-home-" });
+
+      const error = yield* resolveArtifact(home, "ios", null, "a".repeat(40), false).pipe(
+        Effect.provideService(HostProcess.Environment, { T3_NATIVE_CLIENT_CACHE: "off" }),
+        Effect.flip,
+      );
+
+      assert.instanceOf(error, NativeClientError);
+      assert.include(error.message, "cannot build it");
     }),
   );
 });

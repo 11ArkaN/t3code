@@ -65,6 +65,26 @@ import * as LocalDeviceHost from "./LocalDeviceHost.ts";
 
 export const DEVICE_HUB_ROUTE_PREFIX = "/api/device-hub";
 
+const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
+
+// `adb exec-out screencap -p` can print warnings, such as a foldable's multiple displays, around the PNG.
+const extractPng = (bytes: Uint8Array): Uint8Array | undefined => {
+  const start = bytes.findIndex((_, index) =>
+    PNG_SIGNATURE.every((value, offset) => bytes[index + offset] === value),
+  );
+  if (start < 0) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let chunk = start + PNG_SIGNATURE.length; chunk + 12 <= bytes.length;) {
+    const end = chunk + 12 + view.getUint32(chunk);
+    if (end > bytes.length) return undefined;
+    if (String.fromCharCode(...bytes.subarray(chunk + 4, chunk + 8)) === "IEND") {
+      return bytes.subarray(start, end);
+    }
+    chunk = end;
+  }
+  return undefined;
+};
+
 const sshProbeFailureMessage = (error: DeviceHost.DeviceHostError): string => {
   const cause = error.cause;
   if (
@@ -757,7 +777,16 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const screenshot: DeviceService["Service"]["screenshot"] = Effect.fn("DeviceService.screenshot")(
     function* (input) {
       const { ready, device } = yield* resolveDevice(input.hostId, input.deviceId);
-      return { device, png: yield* ready.devices.screenshot(device) };
+      const bytes = yield* ready.devices.screenshot(device);
+      const png = extractPng(bytes);
+      if (png === undefined) {
+        return yield* new DeviceOperationError({
+          operation: "screenshot",
+          reason: "hub_rejected",
+          cause: `The hub returned ${bytes.length} bytes without a complete PNG.`,
+        });
+      }
+      return { device, png };
     },
   );
 
