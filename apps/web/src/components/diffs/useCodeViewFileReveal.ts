@@ -1,5 +1,5 @@
 import type { CodeViewScrollTarget } from "@pierre/diffs";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 interface FileRevealHandle {
   getInstance(): object | undefined;
@@ -21,8 +21,11 @@ export function createCodeViewFileReveal() {
     return true;
   };
   return {
-    request(viewer: FileRevealHandle | null, fileKey: string) {
-      pending = viewer === null || apply(viewer, fileKey) ? null : { viewer, fileKey };
+    /** Whether the viewer was positioned now, rather than left pending or dropped. */
+    request(viewer: FileRevealHandle | null, fileKey: string): boolean {
+      const applied = viewer !== null && apply(viewer, fileKey);
+      pending = viewer === null || applied ? null : { viewer, fileKey };
+      return applied;
     },
     flush(viewer: FileRevealHandle | null) {
       if (pending === null || pending.viewer !== viewer) return;
@@ -31,18 +34,7 @@ export function createCodeViewFileReveal() {
   };
 }
 
-// Compat shim until the web-files layer: the base DiffPanel passes
-// (viewer, scope, readyFileKeys) and never calls `flush`, so a pending reveal
-// is retried here whenever the viewer, scope or rendered files change.
-export function useCodeViewFileReveal<TScope>(
-  viewer: FileRevealHandle | null,
-  legacyScope?: TScope,
-  legacyReadyFileKeys?: ReadonlyArray<string>,
-) {
+export function useCodeViewFileReveal(viewer: FileRevealHandle | null) {
   const [reveal] = useState(createCodeViewFileReveal);
-  useEffect(() => {
-    if (legacyScope === undefined && legacyReadyFileKeys === undefined) return;
-    reveal.flush(viewer);
-  }, [reveal, viewer, legacyScope, legacyReadyFileKeys]);
   return (fileKey: string) => reveal.request(viewer, fileKey);
 }

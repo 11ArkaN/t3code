@@ -14,6 +14,7 @@
     "apps/web/src/hooks/useTheme.ts": ["exports"],
     "apps/web/src/lib/openPullRequestLink.ts": ["exports"],
     "apps/web/src/state/desktopUpdate.ts": ["exports"],
+    "apps/web/src/state/queries.ts": ["exports"],
     "apps/web/src/state/vcs.ts": ["exports"],
   },
   // These executables are supplied by the OS or installed separately from npm.
