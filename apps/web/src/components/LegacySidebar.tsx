@@ -67,7 +67,10 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
+import {
+  threadRuntimeCanArchive,
+  threadRuntimeIsActive,
+} from "@t3tools/client-runtime/state/models";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import {
   MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
@@ -2172,7 +2175,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
           ...(appAtomRegistry.get(canShareWithGuestAtom(thread.environmentId))
             ? [{ id: "share-guest", label: "Share with guest" }]
             : []),
-          { id: "mark-unread", label: "Mark unread" },
+          ...(threadRuntimeIsActive(thread.runtime)
+            ? []
+            : [{ id: "mark-unread", label: "Mark unread" }]),
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
           { id: "project-settings", label: "Project settings" },
