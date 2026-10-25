@@ -187,7 +187,7 @@ const ThreadConfigurationTool = Tool.make("t3_thread_configuration", {
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Set a thread's provider, model, and options. Omit `threadId` for this thread. Permission modes do not change. Values from `orchestrator_capabilities`.",
+    "Set a thread's provider, model, and options. Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     modelSelection: ModelSelection,
@@ -198,7 +198,7 @@ const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId:
 const ThreadForkTool = Tool.make("t3_thread_fork", {
   ...commandTool,
   description:
-    "Fork a thread from a stable run or checkpoint. Omit `threadId` to fork this thread. The fork keeps the source setup. Success does not mean a turn has run.",
+    "Fork a thread from a stable run or checkpoint. Omit `threadId` for this thread. Keeps source setup. No turn has run yet.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
@@ -209,7 +209,7 @@ const ThreadForkTool = Tool.make("t3_thread_fork", {
 const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
   ...commandTool,
   description:
-    "Merge context from one thread into a related thread in the same project. Omit `sourceThreadId` to merge from this thread.",
+    "Merge context from one thread into a related thread in the same project. Omit `sourceThreadId` for this thread.",
   parameters: Schema.Struct({
     sourceThreadId: Schema.optional(ThreadId),
     targetThreadId: ThreadId,
@@ -238,7 +238,7 @@ const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
 const ThreadSearchTool = Tool.make("t3_thread_search", {
   ...commandTool,
   description:
-    "Search active threads by title, branch, PR, and project, then message text. Subagent threads are skipped. One project: `projectId`, else yours. Outside a thread, no `projectId` means all projects. Not exhaustive.",
+    "Search active threads by title, branch, PR, project, then message text. Skips subagent threads. `projectId`: one project, else yours, else all outside a thread. Not exhaustive. In your reply, link each match as `[title](t3-thread://v1/<threadId>)`, exact id.",
   parameters: Schema.Struct({
     ...OrchestrationSearchThreadsInput.fields,
     projectId: Schema.optional(ProjectId),
@@ -264,7 +264,7 @@ const ThreadSearchTool = Tool.make("t3_thread_search", {
 const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   ...commandTool,
   description:
-    "Run one scheduled task now. Needs a full-access or default caller. Returns its thread, or null if it did not start. Success means started, not finished.",
+    "Run one scheduled task now. Needs a full-access or default caller. Returns its thread, or null if not started. Success means started, not finished.",
   parameters: Schema.Struct({ taskId: ScheduledTaskId }),
   success: Schema.Struct({
     taskId: ScheduledTaskId,

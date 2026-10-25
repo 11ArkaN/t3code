@@ -81,7 +81,7 @@ const DelegateTaskTool = Tool.make("delegate_task", {
 
 const TaskStatusTool = Tool.make("task_status", {
   description:
-    "Read one delegated task you started. `workState`: working, waiting_for_children, or result_available. A finished turn with live child work is not done. `summary` is the final result. Reading it marks it delivered.",
+    "Read one delegated task you started. `workState`: working, waiting_for_children, result_available. A finished turn with live child work is not done. `summary`: final result. Reading it marks it delivered.",
   parameters: OrchestratorMcpTaskStatusInput,
   success: OrchestratorMcpDelegateTaskResult,
   failure: OrchestratorMcpFailure,
@@ -107,7 +107,7 @@ const TaskCancelTool = Tool.make("task_cancel", {
 
 const WorkflowStopTool = Tool.make("t3_workflow_stop", {
   description:
-    "Stop a running Claude workflow in a thread. `subagentId` is the coordinator from `t3_thread_read` view 'activity'. Stops the whole workflow only, not the thread.",
+    "Stop a running Claude workflow in a thread. `subagentId`: coordinator from `t3_thread_read` 'activity'. Stops only the workflow, not the thread.",
   parameters: OrchestrationV2StopWorkflowInput,
   success: Schema.Struct({}),
   failure: OrchestratorMcpFailure,
@@ -119,7 +119,7 @@ const WorkflowStopTool = Tool.make("t3_workflow_stop", {
 
 const BackgroundWaitTool = Tool.make("t3_background_wait", {
   description:
-    "Keep this thread in the user's Working list while background work runs. Start the command or Monitor first, then pass its task ID. Do not mark work left running (a dev server, a watcher). `waiting=false` clears the mark. It does not stop the task. Claude threads only.",
+    "Keep this thread in Working while background work runs. Pass its task ID after starting it. Not for work left running (dev server, watcher). `waiting=false` clears. Does not stop the task. Claude only.",
   parameters: Schema.Struct({
     taskIds: Schema.Array(TrimmedNonEmptyString).check(
       Schema.isMinLength(1),
@@ -189,7 +189,7 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    "Ask the user to enter a secret in a private card and wait. You never see the value. Returns a one-use `secretRef` for a tool that accepts one, such as `signature.secretRef`.",
+    "Ask the user to enter a secret in a private card and wait. Asked how to give you a secret for a tool here: call this now. Do not explain instead. You never see the value. Returns a one-use `secretRef`. Pass it at once to the tool that needs it, such as `schedule_task` as `signature.secretRef`. For a shell env var, the user sets it. A `secretRef` cannot enter the shell.",
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -201,7 +201,7 @@ const RequestSecretTool = Tool.make("request_secret", {
 
 const CreateThreadsTool = Tool.make("create_threads", {
   description:
-    "Create new top-level threads in this checkout. Not delegation. Only when the user asks for new or separate threads. One thread or its own worktree: `t3_thread_launch`. Project, branch, and worktree inherit.",
+    "Create new top-level threads in this checkout. Not delegation. Only when the user asks for new or separate threads. One thread or its own worktree: `t3_thread_launch`. Project, branch, and worktree inherit. In your reply, link each as `[title](t3-thread://v1/<threadId>)`, exact id.",
   parameters: OrchestratorMcpCreateThreadsInput,
   success: OrchestratorMcpCreateThreadsResult,
   failure: OrchestratorMcpFailure,
@@ -214,7 +214,7 @@ const CreateThreadsTool = Tool.make("create_threads", {
 
 const ThreadListTool = Tool.make("t3_thread_list", {
   description:
-    "List threads in a project, newest first. Omit `projectId` for yours. Filter by status, title, settled, or snoozed. Page with the cursor. `pullRequests`: linked PRs per thread.",
+    "List threads in a project, newest first. Omit `projectId` for yours. Filter by status, title, settled, or snoozed. Page with the cursor. `pullRequests`: linked PRs per thread. In your reply, link each thread as `[title](t3-thread://v1/<threadId>)`, exact id.",
   parameters: OrchestratorMcpThreadListInput,
   success: OrchestratorMcpThreadListResult,
   failure: OrchestratorMcpFailure,
@@ -228,7 +228,7 @@ const ThreadListTool = Tool.make("t3_thread_list", {
 
 const ThreadReadTool = Tool.make("t3_thread_read", {
   description:
-    "Read any thread by id. `messages` (default): user and assistant messages and plans. `activity`: all timeline items. Keep reads small: low `limit` and `maxCharsPerItem`. Page with `afterPosition=nextPosition`. Cut-off text: `itemId` with `textOffset=nextTextOffset`. Reading a child's final result marks it delivered.",
+    "Read any thread by id. `messages` (default): user and assistant messages and plans. `activity`: all timeline items. Keep reads small: low `limit` and `maxCharsPerItem`. Page with `afterPosition=nextPosition`. Cut-off text: `itemId` with `textOffset=nextTextOffset`. Reading a child's final result marks it delivered. In your reply, link this thread as `[title](t3-thread://v1/<threadId>)`, exact id.",
   parameters: OrchestratorMcpThreadReadInput,
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
@@ -256,7 +256,7 @@ const ThreadUpdateTool = Tool.make("t3_thread_update", {
 
 const ThreadSendTool = Tool.make("t3_thread_send", {
   description:
-    "Send a message to any thread. The target cannot run with broader modes than yours. `mode:'auto'` starts an idle thread, steers a running turn, or queues. `queue`: new turn. `steer`: mid-turn update. `restart`: interrupt and restart. A send to a finished child thread starts a fresh task and returns its `taskId`. New review round: `delegate_task`, not a send to the review child.",
+    "Send a message to any thread. The target cannot run with broader modes than yours. `mode:'auto'` starts an idle thread, steers a running turn, or queues. `queue`: new turn. `steer`: mid-turn update. `restart`: interrupt and restart. A send to a finished child thread starts a fresh task and returns its `taskId`. New review round: `delegate_task`, not a send to the review child. In your reply, link the target as `[title](t3-thread://v1/<threadId>)`, exact id.",
   parameters: OrchestratorMcpThreadSendInput,
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,
