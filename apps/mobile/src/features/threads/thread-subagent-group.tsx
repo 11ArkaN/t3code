@@ -151,7 +151,11 @@ export function ThreadSubagentGroup(props: {
         >
           <View className="flex-row items-center">
             {agents.slice(0, 3).map((agent, index) => (
-              <View key={agent.item.id} style={{ marginLeft: index === 0 ? 0 : -7 }}>
+              // Earlier avatars stack on top so each bottom-right account badge stays visible.
+              <View
+                key={agent.item.id}
+                style={{ marginLeft: index === 0 ? 0 : -7, zIndex: 3 - index }}
+              >
                 <SubagentAvatar
                   item={agent.item}
                   providers={config?.providers ?? EMPTY_PROVIDERS}

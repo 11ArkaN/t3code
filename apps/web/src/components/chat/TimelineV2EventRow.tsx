@@ -263,14 +263,16 @@ const V2SubagentGroup = memo(function V2SubagentGroup({
           )}
         >
           <span className="flex shrink-0 items-center -space-x-1.5" aria-hidden>
-            {agents.slice(0, 3).map(({ item, status }) => (
-              <EnvironmentSubagentAvatar
-                key={item.id}
-                environmentId={ctx.activeThreadEnvironmentId}
-                providerInstanceId={item.providerInstanceId}
-                driver={item.driver}
-                status={agents.length === 1 ? status : undefined}
-              />
+            {/* Earlier avatars stack on top so each bottom-right account badge stays visible. */}
+            {agents.slice(0, 3).map(({ item, status }, index) => (
+              <span key={item.id} className="relative inline-flex" style={{ zIndex: 3 - index }}>
+                <EnvironmentSubagentAvatar
+                  environmentId={ctx.activeThreadEnvironmentId}
+                  providerInstanceId={item.providerInstanceId}
+                  driver={item.driver}
+                  status={agents.length === 1 ? status : undefined}
+                />
+              </span>
             ))}
             {agents.length > 3 ? (
               <span className="relative inline-flex size-6 items-center justify-center rounded-full bg-muted text-3xs font-medium text-muted-foreground ring-2 ring-background">
