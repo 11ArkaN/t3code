@@ -71,4 +71,11 @@ describe("buildThreadActionMenuItems", () => {
     );
     expect(archiveItem?.disabled).toBe(true);
   });
+
+  it("omits mark unread while the thread is running", () => {
+    const ids = (isRunning: boolean) =>
+      buildThreadActionMenuItems({ ...baseState, isRunning }).map((item) => item.id);
+    expect(ids(false)).toContain("mark-unread");
+    expect(ids(true)).not.toContain("mark-unread");
+  });
 });
