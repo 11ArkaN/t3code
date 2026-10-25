@@ -165,14 +165,21 @@ function SubagentTraitsLabel(props: { readonly traits: SubagentTraits }) {
     speedIcon === "ultrafast" ? "Ultrafast mode on" : speedIcon ? "Fast mode on" : null;
   return (
     <View
+      accessible
       collapsable={false}
       accessibilityLabel={[speedLabel, effort].filter(Boolean).join(", ")}
-      className="shrink-0 flex-row items-center gap-1"
+      className="min-w-0 shrink flex-row items-center gap-1"
     >
-      <Text className="text-xs text-foreground-muted">·</Text>
+      <Text
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+        className="shrink-0 text-xs text-foreground-muted"
+      >
+        ·
+      </Text>
       {speedIcon ? <SpeedIcon speedIcon={speedIcon} /> : null}
       {effort ? (
-        <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+        <Text className="min-w-0 shrink text-xs text-foreground-muted" numberOfLines={1}>
           {effort}
         </Text>
       ) : null}
