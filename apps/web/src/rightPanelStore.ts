@@ -4,7 +4,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, RunId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
 import { useClosedViewStore } from "./closedViewStore";
@@ -107,11 +107,6 @@ export type DiffOpenSelection =
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
-  // Compat shim for the base ChatView until the web-chat-view layer.
-  pendingMaximizeThreadKey: string | null;
-  requestMaximize: (ref: ScopedThreadRef) => void;
-  consumeMaximizeRequest: (ref: ScopedThreadRef) => boolean;
-  reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
   threadPanelVisibilityByThreadKey: Record<string, ThreadPanelVisibility>;
   userActionRevisionByThreadKey: Record<string, number>;
   closeRevisionByThreadKey: Record<string, number>;
@@ -615,24 +610,38 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
   return { byThreadKey, threadPanelVisibilityByThreadKey };
 }
 
+// Generic ways onto the diff (tab-close fallback, reveal, proactive open) always show the
+// checkout. openDiff and clicking the Diff tab write through api.setState, which skips this,
+// because they pick or keep a specific scope.
+const resetDiffScopeWhenActivated =
+  (config: StateCreator<RightPanelStoreState>): StateCreator<RightPanelStoreState> =>
+  (set, get, api) =>
+    config(
+      (updater) => {
+        const before = get().byThreadKey;
+        set(updater);
+        const after = get().byThreadKey;
+        if (after === before) return;
+        for (const threadKey of Object.keys(after)) {
+          if (after[threadKey] === before[threadKey]) continue;
+          const ref = parseScopedThreadKey(threadKey);
+          if (
+            ref &&
+            selectActiveRightPanel(after, ref) === "diff" &&
+            selectActiveRightPanel(before, ref) !== "diff"
+          ) {
+            useDiffPanelStore.getState().selectGitScope(ref, "branch");
+          }
+        }
+      },
+      get,
+      api,
+    );
+
 export const useRightPanelStore = create<RightPanelStoreState>()(
   persist(
-    (set, get) => ({
+    resetDiffScopeWhenActivated((set, get, api) => ({
       byThreadKey: {},
-      // Compat shim for the base ChatView until the web-chat-view layer.
-      pendingMaximizeThreadKey: null,
-      requestMaximize: (ref) => set({ pendingMaximizeThreadKey: scopedThreadKey(ref) }),
-      consumeMaximizeRequest: (ref) => {
-        if (get().pendingMaximizeThreadKey !== scopedThreadKey(ref)) return false;
-        set({ pendingMaximizeThreadKey: null });
-        return true;
-      },
-      reconcileFileSurfaces: (ref, workspaceAvailable) =>
-        set((state) =>
-          automaticUpdate(state, scopedThreadKey(ref), (current) =>
-            workspaceAvailable ? current : withoutWorkspaceFileSurfaces(current),
-          ),
-        ),
       threadPanelVisibilityByThreadKey: {},
       userActionRevisionByThreadKey: {},
       closeRevisionByThreadKey: {},
@@ -689,10 +698,14 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           }),
         ),
       openDiff: (ref, selection = { scope: "branch" }) => {
+        api.setState((state) =>
+          userAction(state, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, singletonSurface("diff")),
+          ),
+        );
         const diffPanel = useDiffPanelStore.getState();
         if ("turnId" in selection) diffPanel.selectTurn(ref, selection.turnId, selection.filePath);
         else diffPanel.selectGitScope(ref, selection.scope);
-        get().open(ref, "diff");
       },
       openDevice: (ref, target, automatic = false) =>
         set((state) =>
@@ -925,7 +938,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           }),
         ),
       activateSurface: (ref, surfaceId) =>
-        set((state) =>
+        api.setState((state) =>
           userAction(state, scopedThreadKey(ref), (current) =>
             current.surfaces.some((surface) => surface.id === surfaceId)
               ? { ...current, isOpen: true, activeSurfaceId: surfaceId }
@@ -1133,7 +1146,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             closeRevisionByThreadKey,
           };
         }),
-    }),
+    })),
     {
       name: RIGHT_PANEL_STORAGE_KEY,
       version: RIGHT_PANEL_STORAGE_VERSION,
