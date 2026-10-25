@@ -422,13 +422,11 @@ it.effect.each(["limit", "runLimit", "maxCharsPerItem"])(
 
 it("routes same-child follow-ups to t3_thread_send and independent reviews to delegate_task", () => {
   const description = OrchestratorToolkit.tools.delegate_task.description ?? "";
-  expect(description).toContain(
-    "For independent T3 delegated review rounds, call delegate_task again",
-  );
+  expect(description).toContain("For a new review round, call delegate_task again");
   expect(description).toContain(
     "For a follow-up that needs the same child's conversation, use t3_thread_send on its childThreadId.",
   );
-  expect(description).toContain("end your turn instead of polling");
+  expect(description).toContain("End your turn. Do not poll.");
   expect(description).not.toContain("Prefer native");
 });
 
@@ -449,7 +447,7 @@ it.effect(
       expect(linkTool?.tool.annotations?.idempotentHint).toBe(true);
       expect(linkTool?.tool.annotations?.openWorldHint).toBe(false);
       expect(linkTool?.tool.description).toContain("Link a PR to this thread");
-      expect(linkTool?.tool.description).toContain("Safe to call twice");
+      expect(linkTool?.tool.description).toContain("stays linked across pushes and wakes");
 
       const denied = yield* server
         .callTool({ name: "list_thread_pull_requests", arguments: {} })

@@ -277,7 +277,7 @@ export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.T
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
-    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge. Safe to call twice (`alreadyLinked=true`).",
+    "Link a PR to this thread, once. It stays linked across pushes and wakes. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -321,7 +321,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch an open PR for this thread. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on until merge, close, settle, or unwatch. Do not call this again on a wake. Subagents cannot watch.",
+    "Watch an open PR for this thread when you must wait for checks or reviews. If it is ready now, act now. Do not watch. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch. Do not call this again on a wake. Subagents cannot watch.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,

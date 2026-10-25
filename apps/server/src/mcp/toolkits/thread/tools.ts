@@ -238,7 +238,7 @@ const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
 const ThreadSearchTool = Tool.make("t3_thread_search", {
   ...commandTool,
   description:
-    "Search active threads like the command palette. Title, branch, PR, and project matches come first. Then messages with every query word of 3 or more chars, with snippets. Subagent threads are skipped. One project only: `projectId`, else yours. Outside a thread, no `projectId` searches all projects. Results are not exhaustive.",
+    "Search active threads by title, branch, PR, and project, then message text, with snippets. Subagent threads are skipped. One project only: `projectId`, else yours. Outside a thread, no `projectId` searches all projects. Not exhaustive.",
   parameters: Schema.Struct({
     ...OrchestrationSearchThreadsInput.fields,
     projectId: Schema.optional(ProjectId),

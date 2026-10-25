@@ -101,7 +101,7 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
 const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ...shared,
   description:
-    "Create one new top-level thread, bound to a workspace before its agent starts. Use only when the user asks for a separate or new thread. For child work, use `delegate_task`. Put the task in `message`. Never ask the agent to make its own worktree in the shell. That does not bind the thread. Omit `projectId`, model, and modes to inherit yours. Outside a thread, `projectId` is required. Modes cannot exceed yours. No retry key. Keep the returned `threadId`. Follow it with `t3_thread_read` or `t3_thread_wait`. After an error or a lost reply, check `t3_thread_list` before you retry.",
+    "Create one new top-level thread, bound to a workspace before its agent starts. Use only when the user asks for a separate or new thread. For child work, use `delegate_task`. Put the task in `message`. Put no worktree setup in `message`. Only `workspaceStrategy` binds the thread. Omit `projectId`, model, and modes to inherit yours. Outside a thread, `projectId` is required. Modes cannot exceed yours. No retry key. Keep the returned `threadId`. Follow it with `t3_thread_read` or `t3_thread_wait`. After an error or a lost reply, check `t3_thread_list` before you retry.",
   parameters: Schema.Struct({
     projectId: Schema.optional(ProjectId),
     scratch: Schema.optional(

@@ -11,14 +11,14 @@ Ordinary coding tasks need no T3 tools.
 - For independent T3 delegated review rounds, call \`delegate_task\` again with the brief, prior findings, and open objections. Never send a round with \`t3_thread_send\` to a \`childThreadId\`. Fix nits yourself. Told to ship, file, or merge without waiting for a delegate? \`task_cancel\` it. Start no replacement.
 - After an async delegate, end your turn. Completion wakes you. Do not poll with \`task_status\`, \`sleep\`, watchers, Monitor, or ScheduleWakeup. Stop delegates with \`task_cancel\`. Never \`t3_thread_interrupt\` a \`childThreadId\`.
 - Subagents and children: do the work yourself. Start no subagents unless your task says to.`,
-  `- \`t3_thread_launch\` and \`create_threads\` make new top-level threads. Use only when the user asks for a new thread. "Subagent", "delegate", and "parallel" never mean a new thread. For a worktree thread, set \`workspaceStrategy\`. Never tell an agent to run \`git worktree add\`. No strategy means project root.
+  `- \`t3_thread_launch\` and \`create_threads\` make new top-level threads. Use only when the user asks for a new thread. "Subagent", "delegate", and "parallel" never mean a new thread. For a worktree thread, set \`workspaceStrategy\`. Shell-made worktrees do not bind the thread. Put no checkout setup in its prompt. No strategy means project root.
 - Given a thread id, read it with \`t3_thread_read\` before you answer about it. Whenever your reply refers to another thread (given, read, messaged, launched, or found), link it as \`[title](t3-thread://v1/<threadId>)\` with its exact id, even when you do not name it. Never give a bare thread id.
 - A secret for a tool here: call \`request_secret\`, pass its \`secretRef\` to that tool. Never ask in chat or invent one. Asked to schedule? Call \`schedule_task\`. Do not run the job first.
 - T3 tools may load late. Try the name once before you call it absent.`,
   `### Visuals and preview
 
 - Pick where a visual goes. In this thread: one HTML page, \`html_preview\`, then \`html_render\`. Do not serve it, preview it, or use a page's own chart, save, or dashboard tool. Page tools give data only. An image to post, send, or use elsewhere: a \`.png\` file and its path. Never \`html_render\` that.
-- Call \`preview_*\` only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages: web fetch or search. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
+- Call \`preview_*\` only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages with no browser ask: web fetch or search. Asked browser work: read that page with preview tools only. No web fetch on it. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
@@ -30,7 +30,7 @@ export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## T3 Code browser
 
-The \`preview_*\` tools are the browser you share with the user. Call \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Read any listed tab. Act only on your tab, or an \`unclaimed\` tab with no human in control. Pass \`profileId\` for saved logins. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
+The \`preview_*\` tools are the browser you share with the user. Call \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
 `;
 
 // ACP only: some ACP agents accept the injected MCP server but never expose

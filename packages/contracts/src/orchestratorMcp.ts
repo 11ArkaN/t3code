@@ -107,7 +107,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Options that model lists in `orchestrator_capabilities`, such as {effort:'max'}. Same provider and model: given values override inherited ones. [] or {} clears them.",
+        "Model options from `orchestrator_capabilities`, such as {effort:'max'}. Same provider and model: given values override inherited. [] or {} clears.",
     }),
   ),
 });
@@ -162,7 +162,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared' (default): parent checkout. 'worktree': new checkout from the parent commit, setup run first. Uncommitted edits stay out.",
+        "'shared' (default): parent checkout. 'worktree': new checkout from the parent commit, setup run first. The child starts there. Put no checkout setup in `task`. Uncommitted edits stay out.",
     }),
   ),
   mode: Schema.optional(

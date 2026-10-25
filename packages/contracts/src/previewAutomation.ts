@@ -15,8 +15,7 @@ import { BrowserProfileId } from "./browserProfile.ts";
 const BoundedUrl = Schema.String.check(Schema.isTrimmed())
   .check(Schema.isNonEmpty())
   .check(Schema.isMaxLength(2048));
-const URL_GUIDANCE =
-  "Absolute http(s) URL, or a bare host such as t3.chat or localhost:5173 (https; http for loopback).";
+const URL_GUIDANCE = "Absolute http(s) URL, or a bare host (https; http for loopback).";
 const PROFILE_GUIDANCE =
   "Profile id or name from preview_status, for a new tab. Default: the user's. A tab keeps its profile.";
 const OptionalTimeoutMs = Schema.optional(
@@ -293,8 +292,7 @@ export const PreviewAutomationSetColorSchemeResult = Schema.Struct({
 export type PreviewAutomationSetColorSchemeResult =
   typeof PreviewAutomationSetColorSchemeResult.Type;
 
-const LOCATOR_GUIDANCE =
-  "'aria-ref=<ref>' from the last snapshot, or a Playwright selector. Refs die on navigation or a new snapshot.";
+const LOCATOR_GUIDANCE = "'aria-ref=<ref>' from the last snapshot, or a Playwright selector.";
 const Locator = TrimmedNonEmptyString;
 const LegacySelector = TrimmedNonEmptyString;
 

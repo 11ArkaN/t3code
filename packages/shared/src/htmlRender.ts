@@ -230,7 +230,7 @@ export const HTML_RENDER_THEME_GUIDE = [
 ].join(" ");
 
 export const HTML_RENDER_LAYOUT_GUIDE = [
-  `The frame sits on the thread background at reply width (${HTML_RENDER_COLUMN_WIDTH}px on desktop, about 360px on phones), left edge with your text.`,
+  `Frame width is reply width (${HTML_RENDER_COLUMN_WIDTH}px desktop, about 360px phones), on the thread background.`,
   "Leave html, body, and the outer element with no background color, no outer card, border, banner title, or side padding. This overrides fixed black page styles.",
   "A box that needs its own background gets 16px padding and var(--radius) corners. Give charts fixed pixel heights.",
   "Let content set the height. Do not use vh units or height:100% on html or body. Both are rejected or loop.",

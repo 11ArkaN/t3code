@@ -21,7 +21,7 @@ const Html = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512_0
 });
 
 const PAGE_RULES =
-  "One self-contained document, inline <style> and <script>. Local images as absolute paths are inlined. Remote http(s) URLs load as-is.";
+  "Inline <style> and <script>. Local images as absolute paths are inlined. Remote URLs load as-is.";
 
 export const HtmlPreviewTool = Tool.make("html_preview", {
   description: `Check an HTML page before html_render. Returns a PNG screenshot, contentHeight for this width, and console output with stack traces. If it says the browser is still installing, call again in a minute. ${PAGE_RULES} Theme and layout rules are in html_render.`,
