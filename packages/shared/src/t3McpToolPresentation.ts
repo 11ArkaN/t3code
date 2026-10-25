@@ -190,6 +190,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "Snapshot the preview page",
   ),
+  preview_act: tool(["Use", "Using", "Used", "the preview browser"], "browser", "browser"),
   preview_click: tool(
     ["Click", "Clicking", "Clicked", "in the preview browser"],
     "browser",
