@@ -8,7 +8,6 @@ import {
   nextThreadChangeRequestSnapshot,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
-  resolveThreadCheckout,
   resolveThreadPr,
   threadChangeRequestSnapshotsEqual,
   threadChangeRequestSnapshotsAtom,
@@ -100,17 +99,6 @@ describe("resolveThreadPr", () => {
         gitStatus: status(),
       }),
     ).toBeNull();
-  });
-});
-
-describe("resolveThreadCheckout", () => {
-  it("drops the stored branch and worktree once the worktree checkout is gone", () => {
-    const thread = { branch: "t3/reply-hello", worktreePath: "/repo/.t3/worktrees/reply-hello" };
-
-    expect(
-      resolveThreadCheckout({ thread, gitStatus: status({ isRepo: false, refName: null }) }),
-    ).toEqual({ branch: null, worktreePath: null });
-    expect(resolveThreadCheckout({ thread, gitStatus: null })).toEqual(thread);
   });
 });
 
