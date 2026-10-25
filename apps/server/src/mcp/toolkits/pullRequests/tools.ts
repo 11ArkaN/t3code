@@ -38,24 +38,20 @@ export const PullRequestTargetInput = Schema.Struct({
       description: "Thread. Default: this thread.",
     }),
   ),
-  url: Schema.optional(
-    TrimmedNonEmptyString.annotate({
-      description: "PR URL. Preferred.",
-    }),
-  ),
+  url: Schema.optional(TrimmedNonEmptyString),
   repository: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "owner/repo. With `number`, when no `url`.",
+      description: "With `number`, when no `url`.",
     }),
   ),
   number: Schema.optional(
     PositiveInt.annotate({
-      description: "PR number. With `repository`, when no `url`.",
+      description: "With `repository`, when no `url`.",
     }),
   ),
   host: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Host. Default: this project's.",
+      description: "Default: this project's host.",
     }),
   ),
 });
@@ -216,9 +212,7 @@ const PullRequestIdentity = {
 
 export const LinkPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
-  alreadyLinked: Schema.Boolean.annotate({
-    description: "True when the pull request was linked to this thread before the call.",
-  }),
+  alreadyLinked: Schema.Boolean,
 });
 export type LinkPullRequestResult = typeof LinkPullRequestResult.Type;
 
@@ -226,20 +220,14 @@ export const UnlinkPullRequestResult = Schema.Struct({
   host: Schema.String,
   repository: Schema.String,
   number: Schema.Int,
-  wasLinked: Schema.Boolean.annotate({
-    description: "False when the pull request was not linked to this thread to begin with.",
-  }),
+  wasLinked: Schema.Boolean,
 });
 export type UnlinkPullRequestResult = typeof UnlinkPullRequestResult.Type;
 
 export const WatchPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
-  watching: Schema.Boolean.annotate({
-    description: "Whether T3 Code now watches the pull request for this thread.",
-  }),
-  wasWatching: Schema.Boolean.annotate({
-    description: "Whether it was already watched before the call.",
-  }),
+  watching: Schema.Boolean,
+  wasWatching: Schema.Boolean,
 });
 export type WatchPullRequestResult = typeof WatchPullRequestResult.Type;
 
@@ -277,7 +265,7 @@ export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.T
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
-    "Link a PR to this thread, once. It stays linked across pushes and wakes. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge.",
+    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -305,7 +293,7 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
   description:
-    "List PRs linked to a thread. Omit `threadId` for this thread. Shows last known state and stack order, bottom to top. Call only when you need the linked PRs. Do not call it as an end-of-work check.",
+    "List PRs linked to a thread, with last known state and stack order (bottom to top). Omit `threadId` for this thread. Call only when you need that list. Never as an end-of-work check.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
   }),
@@ -321,7 +309,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch an open PR for this thread when you must wait for checks or reviews. If it is ready now, act now. Do not watch. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch. Do not call this again on a wake. Subagents cannot watch.",
+    "Watch an open PR for this thread. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Handle old comments first. Only later ones wake you. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch. Subagents cannot watch.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -359,8 +347,7 @@ const GuideTarget = Schema.Struct({
 const GuideOutcome = Schema.Struct({
   ...PullRequestIdentity,
   outcome: Schema.Literals(["started", "running", "failed"]).annotate({
-    description:
-      "started: a run began. running: one was already going for this head and the call joined it. failed: this pull request could not be guided; see detail.",
+    description: "started: a run began. running: joined a run for this head. failed: see detail.",
   }),
   detail: Schema.NullOr(Schema.String),
 });
@@ -376,15 +363,14 @@ export const ReadPullRequestGuideResult = Schema.Struct({
   run: Schema.NullOr(PullRequestReviewGuideRun),
   currentHeadSha: Schema.NullOr(Schema.String),
   stale: Schema.Boolean.annotate({
-    description:
-      "True when the guide was written for an earlier head than the pull request has now.",
+    description: "True when the PR head moved after the guide was written.",
   }),
 });
 export type ReadPullRequestGuideResult = typeof ReadPullRequestGuideResult.Type;
 
 const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
   description:
-    "Write review guides for up to 20 PRs. A guide is the tour in the PR Guide tab. Returns once runs start. Each run takes minutes in a temporary checkout. A run for the same head is joined, not restarted. Read results with `read_pull_request_guide`. Fails while guides are off on this server.",
+    "Write review guides for up to 20 PRs (the tour in the PR Guide tab). Returns once runs start. Each run takes minutes in a temporary checkout. A run for the same head is joined. Read with `read_pull_request_guide`. Fails while guides are off.",
   parameters: Schema.Struct({
     pullRequests: Schema.Array(GuideTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   }),
@@ -400,7 +386,7 @@ const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
 
 const ReadPullRequestGuideTool = Tool.make("read_pull_request_guide", {
   description:
-    "Read a PR's stored review guide and its run state. `guide` is null when none was written. `stale` means the PR head moved since the guide was written. Never starts a run.",
+    "Read a PR's stored review guide and run state. `guide` is null when none exists. Never starts a run.",
   parameters: GuideTarget,
   success: ReadPullRequestGuideResult,
   failure: PullRequestToolError,

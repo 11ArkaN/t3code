@@ -447,7 +447,7 @@ it.effect(
       expect(linkTool?.tool.annotations?.idempotentHint).toBe(true);
       expect(linkTool?.tool.annotations?.openWorldHint).toBe(false);
       expect(linkTool?.tool.description).toContain("Link a PR to this thread");
-      expect(linkTool?.tool.description).toContain("stays linked across pushes and wakes");
+      expect(linkTool?.tool.description).toContain("Pass the URL, or repository plus number");
 
       const denied = yield* server
         .callTool({ name: "list_thread_pull_requests", arguments: {} })
