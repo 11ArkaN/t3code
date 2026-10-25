@@ -1,8 +1,15 @@
-import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useEffect, useRef, useState } from "react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { ModelSelection, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
+import { modelSelectionsEqual } from "@t3tools/shared/model";
+import * as Schema from "effect/Schema";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { reviewEnvironment } from "~/state/review";
+import {
+  activeCommitDescriptionScopeAtom,
+  commitDescriptionsAtom,
+  emptyCommitDescriptions,
+  reviewEnvironment,
+} from "~/state/review";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 const BATCH_SIZE = 10;
@@ -18,21 +25,7 @@ export function nextCommitDescriptionBatch(
     .slice(0, BATCH_SIZE);
 }
 
-interface DescriptionState {
-  readonly scope: string | null;
-  readonly wanted: number;
-  readonly descriptions: ReadonlyMap<string, string>;
-  readonly pending: boolean;
-  readonly failed: boolean;
-}
-
-const initialState = (scope: string | null): DescriptionState => ({
-  scope,
-  wanted: BATCH_SIZE,
-  descriptions: new Map(),
-  pending: false,
-  failed: false,
-});
+const decodeModelSelection = Schema.decodeSync(Schema.fromJsonString(ModelSelection));
 
 export function useCommitMenuSnapshot<A>(data: A, open: boolean, scope: string | null): A {
   const [snapshot, setSnapshot] = useState({ data, open, scope });
@@ -56,6 +49,7 @@ export function useCommitDescriptions({
   enabled,
   visible,
   open,
+  prepare = false,
 }: {
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
@@ -65,87 +59,122 @@ export function useCommitDescriptions({
   enabled: boolean;
   visible: boolean;
   open: boolean;
+  prepare?: boolean;
 }) {
-  const canGenerate = useAtomValue(
-    reviewEnvironment.commitDescriptions.permissionAtom(environmentId),
-  );
+  const registry = useContext(RegistryContext);
+  const permission = reviewEnvironment.commitDescriptions.permissionAtom(environmentId);
+  const canGenerate = useAtomValue(permission);
   const generate = useAtomCommand(reviewEnvironment.commitDescriptions, { reportFailure: false });
+  const modelSelection = modelKey === "null" ? null : decodeModelSelection(modelKey);
   const scope =
-    enabled && canGenerate && environmentId && threadId && cwd
+    enabled && canGenerate && environmentId && threadId && cwd && modelSelection
       ? JSON.stringify([environmentId, threadId, cwd, modelKey])
       : null;
-  const [stored, setState] = useState(() => initialState(scope));
-  const state = stored.scope === scope ? stored : initialState(scope);
-  const requested = useRef({ scope, shas: new Set<string>() });
+  const atom = commitDescriptionsAtom(scope);
+  const state = useAtomValue(atom);
+  const [window, setWindow] = useState({ scope, wanted: BATCH_SIZE });
+  const wanted = window.scope === scope ? window.wanted : BATCH_SIZE;
+  const previous = useRef(atom);
   const shasKey = shas.join(",");
 
+  useLayoutEffect(() => {
+    if (scope === null) return;
+    const owners = registry.get(atom).owners;
+    const owner = {};
+    owners.add(owner);
+    return () => {
+      owners.delete(owner);
+    };
+  }, [atom, registry, scope]);
+
+  useLayoutEffect(() => {
+    const old = prepare
+      ? commitDescriptionsAtom(registry.get(activeCommitDescriptionScopeAtom))
+      : previous.current;
+    previous.current = atom;
+    if (prepare) registry.set(activeCommitDescriptionScopeAtom, scope);
+    if (old === atom) return;
+    setWindow({ scope, wanted: BATCH_SIZE });
+    const stored = registry.get(old);
+    if (!prepare && stored.owners.size > 0) return;
+    registry.set(
+      old,
+      scope === null ? emptyCommitDescriptions(stored.owners) : { ...stored, pending: null },
+    );
+  }, [atom, prepare, registry, scope]);
+
   useEffect(() => {
-    if (requested.current.scope !== scope) {
-      requested.current = { scope, shas: new Set() };
-      setState(initialState(scope));
-    }
     if (
       !visible ||
       scope === null ||
-      state.failed ||
-      state.pending ||
       !environmentId ||
       !threadId ||
-      !cwd
+      !cwd ||
+      !modelSelection ||
+      state.failed ||
+      state.pending
     )
       return;
-    const request = requested.current;
+    const current = registry.get(atom);
+    if (current.failed || current.pending || !registry.get(permission)) return;
+    const commitShas = shasKey ? shasKey.split(",") : [];
     const batch = nextCommitDescriptionBatch(
-      shasKey ? shasKey.split(",") : [],
-      open ? state.wanted : BATCH_SIZE,
-      request.shas,
+      commitShas,
+      open ? wanted : BATCH_SIZE,
+      new Set(current.descriptions.keys()),
     );
     if (batch.length === 0) return;
-    for (const sha of batch) request.shas.add(sha);
-    setState((stored) => ({
-      ...(stored.scope === scope ? stored : initialState(scope)),
-      pending: true,
-    }));
+    registry.set(atom, { ...current, pending: batch });
+    const unsubscribe = registry.subscribe(permission, (allowed) => {
+      if (!allowed) registry.set(atom, emptyCommitDescriptions(registry.get(atom).owners));
+    });
     void generate({ environmentId, input: { cwd, threadId, shas: batch } }).then((result) => {
-      if (requested.current !== request) return;
-      if (result._tag !== "Success") {
-        for (const sha of batch) request.shas.delete(sha);
+      unsubscribe();
+      const stored = registry.get(atom);
+      if (stored.pending !== batch) return;
+      if (!registry.get(permission)) {
+        registry.set(atom, emptyCommitDescriptions(stored.owners));
+        return;
       }
-      setState((stored) => {
-        const current = stored.scope === scope ? stored : initialState(scope);
-        if (requested.current !== request) return stored;
-        return result._tag === "Success"
-          ? {
-              ...current,
-              pending: false,
-              descriptions: new Map([
-                ...current.descriptions,
-                ...result.value.descriptions.map(
-                  ({ sha, description }) => [sha, description] as const,
-                ),
-              ]),
-            }
-          : { ...current, pending: false, failed: true };
+      if (
+        result._tag !== "Success" ||
+        !modelSelectionsEqual(modelSelection, result.value.modelSelection)
+      ) {
+        registry.set(atom, { ...stored, pending: null, failed: true });
+        return;
+      }
+      const descriptions = new Map(stored.descriptions);
+      for (const { sha, description } of result.value.descriptions) {
+        if (batch.includes(sha)) descriptions.set(sha, description);
+      }
+      registry.set(atom, {
+        ...stored,
+        descriptions: new Map([...descriptions].filter(([sha]) => commitShas.includes(sha))),
+        pending: null,
+        failed: false,
       });
     });
   }, [
+    atom,
     cwd,
     environmentId,
     generate,
+    modelSelection,
     open,
+    permission,
+    registry,
     scope,
     shasKey,
     state.failed,
     state.pending,
-    state.wanted,
     threadId,
     visible,
+    wanted,
   ]);
 
   const retry = () => {
-    setState((stored) =>
-      stored.scope === scope && stored.failed ? { ...stored, failed: false } : stored,
-    );
+    const stored = registry.get(atom);
+    if (stored.failed) registry.set(atom, { ...stored, failed: false });
   };
 
   const observeLast = (element: HTMLElement | null) => {
@@ -153,15 +182,15 @@ export function useCommitDescriptions({
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((entry) => entry.isIntersecting)) return;
       observer.disconnect();
-      setState((stored) => {
-        const current = stored.scope === scope ? stored : initialState(scope);
-        return { ...current, wanted: current.wanted + BATCH_SIZE };
-      });
+      setWindow((stored) => ({
+        scope,
+        wanted: (stored.scope === scope ? stored.wanted : BATCH_SIZE) + BATCH_SIZE,
+      }));
     });
     observer.observe(element);
     return () => observer.disconnect();
   };
 
   const descriptions = useCommitMenuSnapshot(state.descriptions, open, scope);
-  return { descriptions, lastIndex: state.wanted - 1, observeLast, retry };
+  return { descriptions, lastIndex: wanted - 1, observeLast, retry };
 }
