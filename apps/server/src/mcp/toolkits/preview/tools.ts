@@ -45,9 +45,7 @@ const PreviewToolFailure = Schema.Union([PreviewAutomationError, OrchestratorMcp
 
 const presentationFields = { toolIcon: Schema.optional(ToolActivityIcon) };
 
-const PreviewActionResult = Schema.Struct(presentationFields).annotate({
-  description: "The preview action completed successfully.",
-});
+const PreviewActionResult = Schema.Struct(presentationFields);
 
 const browserTool = <T extends Tool.Any>(tool: T): T =>
   tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T;
@@ -60,7 +58,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. With `tabId`, one tab. Without it, your tab, or the user's viewed tab. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control. Tabs open only in the user's local desktop app are not listed and cannot be reached from a remote environment. Say so. Do not ask the user to reopen one here.",
+    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control. Tabs open only in the user's local desktop app are not listed and cannot be reached from a remote environment. Say so. Do not ask the user to reopen one here.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -144,13 +142,12 @@ export const PreviewSnapshotTool = safeBrowserTool(
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
         Schema.Boolean.annotate({
-          description: "Add the PNG to the result. Default false. True only to see the page.",
+          description: "Default false. True only to see the page.",
         }),
       ),
       save: Schema.optional(
         Schema.Boolean.annotate({
-          description:
-            "Write the PNG to disk. Returns its path as `screenshotPath`. Default false.",
+          description: "Write PNG to disk, return `screenshotPath`. Default false.",
         }),
       ),
     }),
@@ -163,7 +160,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target. Prefer a Playwright locator. `selector` takes CSS. `x` and `y` go together. `button:'right'` opens a context menu. `clickCount:2` double-clicks. Server tabs only.",
+      "Click exactly one target. Prefer a Playwright locator. `x` and `y` go together. Server tabs only.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -254,7 +251,7 @@ export const PreviewEvaluateResult = Schema.Struct({
   value: Schema.Unknown.annotate({
     description: "The JSON-serializable value the expression produced, or null.",
   }),
-}).annotate({ description: "The evaluated expression result." });
+});
 
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {

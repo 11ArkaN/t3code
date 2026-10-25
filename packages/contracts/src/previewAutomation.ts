@@ -20,7 +20,7 @@ const PROFILE_GUIDANCE =
   "Profile id or name from preview_status, for a new tab. Default: the user's. A tab keeps its profile.";
 const OptionalTimeoutMs = Schema.optional(
   Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(60_000)),
-).annotate({ description: "Max wait in ms. Default 15000, max 60000." });
+).annotate({ description: "Default 15000, max 60000 ms." });
 
 export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
   "status",
@@ -57,7 +57,7 @@ export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
 
 const PreviewAutomationTabTargetFields = {
   tabId: Schema.optional(PreviewTabId).annotate({
-    description: "Tab id. Default: yours, then the user's viewed tab.",
+    description: "Default: yours, then the user's viewed tab.",
   }),
 };
 

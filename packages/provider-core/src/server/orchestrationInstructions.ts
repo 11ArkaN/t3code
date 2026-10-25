@@ -17,8 +17,8 @@ Ordinary coding tasks need no T3 tools.
 - T3 tools may load late. Try the name once before you call it absent.`,
   `### Visuals and preview
 
-- Pick where a visual goes. In this thread: one HTML page, \`html_preview\`, then \`html_render\`. Do not serve it, preview it, or use a page's own chart, save, or dashboard tool. Page tools give data only. An image to post, send, or use elsewhere: a \`.png\` file and its path. Never \`html_render\` that.
-- Call \`preview_*\` only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages with no browser ask: web fetch or search. Asked browser work: read that page with preview tools only. No web fetch on it. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
+- Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. Read its file first if it has one. A screenshot on disk or a text description does not show it. Never serve it or use a page's own chart, save, or dashboard tool; page tools give data only. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
+- Call \`preview_*\` (not \`html_preview\`) only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

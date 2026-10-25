@@ -86,9 +86,7 @@ const DeviceCloseTool = Tool.make("device_close", {
   description:
     "Remove a device from this thread's Device panel. `shutdown=true` also turns it off.",
   parameters: DeviceToolCloseInput,
-  success: Schema.Record(Schema.String, Schema.Never).annotate({
-    description: "The device was closed.",
-  }),
+  success: Schema.Record(Schema.String, Schema.Never),
   failure: DeviceToolFailure,
   dependencies,
 })
