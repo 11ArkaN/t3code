@@ -143,6 +143,8 @@ export function SwipeableScrollGateProvider(props: {
 export function useSwipeableScrollGate(options?: {
   readonly onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   readonly onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  /** Called when a drag's scroll settles and swipes turn back on. */
+  readonly onSettle?: () => void;
 }) {
   const [gateActive, setGateActive] = useState(false);
   const gateActiveRef = useRef(false);
@@ -151,13 +153,18 @@ export function useSwipeableScrollGate(options?: {
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const externalOnScroll = options?.onScroll;
   const externalOnScrollBeginDrag = options?.onScrollBeginDrag;
+  const externalOnSettle = options?.onSettle;
 
-  const update = useCallback((next: boolean) => {
-    if (gateActiveRef.current !== next) {
-      gateActiveRef.current = next;
-      setGateActive(next);
-    }
-  }, []);
+  const update = useCallback(
+    (next: boolean) => {
+      if (gateActiveRef.current !== next) {
+        gateActiveRef.current = next;
+        setGateActive(next);
+        if (!next) externalOnSettle?.();
+      }
+    },
+    [externalOnSettle],
+  );
   const clearSettle = useCallback(() => {
     if (settleTimerRef.current !== null) {
       clearTimeout(settleTimerRef.current);

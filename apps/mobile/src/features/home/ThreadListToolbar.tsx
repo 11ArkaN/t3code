@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
-import { useNavigation, useNavigationState } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import {
   BackHandler,
@@ -33,9 +33,6 @@ export function ThreadListToolbar(props: {
   const navigation = useNavigation();
   const workspace = useWorkspaceTabs();
   const isTabActive = workspace?.isTabActive;
-  const homeFocused = useNavigationState((state) => state.routes[state.index]?.name === "Home");
-  const listFocused =
-    homeFocused && (workspace === null || workspace.state.selectedTab === "threads");
   const { paddingTop, paddingBottom } = useToolbarLayout();
   const connectionState = useWorkspaceConnectionState();
   const { onRequestVisibility, onSearchQueryChange } = props;
@@ -57,9 +54,10 @@ export function ThreadListToolbar(props: {
   }, [onSearchQueryChange]);
 
   useEffect(() => {
-    if (!searching || !listFocused) return;
+    if (!searching) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      // Frozen Home screens can keep effects alive after a detail route opens.
+      // Frozen Home screens stay mounted under a detail route or another tab,
+      // so back only applies while the thread list is in front.
       const state = navigation.getState();
       if (
         !state ||
@@ -72,7 +70,7 @@ export function ThreadListToolbar(props: {
       return true;
     });
     return () => subscription.remove();
-  }, [closeSearch, searching, listFocused, navigation, isTabActive]);
+  }, [closeSearch, searching, navigation, isTabActive]);
 
   const filterIcon = props.filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
