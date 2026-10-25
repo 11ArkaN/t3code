@@ -82,8 +82,17 @@ vi.mock("~/state/use-atom-command", () => ({
 vi.mock("~/state/query", () => ({ formatEnvironmentQueryError: () => "Device failed" }));
 vi.mock("~/rightPanelStore", () => ({
   useRightPanelStore: {
-    getState: () => ({ openDevice: mocks.openDevice, closeSurface: mocks.closeSurface }),
+    getState: () => ({
+      byThreadKey: {},
+      openDevice: mocks.openDevice,
+      closeSurface: mocks.closeSurface,
+    }),
   },
+  selectThreadRightPanelState: () => ({ isOpen: false, activeSurfaceId: null, surfaces: [] }),
+}));
+vi.mock("~/components/preview/collapseRightPanel", () => ({
+  collapseRightPanel: () => {},
+  collapseRightPanelIfEmptied: () => {},
 }));
 vi.mock("~/components/device/DeviceHostUpdates", () => ({ DeviceHostUpdates: () => null }));
 vi.mock("~/components/device/DeviceWorkspace", () => ({

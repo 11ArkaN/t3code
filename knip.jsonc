@@ -12,9 +12,12 @@
     "apps/web/src/components/device/deviceStreamSession.ts": ["exports"],
     "apps/web/src/components/preview/agentOpenedPreviews.ts": ["exports"],
     "apps/web/src/composerDraftStore.ts": ["exports"],
+    "apps/web/src/hooks/useEnvironmentDisconnectDelay.ts": ["exports"],
     "apps/web/src/hooks/useLiveRegion.ts": ["exports"],
+    "apps/web/src/hooks/useMediaQuery.ts": ["exports"],
+    "apps/web/src/lib/terminalFocus.ts": ["exports"],
     "apps/web/src/state/queries.ts": ["exports"],
-    "apps/web/src/state/vcs.ts": ["exports"],
+    "apps/web/src/state/revisionedVcsStatus.ts": ["exports"],
   },
   // These executables are supplied by the OS or installed separately from npm.
   "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
