@@ -4,7 +4,10 @@ import {
 } from "@t3tools/client-runtime/state/subagent-display";
 import { getSelectionSpeedIcon } from "@t3tools/client-runtime/model-traits";
 import { isActiveSubagentStatus } from "@t3tools/client-runtime/state/subagentRuntime";
-import { formatModelSelectionEffort } from "@t3tools/client-runtime/state/thread-execution";
+import {
+  formatModelSelectionEffort,
+  REASONING_EFFORT_OPTION_IDS,
+} from "@t3tools/client-runtime/state/thread-execution";
 import type {
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShell,
@@ -113,7 +116,12 @@ export function resolveSubagentTraits(input: {
   }
   const resolved = { ...selection, model };
   return {
-    effort: formatModelSelectionEffort(resolved, provider.models),
+    effort: resolved.options?.some(
+      (option) =>
+        REASONING_EFFORT_OPTION_IDS.includes(option.id) && typeof option.value === "string",
+    )
+      ? formatModelSelectionEffort(resolved, provider.models)
+      : null,
     speedIcon: getSelectionSpeedIcon(
       provider.driver,
       provider.models.find((candidate) => candidate.slug === model)?.capabilities

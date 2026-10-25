@@ -120,6 +120,32 @@ describe("resolveSubagentTraits", () => {
     ).toEqual({ effort: "Low", speedIcon: null });
   });
 
+  it("does not infer an unsaved variant effort", () => {
+    expect(
+      resolveSubagentTraits({
+        subagent: codexAgent([]),
+        provider: {
+          driver: ProviderDriverKind.make("opencode"),
+          models: [
+            {
+              ...codexModel,
+              capabilities: {
+                optionDescriptors: [
+                  {
+                    id: "variant",
+                    label: "Effort",
+                    type: "select",
+                    options: [{ id: "high", label: "High" }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    ).toEqual({ effort: null, speedIcon: null });
+  });
+
   it.each([
     ["no saved selection", { ...codexAgent([]), modelSelection: undefined }, codex],
     ["no saved options", codexAgent([]), codex],
