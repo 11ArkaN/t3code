@@ -42,6 +42,7 @@ import {
 } from "../observability/Metrics.ts";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import { InjectedSecrets } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
@@ -315,6 +316,7 @@ export const layerWithOptions = (
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
       const commandOutput = yield* CommandOutputHub.CommandOutputHub;
+      const injectedSecrets = yield* InjectedSecrets;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
@@ -1876,22 +1878,58 @@ export const layerWithOptions = (
           ),
       );
 
+      const redactToolOutput = (
+        event: ProviderAdapter.ProviderAdapterV2Event,
+      ): ProviderAdapter.ProviderAdapterV2Event => {
+        if (event.type !== "turn_item.updated") return event;
+        const item = event.turnItem;
+        if (item.type === "command_execution" && item.output !== undefined) {
+          const output = injectedSecrets.redactText(item.output);
+          return output === item.output ? event : { ...event, turnItem: { ...item, output } };
+        }
+        if (item.type === "dynamic_tool" && item.output !== undefined) {
+          const output = injectedSecrets.redact(item.output);
+          return output === item.output ? event : { ...event, turnItem: { ...item, output } };
+        }
+        return event;
+      };
+
       const startEventPump = (entry: LiveSessionEntry) => {
         let stoppedByProvider = false;
+        const heldOutput = new Map<string, string>();
         return entry.runtime.events.pipe(
-          Stream.runForEach((event) => {
+          Stream.runForEach((providerEvent) => {
             if (shutdownSignal.received) return Effect.void;
             // Live output bypasses persistence and subscribers so floods cannot delay domain events.
-            if (event.type === "command_output.delta") {
-              return commandOutput.append(event);
+            if (providerEvent.type === "command_output.delta") {
+              const key = `${providerEvent.threadId}\u0000${providerEvent.itemId}`;
+              const { emit, pending } = injectedSecrets.redactChunk(
+                heldOutput.get(key) ?? "",
+                providerEvent.chunk,
+              );
+              if (pending.length === 0) heldOutput.delete(key);
+              else heldOutput.set(key, pending);
+              return commandOutput.append({ ...providerEvent, chunk: emit });
             }
+            const event = redactToolOutput(providerEvent);
             const releaseLiveOutput =
               event.type === "turn_item.updated" &&
               event.turnItem.type === "command_execution" &&
               !isOrchestrationV2WorkActive(event.turnItem.status)
-                ? commandOutput.finish({
-                    threadId: event.turnItem.threadId,
-                    itemId: event.turnItem.id,
+                ? Effect.suspend(() => {
+                    const target = {
+                      threadId: event.turnItem.threadId,
+                      itemId: event.turnItem.id,
+                    };
+                    const key = `${target.threadId}\u0000${target.itemId}`;
+                    // A held tail never completed a secret, so it is released as is.
+                    const held = heldOutput.get(key);
+                    heldOutput.delete(key);
+                    return (
+                      held === undefined
+                        ? Effect.void
+                        : commandOutput.append({ ...target, chunk: held })
+                    ).pipe(Effect.andThen(commandOutput.finish(target)));
                   })
                 : Effect.void;
             if (
