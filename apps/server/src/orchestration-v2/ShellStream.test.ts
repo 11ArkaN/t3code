@@ -192,6 +192,26 @@ describe("omitIdleSubagentShells", () => {
     ]);
   });
 
+  it("keeps an idle child that parents a side chat, so the side chat stays out of lists", () => {
+    const threads = [
+      row("root", null),
+      row("idle", "root"),
+      row("side", "idle", {
+        sideChat: true,
+        lineage: {
+          parentThreadId: ThreadId.make("idle"),
+          relationshipToParent: "fork",
+          rootThreadId: ThreadId.make("root"),
+        },
+      }),
+    ];
+    expect(omitIdleSubagentShells(threads).map((thread) => thread.id)).toEqual([
+      "root",
+      "idle",
+      "side",
+    ]);
+  });
+
   it("still filters the transcript events of omitted children for a subscriber that opts in", () => {
     const threads = [row("root", null), row("idle", "root")];
     const omitted = activeShellRowsForSubscriber(threads, true);

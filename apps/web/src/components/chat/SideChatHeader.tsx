@@ -15,7 +15,7 @@ import {
   useSideChatActions,
 } from "../../hooks/useSideChatActions";
 import { serverEnvironment } from "../../state/server";
-import { useQuietThreadProjection, useThreadShell } from "../../state/entities";
+import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -30,7 +30,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 export function SideChatHeader(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const navigate = useNavigate();
   const childRef = scopeThreadRef(props.environmentId, props.threadId);
-  const shell = useThreadShell(childRef);
+  const shell = useQuietThreadShell(childRef);
   const childProjection = useQuietThreadProjection(childRef)?.projection ?? null;
   const parentThreadId = shell?.lineage.parentThreadId ?? null;
   const parentRef =

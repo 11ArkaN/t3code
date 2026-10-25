@@ -12,7 +12,7 @@ import {
 } from "../components/chat/composerFocusRedirect";
 import { Button } from "../components/ui/button";
 import { useSideChatFocusStore } from "../sideChatStore";
-import { useThreadShell } from "../state/entities";
+import { useQuietThreadShell } from "../state/entities";
 
 /** How a parent thread shows one of its side chats in its right panel. */
 export interface SideChatEmbedding {
@@ -73,7 +73,7 @@ export function useSideChatGuest(input: {
   }, [focused, parentKey, threadId]);
 
   // The parent's own questions stay one Escape away.
-  const parentShell = useThreadShell(parentRef);
+  const parentShell = useQuietThreadShell(parentRef);
   // A delegated child's request is asked on the parent too.
   const parentAwaitingAnswer =
     parentShell?.hasPendingApprovals === true ||

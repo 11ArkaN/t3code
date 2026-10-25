@@ -254,11 +254,10 @@ import {
   useThreadStatus,
   useThreadHistory,
   useQuietThreadShell,
-  useAllEnvironmentShellsBootstrapped,
   useThreadShell,
   useThreadCheckpointSummaries,
 } from "../state/entities";
-import { useEnvironmentShellHasSnapshot } from "../state/shell";
+import { useEnvironmentShellHasSnapshot, useEnvironmentShellStatus } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
@@ -288,7 +287,7 @@ import { type SideChatEmbedding, useSideChatGuest } from "../hooks/useSideChatGu
 import { ComposerAnchor } from "./chat/ComposerAnchor";
 import { chatClaimsShortcut, SIDE_CHAT_OWN_COMMANDS } from "../sideChat.logic";
 import { chatViewOf } from "./chat/composerEventScope";
-import { buildThreadRouteParams } from "../threadRoutes";
+import { buildThreadRouteParams, isThreadRouteSnapshotAuthoritative } from "../threadRoutes";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
 import { useOpenFavoriteEditorShortcut } from "./chat/OpenInPickerShortcut";
@@ -4144,8 +4143,12 @@ function SideChatPanel(props: {
   const { parentRef, threadId, focused, composerSlot } = props;
   const childRef = scopeThreadRef(parentRef.environmentId, threadId);
   const shell = useThreadShell(childRef);
-  const bootstrapped = useAllEnvironmentShellsBootstrapped();
-  const gone = bootstrapped && (shell === null || shell.deletedAt !== null || !shell.sideChat);
+  // A restored tab can name a side chat the cached shell does not have yet;
+  // only this environment's live snapshot can say it is gone.
+  const live = isThreadRouteSnapshotAuthoritative(
+    useEnvironmentShellStatus(parentRef.environmentId),
+  );
+  const gone = live && (shell === null || shell.deletedAt !== null || !shell.sideChat);
   useEffect(() => {
     if (gone) {
       useRightPanelStore.getState().closeSurface(parentRef, `aside:${threadId}`);
