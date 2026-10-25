@@ -56,9 +56,7 @@ export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SER
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
 
 const PreviewAutomationTabTargetFields = {
-  tabId: Schema.optional(PreviewTabId).annotate({
-    description: "Default: yours, then the user's viewed tab.",
-  }),
+  tabId: Schema.optional(PreviewTabId),
 };
 
 export const PreviewAutomationTabTargetInput = Schema.Struct(PreviewAutomationTabTargetFields);
@@ -133,9 +131,7 @@ export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 
 export const PreviewAutomationDialogInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  accept: Schema.Boolean.annotate({
-    description: "True accepts. False dismisses.",
-  }),
+  accept: Schema.Boolean,
   promptText: Schema.optional(Schema.String),
 });
 export type PreviewAutomationDialogInput = typeof PreviewAutomationDialogInput.Type;
@@ -203,9 +199,7 @@ export const PreviewAutomationNavigateInput = Schema.Struct({
   url: Schema.optional(BoundedUrl).annotate({
     description: `Website URL. ${URL_GUIDANCE} For public pages.`,
   }),
-  target: Schema.optional(BrowserNavigationTarget).annotate({
-    description: "In-environment target. Use {kind:'environment-port',port} for a dev server.",
-  }),
+  target: Schema.optional(BrowserNavigationTarget),
   readiness: Schema.optional(Schema.Literals(["load", "domContentLoaded", "none"])).annotate({
     description: "Default 'load'. 'none': return at once.",
   }),
@@ -221,22 +215,11 @@ export type PreviewAutomationNavigateInput = typeof PreviewAutomationNavigateInp
 
 export const PreviewAutomationResizeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  mode: Schema.Literals(["fill", "freeform", "preset"]).annotate({
-    description:
-      "'fill' fits the panel. 'freeform' uses `width` and `height`. 'preset' uses a named device size.",
-  }),
-  preset: Schema.optional(PreviewViewportPresetId).annotate({
-    description: "Mode 'preset' only.",
-  }),
-  width: Schema.optional(PreviewViewportSize.fields.width).annotate({
-    description: "CSS pixels. Mode 'freeform' only.",
-  }),
-  height: Schema.optional(PreviewViewportSize.fields.height).annotate({
-    description: "CSS pixels. Mode 'freeform' only.",
-  }),
-  orientation: Schema.optional(Schema.Literals(["portrait", "landscape"])).annotate({
-    description: "Preset orientation. Default: its own. Not for 'fill' or 'freeform'.",
-  }),
+  mode: Schema.Literals(["fill", "freeform", "preset"]),
+  preset: Schema.optional(PreviewViewportPresetId),
+  width: Schema.optional(PreviewViewportSize.fields.width),
+  height: Schema.optional(PreviewViewportSize.fields.height),
+  orientation: Schema.optional(Schema.Literals(["portrait", "landscape"])),
   timeoutMs: OptionalTimeoutMs,
 }).check(
   Schema.makeFilter((input) => {
@@ -288,28 +271,15 @@ export const PreviewAutomationSetColorSchemeResult = Schema.Struct({
 export type PreviewAutomationSetColorSchemeResult =
   typeof PreviewAutomationSetColorSchemeResult.Type;
 
-const LOCATOR_GUIDANCE = "'aria-ref=<ref>' from the last snapshot, or a Playwright selector.";
 const Locator = TrimmedNonEmptyString;
 const LegacySelector = TrimmedNonEmptyString;
 
 const PointerTargetFields = {
   ...PreviewAutomationTabTargetFields,
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector. Prefer `locator`.",
-  }),
-  locator: Schema.optional(Locator).annotate({
-    description: LOCATOR_GUIDANCE,
-  }),
-  x: Schema.optional(
-    Schema.Finite.annotate({
-      description: "X in CSS pixels. Needs `y`.",
-    }),
-  ),
-  y: Schema.optional(
-    Schema.Finite.annotate({
-      description: "Y in CSS pixels. Needs `x`.",
-    }),
-  ),
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
+  x: Schema.optional(Schema.Finite),
+  y: Schema.optional(Schema.Finite),
   timeoutMs: OptionalTimeoutMs,
 };
 
@@ -351,14 +321,10 @@ export type PreviewAutomationHoverInput = typeof PreviewAutomationHoverInput.Typ
 
 export const PreviewAutomationSelectInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector for a <select>. Prefer `locator`.",
-  }),
-  locator: Schema.optional(Locator).annotate({
-    description: "The <select>, such as aria-ref=<ref>.",
-  }),
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
   values: Schema.Array(Schema.String).check(Schema.isMaxLength(100)).annotate({
-    description: "Values or labels to pick. Many for a multi-select. Empty clears it.",
+    description: "Empty clears it.",
   }),
   timeoutMs: OptionalTimeoutMs,
 }).check(
@@ -377,25 +343,18 @@ export const PreviewAutomationSelectResult = Schema.Struct({
 });
 export type PreviewAutomationSelectResult = typeof PreviewAutomationSelectResult.Type;
 
-const DescribedLocator = (description: string) =>
-  Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()).annotateKey({ description });
-
 export const PreviewAutomationDragInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  source: DescribedLocator("Element to drag, such as aria-ref=<ref>."),
-  target: DescribedLocator("Element to drop onto, such as aria-ref=<ref>."),
+  source: Locator,
+  target: Locator,
   timeoutMs: OptionalTimeoutMs,
 });
 export type PreviewAutomationDragInput = typeof PreviewAutomationDragInput.Type;
 
 export const PreviewAutomationUploadInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  paths: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(20)).annotate({
-    description: "Absolute file paths here. An empty list cancels the open picker.",
-  }),
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector for an <input type=file>. Prefer `locator`.",
-  }),
+  paths: Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(20)),
+  selector: Schema.optional(LegacySelector),
   locator: Schema.optional(Locator).annotate({
     description: "Set files on this <input type=file> instead of the open picker.",
   }),
@@ -412,12 +371,8 @@ export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.T
 export const PreviewAutomationTypeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   text: Schema.String,
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector for the input. Prefer `locator`.",
-  }),
-  locator: Schema.optional(Locator).annotate({
-    description: "The input, such as role=textbox[name='Message'].",
-  }),
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
   clear: Schema.optional(
     Schema.Boolean.annotate({
       description: "Clear the input first. Default false.",
@@ -435,31 +390,17 @@ export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
 
 export const PreviewAutomationPressInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  key: Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()).annotateKey({
-    description: "Key name, such as Enter, Escape, Tab, ArrowDown, or one char.",
-  }),
+  key: Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()),
   modifiers: Schema.optional(Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"]))),
 });
 export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type;
 
 export const PreviewAutomationScrollInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  deltaX: Schema.optional(
-    Schema.Finite.annotate({
-      description: "Right scroll in CSS pixels. Default 0.",
-    }),
-  ),
-  deltaY: Schema.optional(
-    Schema.Finite.annotate({
-      description: "Down scroll in CSS pixels. Default 0.",
-    }),
-  ),
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector for a container. Default: the viewport.",
-  }),
-  locator: Schema.optional(Locator).annotate({
-    description: "Container to scroll. Default: the viewport.",
-  }),
+  deltaX: Schema.optional(Schema.Finite),
+  deltaY: Schema.optional(Schema.Finite),
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
 }).check(
   Schema.makeFilter((input) => {
     if (input.selector !== undefined && input.locator !== undefined) {
@@ -474,10 +415,7 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   expression: Schema.String.check(Schema.isTrimmed())
     .check(Schema.isNonEmpty())
-    .check(Schema.isMaxLength(64_000))
-    .annotateKey({
-      description: "JavaScript to run in the main frame, such as document.title.",
-    }),
+    .check(Schema.isMaxLength(64_000)),
   awaitPromise: Schema.optional(Schema.Boolean.annotate({ description: "Default true." })),
   returnByValue: Schema.optional(
     Schema.Boolean.annotate({
@@ -489,14 +427,10 @@ export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInp
 
 export const PreviewAutomationWaitForInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  selector: Schema.optional(LegacySelector).annotate({
-    description: "CSS selector that must match. Prefer `locator`.",
-  }),
-  locator: Schema.optional(Locator).annotate({
-    description: "Selector that must match, such as role=button[name='Send'].",
-  }),
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
   text: Schema.optional(TrimmedNonEmptyString).annotate({
-    description: "Text that must show on the page. Case counts.",
+    description: "Case counts.",
   }),
   urlIncludes: Schema.optional(TrimmedNonEmptyString),
   timeoutMs: OptionalTimeoutMs,

@@ -58,7 +58,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control. Tabs open only in the user's local desktop app are not listed and cannot be reached from a remote environment. Say so. Do not ask the user to reopen one here.",
+    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -72,7 +72,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. If you opened a tab only for your own check, close it with `t3_preview_close` on its returned `tabId` before you reply.",
+      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -159,8 +159,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
 
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
-    description:
-      "Click exactly one target. Prefer a Playwright locator. `x` and `y` go together. Server tabs only.",
+    description: "Click exactly one target. Prefer a Playwright locator. `x` and `y` go together.",
     parameters: PreviewAutomationClickInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -170,8 +169,7 @@ const PreviewClickTool = browserTool(
 
 const PreviewTypeTool = browserTool(
   Tool.make("preview_type", {
-    description:
-      "Type literal text into one input. Prefer a Playwright locator. `clear=true` replaces the current text.",
+    description: "Type literal text into one input. `clear=true` replaces the current text.",
     parameters: PreviewAutomationTypeInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -181,7 +179,7 @@ const PreviewTypeTool = browserTool(
 
 const PreviewHoverTool = safeBrowserTool(
   Tool.make("preview_hover", {
-    description: "Hover one target to show menus or tooltips. Server tabs only.",
+    description: "Hover one target to show menus or tooltips.",
     parameters: PreviewAutomationHoverInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -192,7 +190,7 @@ const PreviewHoverTool = safeBrowserTool(
 const PreviewSelectTool = browserTool(
   Tool.make("preview_select", {
     description:
-      "Pick options in one native <select>, by value or label. For a custom dropdown, click it open, then click the option. Server tabs only.",
+      "Pick options in one native <select>, by value or label. For a custom dropdown, click it open, then click the option.",
     parameters: PreviewAutomationSelectInput,
     success: Schema.Struct({
       ...PreviewAutomationSelectResult.fields,
@@ -205,7 +203,7 @@ const PreviewSelectTool = browserTool(
 
 const PreviewDragTool = browserTool(
   Tool.make("preview_drag", {
-    description: "Drag one element onto another. Server tabs only.",
+    description: "Drag one element onto another.",
     parameters: PreviewAutomationDragInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -216,7 +214,7 @@ const PreviewDragTool = browserTool(
 const PreviewUploadTool = browserTool(
   Tool.make("preview_upload", {
     description:
-      "Give files from this environment to the page. After a click opens a file picker, `preview_status` reports it. Pass absolute paths to answer it, or an empty list to cancel. Or pass a locator for an <input type=file>. Server tabs only.",
+      "Give files from this environment to the page. After a click opens a file picker, `preview_status` reports it. Pass absolute paths to answer it, or an empty list to cancel. Or pass a locator for an <input type=file>.",
     parameters: PreviewAutomationUploadInput,
     success: PreviewActionResult,
     failure: PreviewToolFailure,
@@ -256,7 +254,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Page tools reached here: data only. Never their chart, save, or dashboard tool to show results.",
+      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Use page tools reached here only to read data. Never call one that creates, saves, or displays anything.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

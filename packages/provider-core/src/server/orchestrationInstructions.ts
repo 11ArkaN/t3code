@@ -18,7 +18,7 @@ Ordinary coding tasks need no T3 tools.
 - Every thread you mention in a reply is a link at first mention: \`[title](t3-thread://v1/<threadId>)\`, exact id, not URL-encoded. Never a bare or short id. Never a plain title.`,
   `### Visuals and preview
 
-- Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. Read its file first if it has one. A screenshot on disk or a text description does not show it. Never serve it or use a page's own chart, save, or dashboard tool; page tools give data only. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
+- Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
 - Never use \`preview_*\` to check or show your own edit, even a frontend edit or an open tab. Do not repeat preview calls from an earlier turn. Use them only when the current request asks for browser work or names a page or tab. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
 ];
 
