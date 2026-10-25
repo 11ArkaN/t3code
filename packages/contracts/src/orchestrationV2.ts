@@ -2008,15 +2008,17 @@ export function isLiveSubagentShell(
 }
 
 /**
- * A settled top-level thread settled before `beforeMs`. Shells that omit older settled threads
- * count every such thread, so the server and clients share this one rule.
+ * A settled top-level thread, not a side chat, settled before `beforeMs`. Shells that omit older
+ * settled threads count every such thread, so the server and clients share this one rule.
  */
 export function isOlderSettledThreadShell(
-  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "settledOverride" | "settledAt">,
+  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "settledOverride" | "settledAt"> &
+    Partial<Pick<OrchestrationV2ThreadShell, "sideChat">>,
   beforeMs: number,
 ): boolean {
   return (
     thread.lineage.relationshipToParent !== "subagent" &&
+    thread.sideChat !== true &&
     thread.settledOverride === "settled" &&
     thread.settledAt !== null &&
     DateTime.toEpochMillis(thread.settledAt) < beforeMs

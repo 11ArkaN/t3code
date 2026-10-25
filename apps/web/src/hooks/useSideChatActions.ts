@@ -18,7 +18,7 @@ import {
 } from "../sideChatStore";
 import {
   useEnvironmentSupportsSideChats,
-  useThreadProjection,
+  useQuietThreadProjection,
   waitForThreadShell,
 } from "../state/entities";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -65,7 +65,7 @@ function reportFailure(title: string, error: unknown) {
 export function useSideChatActions(parentRef: ScopedThreadRef | null) {
   const environmentId = parentRef?.environmentId ?? null;
   const supported = useEnvironmentSupportsSideChats(environmentId);
-  const projection = useThreadProjection(parentRef)?.projection ?? null;
+  const projection = useQuietThreadProjection(parentRef)?.projection ?? null;
   const forkFromRun = useAtomCommand(threadEnvironment.forkFromRun, { reportFailure: false });
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });

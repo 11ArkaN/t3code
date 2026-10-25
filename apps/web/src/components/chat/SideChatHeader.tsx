@@ -15,7 +15,7 @@ import {
   useSideChatActions,
 } from "../../hooks/useSideChatActions";
 import { serverEnvironment } from "../../state/server";
-import { useThreadProjection, useThreadShell } from "../../state/entities";
+import { useQuietThreadProjection, useThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -31,11 +31,11 @@ export function SideChatHeader(props: { environmentId: EnvironmentId; threadId: 
   const navigate = useNavigate();
   const childRef = scopeThreadRef(props.environmentId, props.threadId);
   const shell = useThreadShell(childRef);
-  const childProjection = useThreadProjection(childRef)?.projection ?? null;
+  const childProjection = useQuietThreadProjection(childRef)?.projection ?? null;
   const parentThreadId = shell?.lineage.parentThreadId ?? null;
   const parentRef =
     parentThreadId === null ? null : scopeThreadRef(props.environmentId, parentThreadId);
-  const parentProjection = useThreadProjection(parentRef)?.projection ?? null;
+  const parentProjection = useQuietThreadProjection(parentRef)?.projection ?? null;
   const actions = useSideChatActions(parentRef);
   const [busy, setBusy] = useState(false);
   // The composer's own permission pick is what the next send uses, so the

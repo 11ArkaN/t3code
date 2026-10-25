@@ -290,6 +290,21 @@ describe("omitOlderSettledShells", () => {
     ]);
     expect(result.olderSettled.counts).toEqual([{ projectId: "project-a", count: 4 }]);
   });
+
+  it("keeps side chats, however old, and the older parent above one, without counting them", () => {
+    const sideChat = (id: string, parent: string) =>
+      row(id, 60, {
+        sideChat: true,
+        lineage: {
+          parentThreadId: ThreadId.make(parent),
+          relationshipToParent: "fork",
+          rootThreadId: ThreadId.make(parent),
+        },
+      });
+    const result = omit([...newest, row("parent", 30), sideChat("side", "parent"), row("old", 30)]);
+    expect(result.threads.map((thread) => thread.id).slice(25)).toEqual(["parent", "side"]);
+    expect(result.olderSettled.counts).toEqual([{ projectId: "project-a", count: 2 }]);
+  });
 });
 
 describe("shellStreamItemsFromInitialSnapshot", () => {

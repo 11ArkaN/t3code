@@ -133,6 +133,7 @@ export function omitOlderSettledShells(input: {
   const settledTimes = input.threads
     .flatMap((thread) =>
       thread.lineage.relationshipToParent !== "subagent" &&
+      thread.sideChat !== true &&
       thread.settledOverride === "settled" &&
       thread.settledAt !== null
         ? [DateTime.toEpochMillis(thread.settledAt)]
@@ -143,6 +144,10 @@ export function omitOlderSettledShells(input: {
   const beforeMs = settledTimes[NEWEST_SETTLED_KEPT - 1] ?? settledTimes.at(-1) ?? nowMs;
   const ancestorIds = new Set<string>();
   for (const thread of input.threads) {
+    // A side chat is never older settled, and its parent stays so clients keep it out of lists.
+    if (thread.sideChat === true && thread.lineage.parentThreadId !== null) {
+      ancestorIds.add(thread.lineage.parentThreadId);
+    }
     if (thread.lineage.relationshipToParent !== "subagent") continue;
     if (thread.lineage.parentThreadId !== null) ancestorIds.add(thread.lineage.parentThreadId);
     ancestorIds.add(thread.lineage.rootThreadId);

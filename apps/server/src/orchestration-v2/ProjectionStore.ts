@@ -6610,6 +6610,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         WHERE t.deleted_at IS NULL
           AND json_extract(t.payload_json, '$.archivedAt') IS NULL
           AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
+          AND json_extract(t.payload_json, '$.sideChat') IS NOT 1
           AND json_extract(t.payload_json, '$.settledOverride') = 'settled'
           AND json_extract(t.payload_json, '$.settledAt') IS NOT NULL${
             projectIds === undefined ? sql`` : sql` AND t.project_id IN ${sql.in(projectIds)}`
@@ -6896,6 +6897,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               thread.deletedAt !== null ||
               thread.archivedAt !== null ||
               thread.lineage.relationshipToParent === "subagent" ||
+              thread.sideChat === true ||
               thread.settledOverride !== "settled" ||
               thread.settledAt === null ||
               (projectIds !== undefined && !projectIds.includes(thread.projectId))
