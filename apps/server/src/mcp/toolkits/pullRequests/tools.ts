@@ -32,9 +32,6 @@ const guideDependencies = [
   PullRequestReviewGuideService.PullRequestReviewGuideService,
 ];
 
-const REGISTER_EVERY_PR =
-  "Register every pull request you create for this thread, including each layer of a stack, right after creating it. Do not link pull requests you only read or review.";
-
 export const PullRequestTargetInput = Schema.Struct({
   threadId: Schema.optional(
     ThreadId.annotate({
@@ -43,25 +40,22 @@ export const PullRequestTargetInput = Schema.Struct({
   ),
   url: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description:
-        "The pull request's web URL as its host shows it, for example https://git.example.com/owner/repo/pull/123 or https://git.example.com/group/project/-/merge_requests/123. Preferred when you have it; host, repository and number are read from it.",
+      description: "PR web URL. Preferred. Host, repository, and number come from it.",
     }),
   ),
   repository: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description:
-        "Repository path below the host, for example owner/repo. Required with number when url is omitted.",
+      description: "Repository path, such as owner/repo. Required with `number` when no `url`.",
     }),
   ),
   number: Schema.optional(
     PositiveInt.annotate({
-      description: "Pull request number. Required with repository when url is omitted.",
+      description: "PR number. Required with `repository` when no `url`.",
     }),
   ),
   host: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description:
-        "Host the repository lives on, for example git.example.com. Defaults to the host of this thread's project.",
+      description: "Repository host. Defaults to this project's host.",
     }),
   ),
 });
@@ -282,7 +276,8 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description: `${REGISTER_EVERY_PR} Links a pull request to this thread so T3 Code tracks it, shows its status beside the thread, and settles the thread when it merges. Pass the URL, or repository plus number. Linking an already-linked pull request succeeds with alreadyLinked=true.`,
+  description:
+    "Link a PR to this thread. T3 then shows its status and settles the thread when it merges. Pass the URL, or repository plus number. Safe to call twice. The result sets `alreadyLinked=true` the second time.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -296,7 +291,7 @@ const LinkPullRequestTool = Tool.make("link_pull_request", {
 
 const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   description:
-    "Remove a pull request link from this thread, for example after closing a pull request you opened by mistake. Pass the URL, or repository plus number. Unlinking a pull request that is not linked succeeds with wasLinked=false.",
+    "Remove a PR link from this thread. Pass the URL, or repository plus number. Succeeds with `wasLinked=false` when it was not linked.",
   parameters: PullRequestTargetInput,
   success: UnlinkPullRequestResult,
   failure: PullRequestToolError,
@@ -309,7 +304,8 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
-  description: `List the pull requests linked to a thread (omit threadId for this thread) with their last known host state, and how they chain into stacks (bottom to top). ${REGISTER_EVERY_PR}`,
+  description:
+    "List PRs linked to a thread. Omit `threadId` for this thread. Shows last known state and stack order, bottom to top. Call only when you need the linked PRs. Do not call it as an end-of-work check.",
   parameters: Schema.Struct({
     threadId: Schema.optional(
       ThreadId.annotate({ description: "Thread to list. Omit for this thread." }),
@@ -327,7 +323,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Have T3 Code watch an open pull request for this thread, linking it first if needed. T3 Code checks it every two minutes and wakes you with a message when a check fails, the required checks pass, someone else comments or reviews, or the branch starts to conflict with its base. Use this to monitor or babysit a pull request instead of polling, sleeping, or running a watcher. Only comments posted after this call wake you, so handle the existing ones first, then end your turn. A wake is news, not a merge decision: check readiness yourself before merging. While T3 Code watches, the thread stays in the user's Working list, not their inbox. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox. Watching ends when the pull request merges or closes, when its thread settles or is archived, when T3 Code fails to read it 8 times in a row (a host rate limit only delays it), when the user stops this thread, or when you call unwatch_pull_request. Unsettle the thread before starting a new watch.",
+    "Watch an open PR for this thread. Links it first if needed. T3 checks every two minutes. It wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on until the PR merges or closes, the thread settles, or you unwatch. Do not call this again on a wake. Subagents cannot watch. The parent thread owns the PR.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -342,7 +338,7 @@ const WatchPullRequestTool = Tool.make("watch_pull_request", {
 
 const UnwatchPullRequestTool = Tool.make("unwatch_pull_request", {
   description:
-    "Stop T3 Code from watching a pull request for this thread. The pull request stays linked. Pass the URL, or repository plus number.",
+    "Stop watching a PR for this thread. It stays linked. Pass the URL, or repository plus number.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -390,7 +386,7 @@ export type ReadPullRequestGuideResult = typeof ReadPullRequestGuideResult.Type;
 
 const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
   description:
-    "Write review guides for up to 20 pull requests, the tour a maintainer reads in a pull request's Guide tab. Each run reads its change in a temporary checkout and takes minutes, so this returns once the runs are under way; read a guide with read_pull_request_guide to see when it is written. A guide for the same head that is already running is joined, not restarted; a pull request whose guide is current is written again. Each pull request is read through the project in this environment whose checkout has that repository. Fails while review guides are off on this server.",
+    "Write review guides for up to 20 PRs. A guide is the tour in the PR Guide tab. Returns once runs start. Each run takes minutes in a temporary checkout. A run for the same head is joined, not restarted. Read results with `read_pull_request_guide`. Fails while guides are off on this server.",
   parameters: Schema.Struct({
     pullRequests: Schema.Array(GuideTarget).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   }),
@@ -406,7 +402,7 @@ const WritePullRequestGuidesTool = Tool.make("write_pull_request_guides", {
 
 const ReadPullRequestGuideTool = Tool.make("read_pull_request_guide", {
   description:
-    "Read a pull request's stored review guide and its run: run.Running while one is being written, run.Failed with the reason when the last one failed, guide null when none was written. stale is true after a push the guide has not caught up with. Never starts a run.",
+    "Read a PR's stored review guide and its run state. `guide` is null when none was written. `stale` means the PR head moved since the guide was written. Never starts a run.",
   parameters: GuideTarget,
   success: ReadPullRequestGuideResult,
   failure: PullRequestToolError,

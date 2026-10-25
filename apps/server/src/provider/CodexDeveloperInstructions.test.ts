@@ -43,23 +43,26 @@ describe("Codex runtime context", () => {
 });
 
 describe("Codex orchestration context", () => {
-  it("routes same-child follow-ups to t3_thread_send and independent reviews to delegate_task", () => {
+  it("sends every subagent and review round through delegate_task", () => {
     const orchestration = Object.entries(buildCodexAdditionalContext({ model: "gpt-6.1-sol" }))
       .filter(([key]) => key.startsWith("t3_code_orchestration_"))
       .map(([, entry]) => entry.value)
       .join("\n");
 
     NodeAssert.ok(
+      orchestration.includes("Use `delegate_task` for every subagent or delegate in T3 Code"),
+    );
+    NodeAssert.ok(
       orchestration.includes(
         "For independent T3 delegated review rounds, call `delegate_task` again.",
       ),
     );
     NodeAssert.ok(
-      orchestration.includes(
-        "For a follow-up that needs the same child's conversation, use `t3_thread_send` on its `childThreadId`.",
-      ),
+      orchestration.includes("Never send a new round with `t3_thread_send` to a `childThreadId`."),
     );
-    NodeAssert.ok(!orchestration.includes("Do not use `t3_thread_send`"));
+    NodeAssert.ok(!orchestration.includes("Prefer native subagent tools"));
+    // The ACP terminal fallback is ACP-only; Codex agents never need it.
+    NodeAssert.ok(!orchestration.includes("acp-mcp-call"));
   });
 });
 

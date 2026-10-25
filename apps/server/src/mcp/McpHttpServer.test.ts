@@ -428,7 +428,8 @@ it("routes same-child follow-ups to t3_thread_send and independent reviews to de
   expect(description).toContain(
     "For a follow-up that needs the same child's conversation, use t3_thread_send on its childThreadId.",
   );
-  expect(description).not.toContain("not the target for starting another");
+  expect(description).toContain("end your turn instead of polling");
+  expect(description).not.toContain("Prefer native");
 });
 
 it.effect(
@@ -447,10 +448,8 @@ it.effect(
       const linkTool = server.tools.find(({ tool }) => tool.name === "link_pull_request");
       expect(linkTool?.tool.annotations?.idempotentHint).toBe(true);
       expect(linkTool?.tool.annotations?.openWorldHint).toBe(false);
-      expect(linkTool?.tool.description).toContain("Register every pull request you create");
-      expect(linkTool?.tool.description).toContain(
-        "Do not link pull requests you only read or review.",
-      );
+      expect(linkTool?.tool.description).toContain("Link a PR to this thread");
+      expect(linkTool?.tool.description).toContain("Safe to call twice");
 
       const denied = yield* server
         .callTool({ name: "list_thread_pull_requests", arguments: {} })
