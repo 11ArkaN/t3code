@@ -261,6 +261,7 @@ function ChangedFilesRows({
   const [range, setRange] = useState({ start: 0, end: 40, rowHeight: 28 });
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
 
+  const rowCount = rows.length;
   useLayoutEffect(() => {
     const container = containerRef.current;
     const rowSize = rowSizeRef.current;
@@ -288,12 +289,12 @@ function ChangedFilesRows({
       const viewportHeight = scrollElement?.clientHeight ?? document.documentElement.clientHeight;
       const start = Math.max(
         0,
-        Math.min(rows.length, Math.floor((viewportTop - listTop) / rowHeight) - ROW_OVERSCAN),
+        Math.min(rowCount, Math.floor((viewportTop - listTop) / rowHeight) - ROW_OVERSCAN),
       );
       const end = Math.max(
         start,
         Math.min(
-          rows.length,
+          rowCount,
           Math.ceil((viewportTop + viewportHeight - listTop) / rowHeight) + ROW_OVERSCAN,
         ),
       );
@@ -322,7 +323,7 @@ function ChangedFilesRows({
       if (frame) cancelAnimationFrame(frame);
       stopObserving();
     };
-  }, [virtualized, rows.length]);
+  }, [virtualized, rowCount]);
 
   const focusedIndex =
     focusedPath === null ? -1 : rows.findIndex((row) => row.node.path === focusedPath);

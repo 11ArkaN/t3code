@@ -4,11 +4,14 @@
   "rules": { "types": "off", "nsTypes": "off" },
   // Temporary for this stacked PR: these exports gain their consumers in a later layer.
   "ignoreIssues": {
+    "apps/web/src/components/chat/citationProcedure.ts": ["exports"],
+    "apps/web/src/components/chat/threadFindStore.ts": ["exports"],
+    "apps/web/src/components/chat/threadOverlayRetention.ts": ["exports"],
+    "apps/web/src/components/chat/timelineViewport.ts": ["exports"],
     "apps/web/src/components/cloud/relayDiscoveryStore.ts": ["exports"],
     "apps/web/src/components/device/deviceStreamSession.ts": ["exports"],
     "apps/web/src/components/preview/agentOpenedPreviews.ts": ["exports"],
     "apps/web/src/composerDraftStore.ts": ["exports"],
-    "apps/web/src/hooks/useDeadline.ts": ["exports"],
     "apps/web/src/hooks/useLiveRegion.ts": ["exports"],
     "apps/web/src/hooks/useRemoveClonedProject.ts": ["exports"],
     "apps/web/src/hooks/useTheme.ts": ["exports"],
