@@ -238,8 +238,11 @@ function makeEncoderPage() {
     document: { createElement: () => canvas },
     Path2D: function Path2D() {},
     MediaRecorder: FakeMediaRecorder,
-    createImageBitmap: async () => {
+    createImageBitmap: async (blob: Blob) => {
+      const decoding = blob.text();
       await decodeGate?.promise;
+      decoded.push(await decoding);
+      if (decoded.length === decodedTarget?.count) decodedTarget.reached.resolve();
       return { width: 1280, height: 800, close() {} };
     },
     atob,
@@ -263,6 +266,8 @@ const encoderStreams: Array<{ frameRate: number | undefined; bitsPerSecond: numb
 const contextRequests: Array<{ profileId: string; isolated: boolean }> = [];
 let contextGate: PromiseWithResolvers<void> | null = null;
 let decodeGate: PromiseWithResolvers<void> | null = null;
+const decoded: Array<string> = [];
+let decodedTarget: { count: number; reached: PromiseWithResolvers<void> } | null = null;
 let pageCopy = "";
 let keyCopy = "";
 let focusedFrame: ReturnType<typeof makeFrame> | null = null;
@@ -372,6 +377,8 @@ beforeEach(() => {
   contextRequests.length = 0;
   contextGate = null;
   decodeGate = null;
+  decoded.length = 0;
+  decodedTarget = null;
   contextFailure = null;
   initialNavigation = null;
   pageCopy = "";
@@ -528,7 +535,7 @@ it.live.each([
     ).pipe(Effect.provide(layer)),
 );
 
-// Chrome sends the next screencast frame only after the previous one is acked.
+// Chrome stops sending screencast frames while too many are unacked.
 it.live("recordings keep receiving screencast frames while the encoder decodes", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -538,21 +545,24 @@ it.live("recordings keep receiving screencast frames while the encoder decodes",
         candidate.send.mock.calls.some(([method]) => method === "Page.startScreencast"),
       )!;
       decodeGate = Promise.withResolvers<void>();
-      for (const sessionId of [1, 2, 3]) {
+      decodedTarget = { count: decoded.length + 2, reached: Promise.withResolvers<void>() };
+      for (const [sessionId, data] of [
+        [1, "first"],
+        [2, "stale"],
+        [3, "latest"],
+      ] as const) {
         session.emit("Page.screencastFrame", {
-          data: "ZnJhbWU=",
+          data: Buffer.from(data).toString("base64"),
           sessionId,
           metadata: { deviceWidth: 1280 },
         });
       }
-      yield* Effect.promise(() =>
-        vi.waitFor(() =>
-          expect(
-            session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck"),
-          ).toHaveLength(3),
-        ),
-      );
+      expect(
+        session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck"),
+      ).toHaveLength(3);
       decodeGate.resolve();
+      yield* Effect.promise(() => decodedTarget!.reached.promise);
+      expect(decoded.slice(-2)).toEqual(["first", "latest"]);
     }),
   ).pipe(Effect.provide(layer)),
 );
