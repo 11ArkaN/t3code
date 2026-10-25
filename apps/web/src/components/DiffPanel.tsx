@@ -758,10 +758,10 @@ export default function DiffPanel({
         <DropdownMenu>
           <div
             className={cn(
-              "flex min-w-0 max-w-full items-center",
-              selectedCommitSha === null && "shrink-0",
+              "min-w-0 max-w-full items-center",
+              selectedCommitSha === null && "flex shrink-0",
               selectedCommitSha !== null &&
-                "h-7 gap-1 rounded-md bg-secondary px-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/90 has-data-popup-open:bg-secondary/80 sm:h-6 sm:text-xs",
+                "grid h-7 grid-cols-[minmax(0,1fr)_auto_auto] gap-1 rounded-md bg-secondary px-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/90 has-data-popup-open:bg-secondary/80 sm:h-6 sm:text-xs",
             )}
             role="group"
             aria-label="Diff scope"
@@ -774,7 +774,7 @@ export default function DiffPanel({
                       selectedCommitSha !== null ? (
                         <button
                           type="button"
-                          className="flex h-full min-w-0 cursor-pointer items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          className="col-span-3 col-start-1 row-start-1 grid h-full min-w-0 cursor-pointer grid-cols-subgrid items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         />
                       ) : (
                         <Button size="xs" variant="secondary" />
@@ -786,7 +786,12 @@ export default function DiffPanel({
                 }
               >
                 <span className="truncate">{selectedScopeLabel}</span>
-                <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+                <ChevronDownIcon
+                  className={cn(
+                    "size-3.5 shrink-0 opacity-70",
+                    selectedCommitSha !== null && "col-start-3",
+                  )}
+                />
               </TooltipTrigger>
               <TooltipPopup side="top">{selectedScopeLabel}</TooltipPopup>
             </Tooltip>
@@ -799,11 +804,11 @@ export default function DiffPanel({
                         href={selectedCommitUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                        className="relative z-10 col-start-2 row-start-1 shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                         onClick={(event) => openPrLink(event, selectedCommitUrl)}
                       />
                     ) : (
-                      <span className="shrink-0 font-mono text-xs text-muted-foreground" />
+                      <span className="relative z-10 col-start-2 row-start-1 shrink-0 font-mono text-xs text-muted-foreground" />
                     )
                   }
                 >
