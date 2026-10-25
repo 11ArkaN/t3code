@@ -15,7 +15,6 @@ import {
 } from "@t3tools/client-runtime/state/thread-search";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { useFocusEffect } from "@react-navigation/native";
 import { use, useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   Platform,
@@ -33,6 +32,7 @@ import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSw
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { cn } from "../../lib/cn";
+import { useDeadlinePassed, useNowMinute } from "../../lib/clock";
 import {
   ANDROID_READING_MAX_WIDTH,
   deriveCenteredContentHorizontalPadding,
@@ -244,7 +244,6 @@ function renderHomeScrollView(props: ScrollViewProps) {
 export function HomeScreen(props: HomeScreenProps) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const workspace = useWorkspaceTabs();
-  const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
   const primaryColumn = use(NativePrimaryColumnContext);
   const contentBackground = primaryColumn ? "bg-drawer" : "bg-screen";
   const containerClassName = cn(
@@ -319,15 +318,22 @@ export function HomeScreen(props: HomeScreenProps) {
   };
   const onFabScroll = useFabScroll();
   const listRef = useRef<LegendListRef>(null);
+  const [initialScrollOffset] = useState(() => workspace?.getScrollOffset("threads") ?? 0);
+  // Cancelling search restores the offset recorded when search opened. The
+  // toolbar that cancels has no handle on this list, so the list scrolls itself
+  // once it sees the tab come back to resting.
   const searchMode = workspace?.state.tabs.threads.searchMode;
   const restoredOffset = workspace?.state.tabs.threads.scrollOffset;
+  const previousSearchMode = useRef(searchMode);
   useEffect(() => {
-    if (searchMode !== "resting" || restoredOffset === undefined) return;
-    listRef.current?.scrollToOffset({
+    const restoringSearch = previousSearchMode.current !== "resting" && searchMode === "resting";
+    previousSearchMode.current = searchMode;
+    if (!restoringSearch || restoredOffset === undefined) return;
+    void listRef.current?.scrollToOffset({
       offset: restoredOffset - (Platform.OS === "ios" ? insets.top : 0),
       animated: false,
     });
-  }, [searchMode, insets.top, restoredOffset]);
+  }, [searchMode, restoredOffset, insets.top]);
   const swipeRowActivation = createSwipeRowActivation();
   const activateVisibleRows = (rows: ReadonlyArray<ThreadListV2ListItem>) => {
     const state = listRef.current?.getState();
@@ -338,7 +344,6 @@ export function HomeScreen(props: HomeScreenProps) {
   };
   // Status-bar, accessibility and programmatic scrolls bypass the gate; activate visible rows after settling.
   const activationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(activationTimerRef.current), []);
   const handleListScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onFabScroll?.(event);
     if (workspace)
@@ -362,6 +367,7 @@ export function HomeScreen(props: HomeScreenProps) {
   const { swipeEnabled, scrollGateHandlers } = useSwipeableScrollGate({
     onScroll: handleListScroll,
     onScrollBeginDrag: handleScrollBeginDrag,
+    onSettle: () => activateVisibleRows(listRef.current?.getState().data ?? []),
   });
 
   const projectScopes = buildHomeProjectScopes({
@@ -420,15 +426,14 @@ export function HomeScreen(props: HomeScreenProps) {
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  // Keep time in state; the compiler would cache a render-time new Date().
-  const [now, setNow] = useState(() => new Date().toISOString());
+  // The list's clock comes from stores: the compiler caches anything computed from
+  // it on its other inputs, so a render-time `new Date()` would stop moving. The
+  // minute tick advances it, and so does the next snooze wake below.
+  const minuteTick = useNowMinute();
+  const [wokenAt, setWokenAt] = useState(() => new Date().toISOString());
+  const minuteNow = `${minuteTick}:00.000Z`;
+  const now = minuteNow > wokenAt ? minuteNow : wokenAt;
   const nowMinute = now.slice(0, 16);
-  const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
-  useFocusEffect(() => {
-    setNow(new Date().toISOString());
-    const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
-    return () => clearInterval(id);
-  });
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
     providersByEnvironmentId,
@@ -442,7 +447,7 @@ export function HomeScreen(props: HomeScreenProps) {
     titleRegenerationEnvironmentIds,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
-  const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick);
+  const pendingOrder = usePendingThreadOrder();
   const {
     layout: threadListV2Layout,
     items: threadListV2Items,
@@ -470,18 +475,13 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
   });
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;
-  useEffect(() => {
-    if (nextSnoozeWakeAt === null) return;
-    const wakeAtMs = Date.parse(nextSnoozeWakeAt);
-    if (Number.isNaN(wakeAtMs)) return;
-    const delayMs = Math.min(Math.max(0, wakeAtMs - Date.now()) + 50, 2_147_483_647);
-    const id = setTimeout(() => {
-      setNow(new Date().toISOString());
-      bumpSnoozeWakeTick((tick) => tick + 1);
-    }, delayMs);
-    return () => clearTimeout(id);
-    // snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
-  }, [nextSnoozeWakeAt, snoozeWakeTick]);
+  const nextSnoozeWakeMs = nextSnoozeWakeAt === null ? null : Date.parse(nextSnoozeWakeAt);
+  const snoozeWakePassed = useDeadlinePassed(nextSnoozeWakeMs);
+  // The layout above still used the clock from before the wake. The wake is a
+  // lower bound for the clock, and exactly the instant the thread unsnoozes at.
+  if (snoozeWakePassed && nextSnoozeWakeMs !== null && Date.parse(now) < nextSnoozeWakeMs) {
+    setWokenAt(new Date(nextSnoozeWakeMs).toISOString());
+  }
   // Called as `props.onSelectThread(...)`, the compiler would cache this handler on the whole
   // props object, which is new on every render of Home's parent.
   const { onSelectThread } = props;
@@ -498,9 +498,6 @@ export function HomeScreen(props: HomeScreenProps) {
     onSelectThread(thread);
   };
   useThreadJumpShortcuts(threadListV2Items, selectThread);
-  useEffect(() => {
-    if (swipeEnabled) activateVisibleRows(threadListV2Items);
-  }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
 
   const renderV2Item = ({ item }: { readonly item: ThreadListV2ListItem }) => {
     if (item.type === "v2-pending") {
@@ -788,6 +785,11 @@ export function HomeScreen(props: HomeScreenProps) {
               itemLayoutAnimation={primaryColumn ? THREAD_SIDEBAR_ROW_LAYOUT : undefined}
               ref={listRef}
               onLoad={() => activateVisibleRows(threadListV2Items)}
+              // Data changes and programmatic scrolls move the visible range
+              // without a drag; a drag activates once the scroll gate settles.
+              onViewableItemsChanged={() => {
+                if (swipeEnabled) activateVisibleRows(listRef.current?.getState().data ?? []);
+              }}
               onTouchStart={(event) => trackListTouches(event, true)}
               onTouchEnd={(event) => trackListTouches(event, false)}
               onTouchCancel={(event) => trackListTouches(event, false)}

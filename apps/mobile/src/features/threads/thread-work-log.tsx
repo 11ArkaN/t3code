@@ -33,9 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  AccessibilityInfo,
   Animated as NativeAnimated,
-  AppState,
   type ColorValue,
   Easing,
   Pressable,
@@ -63,6 +61,7 @@ import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { AppText as Text } from "../../components/ui/AppText";
 import { T3Wordmark } from "../../components/T3Wordmark";
 import { BrowserAppIcon } from "./BrowserAppIcon";
+import { useAppActive, useReduceMotionEnabled } from "../../lib/appState";
 import { cn } from "../../lib/cn";
 import { THREAD_WORK_ROW_MIN_HEIGHT, type deriveThreadWorkLogSizing } from "../../lib/layout";
 import {
@@ -100,6 +99,7 @@ import Animated, {
   LinearTransition,
   ReduceMotion,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
@@ -168,14 +168,13 @@ export function ThreadDisclosureChevron(props: {
   readonly tintColor: ColorValue;
 }) {
   const expandedAngle = props.collapsedDirection === "right" ? 90 : 180;
-  const rotation = useSharedValue(props.expanded ? expandedAngle : 0);
-
-  useLayoutEffect(() => {
-    rotation.value = withTiming(props.expanded ? expandedAngle : 0, {
+  const targetAngle = props.expanded ? expandedAngle : 0;
+  const rotation = useDerivedValue(() =>
+    withTiming(targetAngle, {
       duration: THREAD_DISCLOSURE_TRANSITION_MS,
       reduceMotion: ReduceMotion.System,
-    });
-  }, [expandedAngle, props.expanded, rotation]);
+    }),
+  );
 
   const rotationStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
@@ -263,8 +262,8 @@ export function ShimmeringWorkContent(props: {
 }) {
   const [availableWidth, setAvailableWidth] = useState(0);
   const [textWidth, setTextWidth] = useState(0);
-  const [appIsActive, setAppIsActive] = useState(AppState.currentState === "active");
-  const [reducedMotion, setReducedMotion] = useState(true);
+  const appIsActive = useAppActive();
+  const reducedMotion = useReduceMotionEnabled();
   const screenIsFocused = useIsFocused();
   const progress = useAnimatedValue(0);
   const gradientId = `work-shimmer-${useId().replaceAll(":", "")}`;
@@ -272,22 +271,6 @@ export function ShimmeringWorkContent(props: {
     availableWidth,
     (props.showIcon ? SHIMMER_ICON_AND_GAP_WIDTH : 0) + Math.ceil(textWidth),
   );
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      setAppIsActive(state === "active");
-    });
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReducedMotion);
-    const subscription = AccessibilityInfo.addEventListener(
-      "reduceMotionChanged",
-      setReducedMotion,
-    );
-    return () => subscription.remove();
-  }, []);
 
   // Runs on React Native's native driver instead of Reanimated, whose
   // per-frame commits starve React's while commit pausing is disabled
