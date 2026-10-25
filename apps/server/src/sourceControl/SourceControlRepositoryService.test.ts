@@ -383,7 +383,11 @@ it.effect.each([
   }),
 );
 
-it.effect("keeps a query token out of a failed clone's error text", () =>
+it.effect.each([
+  ["a plain token", "s3cret"],
+  ["a token with an apostrophe", "s3'cret"],
+  ["a token with a double quote", 's3"cret'],
+] as const)("keeps %s in the query out of a failed clone's error text", ([, token]) =>
   Effect.gen(function* () {
     const error = yield* Effect.flip(
       cloneInTemporaryDirectory(
@@ -393,7 +397,7 @@ it.effect("keeps a query token out of a failed clone's error text", () =>
               // Git quotes the URL it was given, query included, and appends a slash.
               yield* (
                 input.progress?.onStderrLine?.(
-                  "fatal: unable to access 'https://github.com/octocat/t3code.git?access_token=s3cret/': Could not resolve host: github.com",
+                  `fatal: unable to access 'https://github.com/octocat/t3code.git?access_token=${token}/': Could not resolve host: github.com`,
                 ) ?? Effect.void
               );
               return yield* new GitCommandError({
@@ -405,7 +409,7 @@ it.effect("keeps a query token out of a failed clone's error text", () =>
               });
             }),
         },
-        { remoteUrl: "https://github.com/octocat/t3code.git?access_token=s3cret" },
+        { remoteUrl: `https://github.com/octocat/t3code.git?access_token=${token}` },
       ),
     );
 
