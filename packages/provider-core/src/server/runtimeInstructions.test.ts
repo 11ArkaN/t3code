@@ -19,16 +19,21 @@ describe("buildRuntimeInstructions", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 
     assert.notInclude(instructions, "Creation, pending checks, or a merge ask alone is not enough");
-    assert.include(instructions, "Links and watches persist across pushes and wakes.");
+    assert.include(instructions, "Links and watches persist across pushes.");
+    // The wake message itself carries the do-not-re-watch rule.
+    assert.notInclude(instructions, "On a wake");
     assert.include(
       instructions,
-      "Call watch_pull_request only when asked to monitor or babysit, or when a step you were asked to do is blocked on checks or reviews",
+      "Call watch_pull_request when asked to monitor or babysit, or when work you were asked to do, such as a merge, still waits on checks or reviews, even after an earlier unwatch",
     );
     assert.notInclude(instructions, "merge it now");
     assert.include(instructions, "Otherwise act now or hand back.");
-    assert.include(instructions, "your first tool call is watch_pull_request");
+    assert.include(instructions, "then watch and end your turn");
     assert.include(instructions, "never watch, even if the brief says babysit");
-    assert.include(instructions, "ends with one line: PR URL, head SHA, check and review state");
+    assert.include(
+      instructions,
+      "A child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>.",
+    );
     assert.include(instructions, "Never wait with sleep");
     assert.include(instructions, "call unwatch_pull_request");
   });
