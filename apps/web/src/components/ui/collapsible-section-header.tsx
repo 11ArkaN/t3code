@@ -62,7 +62,7 @@ export function CollapsibleSectionHeader({
         className={cn(
           "shrink-0 transition-transform",
           variant === "row" ? "size-4 text-muted-foreground" : "size-3",
-          !expanded && "-rotate-90",
+          !expanded && "rotate-180 redesign:-rotate-90",
         )}
       />
     </button>

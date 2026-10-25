@@ -4,6 +4,8 @@
 @custom-variant light (&:not(.dark, .dark *));
 /* Window Controls Overlay: active when Electron exposes native titlebar control geometry. */
 @custom-variant wco (&:is(.wco, .wco *));
+/* Beta "New design" (Settings -> Beta) sets data-redesign on <html>. */
+@custom-variant redesign (&:where([data-redesign] *));
 
 /* Secondary hovering pointers reveal sidebar actions on touch-primary devices. */
 @custom-variant any-hover {
@@ -1243,8 +1245,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --accent-foreground: #f7f9ff;
     --muted: #0a0a0a;
     --muted-foreground: #a3a3a3;
-    /* Row metadata sits a step below read titles (75% white). */
-    --secondary-label: #8f8f8f;
     --border: rgb(255 255 255 / 8%);
     --input: rgb(255 255 255 / 18%);
     --sidebar: var(--card);
@@ -1661,6 +1661,11 @@ body {
   font-family: var(--font-sans);
   margin: 0;
   padding: 0;
+}
+
+/* New design: sidebar row metadata sits a step below read titles (75% white). */
+.dark[data-redesign] [data-app-sidebar] {
+  --secondary-label: #8f8f8f;
 }
 
 /* Lighter default icon stroke. Zero specificity, so stroke-* classes still win

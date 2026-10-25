@@ -198,7 +198,7 @@ function SidebarProviderStack(props: {
       acpRegistryIconUrl={currentEntry.acpRegistryIconUrl}
       showBadge={showInstanceBadge}
       size="compact"
-      iconClassName="opacity-50 grayscale"
+      iconClassName="opacity-60 redesign:opacity-50 redesign:grayscale"
     />
   );
   if (stack.length === 1) {
@@ -978,12 +978,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             ? cn(
                 "truncate",
                 shouldRecede
-                  ? "text-foreground/75 group-hover/sidebar-row:text-foreground group-focus-visible/sidebar-row:text-foreground"
+                  ? "text-secondary-label redesign:text-foreground/75 redesign:group-hover/sidebar-row:text-foreground redesign:group-focus-visible/sidebar-row:text-foreground"
                   : isUnread || isWoke || status === "input" || status === "request"
                     ? "text-foreground"
                     : status === "failed"
                       ? "text-foreground/95"
-                      : "text-foreground",
+                      : "text-foreground/90 redesign:text-foreground",
               )
             : cn(
                 "truncate group-focus-within/sidebar-row:text-foreground group-hover/sidebar-row:text-foreground",
@@ -1284,7 +1284,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     // Repeated brand colors outshout titles; color returns on the row in focus.
                     !props.isActive &&
                       !projectIconColors &&
-                      "opacity-60 grayscale group-focus-visible/sidebar-row:opacity-100 group-focus-visible/sidebar-row:grayscale-0 group-any-hover/sidebar-row:opacity-100 group-any-hover/sidebar-row:grayscale-0",
+                      "redesign:opacity-60 redesign:grayscale redesign:group-focus-visible/sidebar-row:opacity-100 redesign:group-focus-visible/sidebar-row:grayscale-0 redesign:group-any-hover/sidebar-row:opacity-100 redesign:group-any-hover/sidebar-row:grayscale-0",
                   )}
                 />
               ) : null}
@@ -1292,7 +1292,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 label for the wider row controls. */}
               {pinIndicator}
               {props.projectDisplayName ? (
-                <span className="min-w-0 flex-1 truncate text-secondary-label text-xs">
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
+                    shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
+                  )}
+                >
                   {props.projectDisplayName}
                 </span>
               ) : (
@@ -1449,7 +1454,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {thread.branch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
-                  <span className="flex min-w-0 flex-1">
+                  <span className="flex min-w-0 flex-1 text-muted-foreground/40 redesign:text-inherit">
                     <MiddleTruncate value={thread.branch} showTitle={false} />
                   </span>
                 </>
@@ -1458,9 +1463,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   <EnvironmentMachineIcon
                     aria-hidden
                     kind={props.environmentMachine}
-                    className="size-3 shrink-0"
+                    className="size-3 shrink-0 text-muted-foreground/40 redesign:text-inherit"
                   />
-                  <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground/40 redesign:text-inherit">
+                    {props.scratchMachineLabel}
+                  </span>
                 </>
               ) : (
                 <span className="flex-1" />

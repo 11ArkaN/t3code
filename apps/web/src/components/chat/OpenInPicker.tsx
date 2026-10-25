@@ -412,11 +412,11 @@ export const OpenInPicker = memo(function OpenInPicker({
               getOpenInIconClass(primaryOption.kind),
               // Full-color app icons outshout the panel's line icons until the row is in use.
               isPanel &&
-                "grayscale dark:opacity-70 group-hover/details-split:opacity-100 group-hover/details-split:grayscale-0 group-has-[[data-popup-open]]/details-split:opacity-100 group-has-[[data-popup-open]]/details-split:grayscale-0",
+                "redesign:grayscale redesign:dark:opacity-70 redesign:group-hover/details-split:opacity-100 redesign:group-hover/details-split:grayscale-0 redesign:group-has-[[data-popup-open]]/details-split:opacity-100 redesign:group-has-[[data-popup-open]]/details-split:grayscale-0",
               // A hairline keeps pale app icons from dissolving into the card.
               isPanel &&
                 primaryOption.kind === "brand" &&
-                "rounded-sm ring-1 ring-black/10 dark:ring-white/15",
+                "redesign:rounded-sm redesign:ring-1 redesign:ring-black/10 redesign:dark:ring-white/15",
             )}
           />
         ) : isPanel ? (

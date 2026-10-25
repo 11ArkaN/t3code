@@ -3,6 +3,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { type ReactNode } from "react";
 import { cn } from "~/lib/utils";
+import { useClientSettings } from "../../hooks/useSettings";
 import {
   animateSidebarLayoutChanges,
   sidebarMarkerId,
@@ -115,6 +116,8 @@ export function SidebarSectionHeader(props: {
       : props.marker === "snoozed-header"
         ? "snoozed"
         : "settled";
+  const redesign = useClientSettings((s) => s.redesignEnabled);
+  const collapsedCount = props.toggle.expanded ? null : props.count;
   return (
     <SortableSidebarMarker
       marker={props.marker}
@@ -127,12 +130,13 @@ export function SidebarSectionHeader(props: {
         tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
         data-testid={`sidebar-${shelf}-shelf-toggle`}
         accessory={
-          props.toggle.expanded ? null : (
-            <span className="font-normal tabular-nums">{props.count}</span>
-          )
+          redesign && collapsedCount !== null ? (
+            <span className="font-normal tabular-nums">{collapsedCount}</span>
+          ) : null
         }
       >
         {props.label}
+        {!redesign && collapsedCount !== null ? ` (${collapsedCount})` : null}
       </CollapsibleSectionHeader>
     </SortableSidebarMarker>
   );

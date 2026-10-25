@@ -292,7 +292,9 @@ function PullRequestBadge({
             aria-hidden
             className={cn("size-3 shrink-0", presentation.toneClassName)}
           />
-          <span className="text-secondary-label">{presentation.text}</span>
+          <span className={cn(presentation.toneClassName, "redesign:text-secondary-label")}>
+            {presentation.text}
+          </span>
         </span>
       </TooltipTrigger>
       <TooltipPopup
