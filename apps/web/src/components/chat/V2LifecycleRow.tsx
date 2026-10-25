@@ -44,6 +44,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import {
   applyProviderInstanceSettings,
+  deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   normalizeProviderAccentColor,
   shouldShowInstanceBadge,
@@ -337,10 +338,12 @@ export function EnvironmentSubagentAvatar({
   );
   const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
   const badgeLabel = useAtomValue(providersAtom, (providers) => {
-    const derived = deriveProviderInstanceEntries(providers ?? EMPTY_SERVER_PROVIDERS);
-    const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
-    const entry = entries.find((candidate) => candidate.instanceId === providerInstanceId);
-    return entry !== undefined && shouldShowInstanceBadge(entry, entries)
+    const scopedProviders = providers ?? EMPTY_SERVER_PROVIDERS;
+    const entries = deriveProviderEntriesByEnvironment([
+      settings ? [environmentId, scopedProviders, settings] : [environmentId, scopedProviders],
+    ]).get(environmentId);
+    const entry = entries?.get(providerInstanceId);
+    return entry !== undefined && shouldShowInstanceBadge(entry, entries?.values() ?? [])
       ? entry.displayName
       : undefined;
   });
