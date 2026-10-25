@@ -4,7 +4,10 @@
   "rules": { "types": "off", "nsTypes": "off" },
   // Temporary for this stacked PR: these exports gain their consumers in a later layer.
   "ignoreIssues": {
+    "apps/web/src/components/preview/agentOpenedPreviews.ts": ["exports"],
+    "apps/web/src/composerDraftStore.ts": ["exports"],
     "apps/web/src/hooks/useDeadline.ts": ["exports"],
+    "apps/web/src/lib/documentActivity.ts": ["exports"],
   },
   // These executables are supplied by the OS or installed separately from npm.
   "ignoreBinaries": ["eas", "file", "mkfifo", "pkill", "pkg-config", "plutil", "sips"],
