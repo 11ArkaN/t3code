@@ -6,18 +6,6 @@ import * as Effect from "effect/Effect";
 
 const STORAGE_KEY = "t3code:thread-triage-outbox";
 
-/** Resolves with the release once the lock is granted, so the locked work runs on the caller's fiber. */
-const acquireLock = (locks: LockManager) =>
-  Effect.tryPromise({
-    try: () =>
-      new Promise<() => void>((granted, rejected) => {
-        locks
-          .request(STORAGE_KEY, () => new Promise<void>((release) => granted(() => release())))
-          .catch(rejected);
-      }),
-    catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
-  });
-
 /** Kept out of the environment cache so clearing cached data keeps unsynced settles and snoozes. */
 export const browserThreadTriageOutboxStore = makeThreadTriageOutboxStore({
   read: Effect.try({
@@ -38,8 +26,33 @@ export const browserThreadTriageOutboxStore = makeThreadTriageOutboxStore({
           }),
         )
       : Effect.acquireUseRelease(
-          acquireLock(navigator.locks),
-          () => effect,
-          (release) => Effect.sync(release),
+          // Register cleanup before waiting, so the wait remains interruptible.
+          Effect.sync(() => ({
+            controller: new AbortController(),
+            release: undefined as (() => void) | undefined,
+          })),
+          (lock) =>
+            Effect.tryPromise({
+              try: () =>
+                new Promise<void>((granted, rejected) => {
+                  navigator.locks
+                    .request(
+                      STORAGE_KEY,
+                      { signal: lock.controller.signal },
+                      () =>
+                        new Promise<void>((release) => {
+                          lock.release = release;
+                          granted();
+                        }),
+                    )
+                    .catch(rejected);
+                }),
+              catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
+            }).pipe(Effect.andThen(effect)),
+          (lock) =>
+            Effect.sync(() => {
+              lock.controller.abort();
+              lock.release?.();
+            }),
         ),
 });
