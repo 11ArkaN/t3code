@@ -814,6 +814,10 @@ export function ThreadStatusLabel({
   status: ThreadStatusPill;
   compact?: boolean;
 }) {
+  const label = status.questionDotClass ? `${status.label} · Question waiting` : status.label;
+  const questionDot = status.questionDotClass ? (
+    <span className={`size-1.5 shrink-0 rounded-full ${status.questionDotClass}`} />
+  ) : null;
   if (compact) {
     return (
       <Tooltip>
@@ -821,8 +825,8 @@ export function ThreadStatusLabel({
           render={
             <span
               role="img"
-              aria-label={status.label}
-              className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
+              aria-label={label}
+              className={`inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center gap-0.5 ${status.colorClass}`}
             />
           }
         >
@@ -831,8 +835,9 @@ export function ThreadStatusLabel({
               status.pulse ? "motion-safe:animate-status-pulse" : ""
             }`}
           />
+          {questionDot}
         </TooltipTrigger>
-        <TooltipPopup side="top">{status.label}</TooltipPopup>
+        <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
     );
   }
@@ -843,7 +848,7 @@ export function ThreadStatusLabel({
         render={
           <span
             role="img"
-            aria-label={status.label}
+            aria-label={label}
             className={`inline-flex items-center gap-1 text-3xs ${status.colorClass}`}
           />
         }
@@ -853,9 +858,10 @@ export function ThreadStatusLabel({
             status.pulse ? "motion-safe:animate-status-pulse" : ""
           }`}
         />
+        {questionDot}
         <span className="hidden md:inline">{status.label}</span>
       </TooltipTrigger>
-      <TooltipPopup side="top">{status.label}</TooltipPopup>
+      <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }

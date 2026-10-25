@@ -1079,6 +1079,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
               ) : null}
             </Text>
+            {status === "working" && thread.hasPendingQuestion === true ? (
+              <SymbolView
+                name="questionmark.bubble"
+                size={13}
+                tintColorClassName={
+                  selected
+                    ? selectedThreadRowColors.iconTintClassName
+                    : "accent-adaptive-indigo-600-300"
+                }
+                type="monochrome"
+                weight="semibold"
+              />
+            ) : null}
           </View>
         ) : (
           <Text
