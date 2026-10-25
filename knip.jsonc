@@ -7,7 +7,6 @@
     "apps/web/src/components/cloud/relayDiscoveryStore.ts": ["exports"],
     "apps/web/src/components/device/deviceStreamSession.ts": ["exports"],
     "apps/web/src/components/preview/agentOpenedPreviews.ts": ["exports"],
-    "apps/web/src/components/preview/collapseRightPanel.ts": ["exports"],
     "apps/web/src/composerDraftStore.ts": ["exports"],
     "apps/web/src/hooks/useDeadline.ts": ["exports"],
     "apps/web/src/hooks/useLiveRegion.ts": ["exports"],

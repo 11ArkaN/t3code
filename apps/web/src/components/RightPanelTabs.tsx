@@ -53,6 +53,7 @@ import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { resolveShortcutCommand, type ShortcutMatchContext } from "~/keybindings";
+import { registerCommands } from "~/shortcuts/dispatcher";
 import { readLocalApi } from "~/localApi";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { Button } from "~/components/ui/button";
@@ -379,21 +380,23 @@ function RightPanelEmptyState(props: {
   const highlightIndex =
     availableActions.length === 0 ? -1 : Math.min(highlight, availableActions.length - 1);
 
-  const handleShortcut = useEffectEvent((event: KeyboardEvent) => {
+  const handleLetterShortcut = useEffectEvent((event: KeyboardEvent) => {
     const action = surfaceShortcutActionForKey(availableActions, event);
-    if (!action) return;
-    if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
+    if (!action) return false;
+    if (document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return false;
     const target = event.composedPath()[0] ?? event.target;
-    if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return;
+    if (target instanceof Element && surfaceShortcutTargetsTypingContext(target)) return false;
     event.preventDefault();
     event.stopPropagation();
     action.onClick();
+    return true;
   });
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => handleShortcut(event);
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  // Capture phase, so a launcher letter wins over the chat's type-to-focus.
+  useEffect(
+    () =>
+      registerCommands({}, { capture: true, onKeyDown: (event) => handleLetterShortcut(event) }),
+    [],
+  );
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
@@ -734,7 +737,7 @@ function PullRequestSurfaceIcon({
     repository: surface.repository,
     number: surface.number,
   };
-  const sharedSummary = useSharedPullRequestSummary(resolvedEnvironmentId, reference, null);
+  const sharedSummary = useSharedPullRequestSummary(resolvedEnvironmentId, reference);
   const status = linkedSnapshot ?? newestPullRequestSummary(detail, sharedSummary) ?? seed ?? null;
   if (status === null) {
     return <PullRequestGlyph.pullRequest className="size-3 shrink-0 text-muted-foreground" />;
@@ -958,32 +961,34 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
   if (props.open === false && addSurfaceMenuOpen) setAddSurfaceMenuOpen(false);
 
-  const onNewSurfaceKeyDown = useEffectEvent((event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.isComposing) return;
+  const handleNewSurfaceShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (event.isComposing) return false;
     if (
       resolveShortcutCommand(event, props.keybindings, {
         context: { ...props.getShortcutContext(), rightPanelOpen: true },
       }) !== "rightPanel.new"
     )
-      return;
-    if (!addSurfaceMenuOpen && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS)) return;
+      return false;
+    if (!addSurfaceMenuOpen && document.querySelector(LAUNCHER_SHORTCUT_BLOCKING_LAYERS))
+      return false;
     event.preventDefault();
     event.stopPropagation();
     if (!event.repeat) {
       addSurfaceTriggerRef.current?.focus();
       setAddSurfaceMenuOpen(true);
     }
+    return true;
   });
+  // Capture phase, ahead of focused widgets (the terminal) that consume the chord themselves.
   useEffect(() => {
     if (props.open === false) return;
-    document.addEventListener("keydown", onNewSurfaceKeyDown, true);
-    return () => document.removeEventListener("keydown", onNewSurfaceKeyDown, true);
+    return registerCommands(
+      {},
+      { capture: true, onKeyDown: (event) => handleNewSurfaceShortcut(event) },
+    );
   }, [props.open]);
 
-  const updateTabScrollState = () => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
-
+  const updateTabScrollState = (viewport: HTMLDivElement) => {
     const hasOverflow = viewport.scrollWidth - viewport.clientWidth > TAB_SCROLL_EDGE_TOLERANCE;
     const canScrollLeft = hasOverflow && viewport.scrollLeft > TAB_SCROLL_EDGE_TOLERANCE;
     const canScrollRight =
@@ -1182,34 +1187,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     setRenamingDevice(null);
   });
 
+  // A newly active tab, or tabs that start overflowing, can sit outside the scrolled strip.
   useEffect(() => {
     if (!props.activeSurfaceId || !tabScrollState.hasOverflow) return;
     const activeTab = tabListRef.current?.querySelector<HTMLElement>("[data-active-tab='true']");
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeSurfaceId, tabScrollState.hasOverflow]);
 
-  useEffect(() => {
-    const viewport = tabScrollViewport(tabListRef.current);
+  const attachTabList = (root: HTMLDivElement | null) => {
+    tabListRef.current = root;
+    const viewport = tabScrollViewport(root);
     if (!viewport) return;
 
-    const content = viewport.firstElementChild;
-    const stopObserving = observeResize(
-      content ? [viewport, content] : viewport,
-      updateTabScrollState,
-    );
-    viewport.addEventListener("scroll", updateTabScrollState, { passive: true });
-    updateTabScrollState();
-
-    return () => {
-      stopObserving();
-      viewport.removeEventListener("scroll", updateTabScrollState);
-    };
-  }, [updateTabScrollState]);
-
-  useEffect(() => {
-    const viewport = tabScrollViewport(tabListRef.current);
-    if (!viewport) return;
-
+    const update = () => updateTabScrollState(viewport);
     const handleWheel = (event: WheelEvent) => {
       if (event.ctrlKey) return;
       let delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -1221,12 +1211,22 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       viewport.scrollLeft += delta;
       if (viewport.scrollLeft === previousScrollLeft) return;
       event.preventDefault();
-      updateTabScrollState();
+      update();
     };
 
+    const content = viewport.firstElementChild;
+    const stopObserving = observeResize(content ? [viewport, content] : viewport, update);
+    viewport.addEventListener("scroll", update, { passive: true });
     viewport.addEventListener("wheel", handleWheel, { passive: false });
-    return () => viewport.removeEventListener("wheel", handleWheel);
-  }, [updateTabScrollState]);
+    update();
+
+    return () => {
+      tabListRef.current = null;
+      stopObserving();
+      viewport.removeEventListener("scroll", update);
+      viewport.removeEventListener("wheel", handleWheel);
+    };
+  };
 
   return (
     <PreviewPanelShell
@@ -1249,7 +1249,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       >
         <ScrollArea
           radius="none"
-          ref={tabListRef}
+          ref={attachTabList}
           hideScrollbars
           scrollFade
           className="min-w-0 flex-1"
