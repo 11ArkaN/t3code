@@ -45,6 +45,7 @@ import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
+  normalizeProviderAccentColor,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
@@ -259,12 +260,16 @@ function SubagentAvatar({
   driver,
   displayName,
   iconUrl,
+  accentColor,
+  showBadge = false,
   status,
   className,
 }: {
   driver?: ProviderDriverKind | undefined;
   displayName?: string | undefined;
   iconUrl?: string | undefined;
+  accentColor?: string | undefined;
+  showBadge?: boolean;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
 }) {
@@ -280,9 +285,12 @@ function SubagentAvatar({
         <ProviderInstanceIcon
           driverKind={driver}
           displayName={displayName ?? driver}
+          accentColor={accentColor}
           acpRegistryIconUrl={iconUrl}
+          showBadge={showBadge}
+          size="compact"
           className="z-auto"
-          iconClassName="size-3.5"
+          indicatorBackground="var(--muted)"
         />
       ) : (
         <BotIcon className="size-3.5 text-muted-foreground" />
@@ -290,7 +298,8 @@ function SubagentAvatar({
       {status ? (
         <span
           className={cn(
-            "absolute -right-px -bottom-px size-2 rounded-full ring-2 ring-background",
+            "absolute size-2 rounded-full ring-2 ring-background",
+            showBadge ? "-left-px -top-px" : "-right-px -bottom-px",
             subagentStatusVisual(status).dotClass,
           )}
         />
@@ -299,7 +308,7 @@ function SubagentAvatar({
   );
 }
 
-// Select strings; status pushes replace providers even when avatar fields are unchanged.
+// Select primitives; status pushes replace providers even when avatar fields are unchanged.
 export function EnvironmentSubagentAvatar({
   environmentId,
   providerInstanceId,
@@ -321,7 +330,27 @@ export function EnvironmentSubagentAvatar({
     (providers) =>
       providers?.find((provider) => provider.instanceId === providerInstanceId)?.iconUrl,
   );
-  return <SubagentAvatar {...props} displayName={displayName} iconUrl={iconUrl} />;
+  const accentColor = useAtomValue(providersAtom, (providers) =>
+    normalizeProviderAccentColor(
+      providers?.find((provider) => provider.instanceId === providerInstanceId)?.accentColor,
+    ),
+  );
+  const badgeLabel = useAtomValue(providersAtom, (providers) => {
+    const entries = deriveProviderInstanceEntries(providers ?? EMPTY_SERVER_PROVIDERS);
+    const entry = entries.find((candidate) => candidate.instanceId === providerInstanceId);
+    return entry !== undefined && shouldShowInstanceBadge(entry, entries)
+      ? entry.displayName
+      : undefined;
+  });
+  return (
+    <SubagentAvatar
+      {...props}
+      displayName={badgeLabel ?? displayName}
+      iconUrl={iconUrl}
+      accentColor={accentColor}
+      showBadge={badgeLabel !== undefined}
+    />
+  );
 }
 
 const NOTIFICATION_OUTCOME_STATUS: Record<

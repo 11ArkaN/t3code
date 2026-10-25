@@ -1,19 +1,25 @@
 import { useAtomValue } from "@effect/atom-react";
 import { StackActions, useIsFocused, useNavigation } from "@react-navigation/native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  normalizeProviderAccentColor,
+  resolveProviderInstanceDisplayName,
+  shouldShowInstanceBadge,
+} from "@t3tools/client-runtime/state/provider-instance-display";
 import { summarizeSubagentStatuses } from "@t3tools/client-runtime/state/subagent-display";
 import { isActiveSubagentStatus } from "@t3tools/client-runtime/state/subagentRuntime";
 import type {
   EnvironmentId,
   OrchestrationV2Subagent,
   OrchestrationV2TurnItem,
+  ServerProvider,
 } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { AppState, Pressable, View, type ColorValue } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { ProviderIcon } from "../../components/ProviderIcon";
+import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
 import type { ThreadFeedActivity } from "../../lib/threadActivity";
 import { serverEnvironment } from "../../state/server";
@@ -21,6 +27,8 @@ import { environmentThreadDetails } from "../../state/threads";
 import { subagentCardElapsed } from "./subagent-card-presentation";
 import { SubagentRow } from "./SubagentRow";
 import { WorkLogBlock } from "./work-log-layout";
+
+const EMPTY_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 
 type SubagentItem = Extract<OrchestrationV2TurnItem, { type: "subagent" }>;
 type AgentTiming = Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt">;
@@ -49,14 +57,43 @@ function SubagentElapsed({ agents }: { readonly agents: ReadonlyArray<AgentTimin
 
 function SubagentAvatar(props: {
   readonly item: SubagentItem;
-  readonly iconUrl?: string | null | undefined;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly surfaceColor: string;
 }) {
+  const provider = props.providers.find(
+    (candidate) => candidate.instanceId === props.item.providerInstanceId,
+  );
+  const showBadge =
+    provider !== undefined &&
+    shouldShowInstanceBadge(
+      {
+        driverKind: provider.driver,
+        accentColor: normalizeProviderAccentColor(provider.accentColor),
+        enabled: provider.enabled,
+      },
+      props.providers.map((candidate) => ({
+        driverKind: candidate.driver,
+        enabled: candidate.enabled,
+      })),
+    );
   return (
     <View
       accessible={false}
       className="h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-card"
     >
-      <ProviderIcon provider={props.item.driver} iconUrl={props.iconUrl} size={15} />
+      {showBadge ? (
+        <ProviderInstanceIcon
+          provider={provider.driver}
+          iconUrl={provider.iconUrl}
+          size={15}
+          displayName={resolveProviderInstanceDisplayName(provider)}
+          accentColor={provider.accentColor}
+          showBadge
+          surfaceColor={props.surfaceColor}
+        />
+      ) : (
+        <ProviderIcon provider={props.item.driver} iconUrl={provider?.iconUrl} size={15} />
+      )}
     </View>
   );
 }
@@ -67,6 +104,7 @@ export function ThreadSubagentGroup(props: {
   readonly anchorKey: string;
   readonly expandedRows: Readonly<Record<string, boolean>>;
   readonly iconSubtleColor: ColorValue;
+  readonly edgeFadeColor: string;
   readonly onToggleRow: (rowId: string, anchorKey: string) => void;
 }) {
   const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
@@ -95,8 +133,6 @@ export function ThreadSubagentGroup(props: {
   const label = `${agents.length} subagents`;
   const summary = summarizeSubagentStatuses(agents.map((agent) => agent.status));
   const expanded = props.expandedRows[props.anchorKey] ?? false;
-  const iconUrl = (item: SubagentItem) =>
-    config?.providers.find((provider) => provider.instanceId === item.providerInstanceId)?.iconUrl;
   return (
     <WorkLogBlock>
       {grouped ? (
@@ -110,7 +146,11 @@ export function ThreadSubagentGroup(props: {
           <View className="flex-row items-center">
             {agents.slice(0, 3).map((agent, index) => (
               <View key={agent.item.id} style={{ marginLeft: index === 0 ? 0 : -7 }}>
-                <SubagentAvatar item={agent.item} iconUrl={iconUrl(agent.item)} />
+                <SubagentAvatar
+                  item={agent.item}
+                  providers={config?.providers ?? EMPTY_PROVIDERS}
+                  surfaceColor={props.edgeFadeColor}
+                />
               </View>
             ))}
             {agents.length > 3 ? (
