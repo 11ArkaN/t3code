@@ -151,7 +151,7 @@ const collect = <E>(stream: Stream.Stream<Uint8Array, E>) =>
 /** Gradle needs the SDK location; fall back to Android Studio's default install like the device host does. */
 const androidSdk = Effect.gen(function* () {
   const environment = yield* HostProcess.Environment;
-  const configured = environment.ANDROID_HOME ?? environment.ANDROID_SDK_ROOT;
+  const configured = environment.ANDROID_HOME?.trim() || environment.ANDROID_SDK_ROOT?.trim();
   if (configured) return configured;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -159,7 +159,7 @@ const androidSdk = Effect.gen(function* () {
   const defaults = [
     path.join(home, "Library/Android/sdk"),
     path.join(home, "Android/Sdk"),
-    path.join(home, "AppData/Local/Android/Sdk"),
+    path.join(environment.LOCALAPPDATA ?? path.join(home, "AppData/Local"), "Android/Sdk"),
   ];
   for (const sdk of defaults) {
     if (yield* fs.exists(sdk).pipe(Effect.orElseSucceed(() => false))) return sdk;
@@ -734,7 +734,6 @@ export const resolveArtifact = Effect.fn("nativeClient.resolveArtifact")(functio
   platform: NativePlatform,
   abi: string | null,
   fingerprint: string,
-  canBuild = true,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -763,6 +762,10 @@ export const resolveArtifact = Effect.fn("nativeClient.resolveArtifact")(functio
       return { ...artifact, source: "remote" as const, buildMs: yield* readBuildMs(directory) };
     }
   }
+  // The shared iOS client is an arm64 simulator build, so only Apple silicon Macs can produce it.
+  const canBuild =
+    platform === "android" ||
+    ((yield* HostProcess.Platform) === "darwin" && (yield* HostProcess.Architecture) === "arm64");
   if (!canBuild)
     return yield* new NativeClientError({
       message: `No cached client for ${key}, and this machine cannot build it. Run vp run mobile:install ios on an Apple silicon Mac with this checkout once, or test on Android.`,
@@ -890,12 +893,9 @@ const printArtifact = Effect.fn("nativeClient.printArtifact")(function* (
       message:
         "Pass --abi arm64-v8a for a phone or an emulator on an Apple silicon Mac, or --abi x86_64 for an emulator on a Linux or Intel host.",
     });
-  const canBuild =
-    platform === "android" ||
-    ((yield* HostProcess.Platform) === "darwin" && (yield* HostProcess.Architecture) === "arm64");
   const task = abi ? `native-client:android-${abi}` : `native-client:${platform}`;
   const current = yield* fingerprint(platform);
-  const artifact = yield* resolveArtifact(home, platform, abi, current, canBuild).pipe(
+  const artifact = yield* resolveArtifact(home, platform, abi, current).pipe(
     Effect.provideService(BuildLog, yield* buildLog(home, platform, started)),
     Effect.tapError(() => reportTelemetry(home, task, "failed", 0)),
   );
@@ -944,8 +944,14 @@ const main = Command.make(
       return yield* new NativeClientError({
         message: "HOME or USERPROFILE must be set to store native client records.",
       });
-    if (artifact)
+    if (artifact) {
+      if (mode === "check" || Option.isSome(requested))
+        return yield* new NativeClientError({
+          message:
+            "--artifact takes no device id and runs with ensure: vp run mobile:install <platform> --artifact",
+        });
       return yield* printArtifact(home, platform, Option.getOrUndefined(requestedAbi), started);
+    }
     const target = yield* resolveDevice(platform, Option.getOrUndefined(requested));
     const device = target.id;
     yield* Console.error(`Device: ${target.label} (${device})`);

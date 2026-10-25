@@ -46,7 +46,14 @@ const pngChunk = (type: string, length: number) => {
   return chunk;
 };
 const minimalPng = Uint8Array.from([
-  ...[137, 80, 78, 71, 13, 10, 26, 10],
+  137,
+  80,
+  78,
+  71,
+  13,
+  10,
+  26,
+  10,
   ...pngChunk("IHDR", 13),
   ...pngChunk("IEND", 0),
 ]);
@@ -517,10 +524,10 @@ describe("device screenshots", () => {
       const { service, settings, screenshotBody } = yield* fixture();
       yield* Ref.update(settings, (current) => ({ ...current, enableDeviceSupport: true }));
       yield* Ref.set(screenshotBody, minimalPng.subarray(0, 30));
-      const exit = yield* Effect.exit(
+      const error = yield* Effect.flip(
         service.screenshot({ deviceId: DeviceId.make("Pixel_API_35") }),
       );
-      expect(Exit.isFailure(exit) && String(exit.cause)).toContain("DeviceOperationError");
+      expect(error).toMatchObject({ _tag: "DeviceOperationError", reason: "hub_rejected" });
     }).pipe(Effect.scoped),
   );
 });

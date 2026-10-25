@@ -66,18 +66,21 @@ it.layer(NodeServices.layer)("prebuildAndroid", (it) => {
 });
 
 it.layer(Layer.merge(NodeServices.layer, FetchHttpClient.layer))("resolveArtifact", (it) => {
-  it.effect("fails with a next step when nothing is cached and this machine cannot build", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const home = yield* fs.makeTempDirectoryScoped({ prefix: "native-client-home-" });
+  it.effect(
+    "fails with a next step when no iOS client is cached on a machine that cannot build one",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "native-client-home-" });
 
-      const error = yield* resolveArtifact(home, "ios", null, "a".repeat(40), false).pipe(
-        Effect.provideService(HostProcess.Environment, { T3_NATIVE_CLIENT_CACHE: "off" }),
-        Effect.flip,
-      );
+        const error = yield* resolveArtifact(home, "ios", null, "a".repeat(40)).pipe(
+          Effect.provideService(HostProcess.Environment, { T3_NATIVE_CLIENT_CACHE: "off" }),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.flip,
+        );
 
-      assert.instanceOf(error, NativeClientError);
-      assert.include(error.message, "cannot build it");
-    }),
+        assert.instanceOf(error, NativeClientError);
+        assert.include(error.message, "cannot build it");
+      }),
   );
 });

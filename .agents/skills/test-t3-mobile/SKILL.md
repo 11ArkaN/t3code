@@ -38,7 +38,9 @@ The **layout** is where the device runs relative to this checkout:
   machine's backend and Metro through loopback.
 - **Split:** the device host is another machine (SSH or EAS). On the device,
   `127.0.0.1` and `10.0.2.2` point at that host, not here. T3 forwards device
-  control only, never Metro or the backend.
+  control only, never Metro or the backend. The Tailscale addresses below
+  assume an SSH host on this tailnet; an EAS cloud device needs public Metro
+  and backend URLs, so report that blocker when none exist.
 
 ## Start an isolated backend
 
@@ -100,7 +102,7 @@ Reuse a healthy Metro belonging to this checkout, or start one from the
 repository root the same way as the backend:
 
 ```bash
-bash -c 'mkdir -p "$0"; set -m; (cd apps/mobile && exec vp run dev:client) > "$0/metro.log" 2>&1 & echo $! > "$0/metro.pgid"' "$PWD/.t3/mobile-test"
+bash -c 'mkdir -p "$0"; set -m; (cd apps/mobile && exec vp run dev:client < /dev/null) > "$0/metro.log" 2>&1 & echo $! > "$0/metro.pgid"' "$PWD/.t3/mobile-test"
 ```
 
 When another process owns port 8081, use a free port and leave that process
@@ -137,9 +139,8 @@ and `http://10.0.2.2:<server-port>` on an Android emulator. For split, it is
 the `--share` origin.
 
 Confirm the intended projects appear, exercise the affected flow, and capture
-evidence. Verify with `snapshot -i` and `wait text "<expected label>"`. If `device_screenshot` returns
-an unreadable image or 0x0 size, run AgentDevice `screenshot <file>` and read
-that file.
+evidence. Verify with `snapshot -i` and `wait text "<expected label>"`. If `device_screenshot` fails, run
+AgentDevice `screenshot <file>` and read that file.
 
 ## Teardown
 
