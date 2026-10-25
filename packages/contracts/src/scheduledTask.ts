@@ -29,18 +29,12 @@ const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annota
 });
 
 const ScheduledTaskIntervalSchedule = Schema.Struct({
-  type: Schema.Literal("interval").annotate({
-    description: "Run on an interval.",
-  }),
+  type: Schema.Literal("interval"),
   everyMs: ScheduledTaskIntervalMs,
-}).annotate({
-  description: "Run every `everyMs`.",
 });
 
 const ScheduledTaskFixedTimeSchedule = Schema.Struct({
-  type: Schema.Literal("fixed_time").annotate({
-    description: "Run at a fixed local time.",
-  }),
+  type: Schema.Literal("fixed_time"),
   timeOfDay: TimeOfDay,
   weekdays: Schema.optional(
     Schema.Array(
@@ -51,8 +45,6 @@ const ScheduledTaskFixedTimeSchedule = Schema.Struct({
       description: "Weekdays. Default: every day.",
     }),
   ),
-}).annotate({
-  description: "Run at `timeOfDay` on `weekdays`.",
 });
 
 const ScheduledTaskWebhookSignatureFields = {
@@ -104,10 +96,7 @@ export const MAX_WEBHOOK_FILTERS = 16;
 
 const WebhookFilterPath = TrimmedNonEmptyString.check(
   Schema.isPattern(/^(body|headers|query)(\.|$)/),
-).annotate({
-  description:
-    "Value to test, such as headers.x-event, body.action, query.source. A `[]` part tests every array item.",
-});
+);
 
 /**
  * Forms edit an `in` list as comma-separated text, so a value that has no
@@ -131,7 +120,7 @@ export const ScheduledTaskWebhookFilter = Schema.Union([
   Schema.Struct({ path: WebhookFilterPath, op: Schema.Literal("exists") }),
 ]).annotate({
   description:
-    "Values compare as strings. Objects and arrays only pass 'exists'. A missing path fails all but 'exists'. With `[]`, equals, in, and startsWith pass if any item does. notEquals passes if none do.",
+    "Paths look like headers.x-event or body.action. Values compare as strings. Objects pass only 'exists'. With `[]`, a test passes if any item does (notEquals: none).",
 });
 export type ScheduledTaskWebhookFilter = typeof ScheduledTaskWebhookFilter.Type;
 export type ScheduledTaskWebhookFilterOp = ScheduledTaskWebhookFilter["op"];
@@ -144,9 +133,7 @@ const ScheduledTaskWebhookFilters = Schema.Array(ScheduledTaskWebhookFilter)
   });
 
 const ScheduledTaskWebhookSchedule = Schema.Struct({
-  type: Schema.Literal("webhook").annotate({
-    description: "Run on each webhook request.",
-  }),
+  type: Schema.Literal("webhook"),
   signature: Schema.NullOr(ScheduledTaskWebhookSignature),
   maxDeliveryAgeMinutes: Schema.optional(Schema.NullOr(WebhookMaxDeliveryAgeMinutes)),
   dedupe: Schema.optional(ScheduledTaskWebhookDedupe),
@@ -157,9 +144,7 @@ const ScheduledTaskWebhookSchedule = Schema.Struct({
 });
 
 const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
-  type: Schema.Literal("webhook").annotate({
-    description: "Run on each webhook request.",
-  }),
+  type: Schema.Literal("webhook"),
   signature: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -196,16 +181,12 @@ export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
 export const ScheduledTaskUpsertSchedule = Schema.Union([
   Schema.Struct({
-    type: Schema.Literal("interval").annotate({
-      description: "Run on an interval.",
-    }),
+    type: Schema.Literal("interval"),
     everyMs: ScheduledTaskIntervalMs.check(
       Schema.isGreaterThanOrEqualTo(MIN_SCHEDULED_TASK_INTERVAL_MS),
     ).annotate({
       description: "Interval in ms. Min 60000.",
     }),
-  }).annotate({
-    description: "Run every `everyMs`.",
   }),
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskUpsertWebhookSchedule,

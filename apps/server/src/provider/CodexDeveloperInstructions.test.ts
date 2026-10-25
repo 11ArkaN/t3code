@@ -43,24 +43,25 @@ describe("Codex runtime context", () => {
 });
 
 describe("Codex orchestration context", () => {
-  it("sends every subagent and review round through delegate_task", () => {
+  it("routes subagents native first, delegate_task for the rest", () => {
     const orchestration = Object.entries(buildCodexAdditionalContext({ model: "gpt-6.1-sol" }))
       .filter(([key]) => key.startsWith("t3_code_orchestration_"))
       .map(([, entry]) => entry.value)
       .join("\n");
 
-    NodeAssert.ok(
-      orchestration.includes("Use `delegate_task` for every subagent or delegate in T3 Code"),
-    );
+    NodeAssert.ok(orchestration.includes("use your native tool when the child uses your provider"));
+    NodeAssert.ok(orchestration.includes("`run_in_background:false`"));
+    NodeAssert.ok(orchestration.includes("a native type that runs one counts"));
     NodeAssert.ok(
       orchestration.includes(
-        "For independent T3 delegated review rounds, call `delegate_task` again.",
+        "For independent T3 delegated review rounds, call `delegate_task` again",
       ),
     );
     NodeAssert.ok(
-      orchestration.includes("Never send a new round with `t3_thread_send` to a `childThreadId`."),
+      orchestration.includes("Never send a round with `t3_thread_send` to a `childThreadId`."),
     );
-    NodeAssert.ok(!orchestration.includes("Prefer native subagent tools"));
+    NodeAssert.ok(!orchestration.includes("inheritedOptions"));
+    NodeAssert.ok(!orchestration.includes("Prefer native"));
     // The ACP terminal fallback is ACP-only; Codex agents never need it.
     NodeAssert.ok(!orchestration.includes("acp-mcp-call"));
   });

@@ -16,13 +16,11 @@ const BoundedUrl = Schema.String.check(Schema.isTrimmed())
   .check(Schema.isNonEmpty())
   .check(Schema.isMaxLength(2048));
 const URL_GUIDANCE =
-  "Absolute http(s) URL, or a bare host such as t3.chat or localhost:5173. Bare public hosts use https. Loopback uses http.";
+  "Absolute http(s) URL, or a bare host such as t3.chat or localhost:5173 (https; http for loopback).";
 const PROFILE_GUIDANCE =
-  "Profile id or name from preview_status, for a new tab. Default: the user's profile. A tab keeps its profile.";
+  "Profile id or name from preview_status, for a new tab. Default: the user's. A tab keeps its profile.";
 const OptionalTimeoutMs = Schema.optional(
-  Schema.Int.check(Schema.isGreaterThan(0))
-    .check(Schema.isLessThanOrEqualTo(60_000))
-    .annotate({ description: "Max wait in ms. Default 15000, max 60000." }),
+  Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(60_000)),
 ).annotate({ description: "Max wait in ms. Default 15000, max 60000." });
 
 export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
@@ -59,12 +57,8 @@ export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_SER
 export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
 
 const PreviewAutomationTabTargetFields = {
-  tabId: Schema.optional(
-    PreviewTabId.annotate({
-      description: "Tab to use. Default: yours, or the user's viewed tab.",
-    }),
-  ).annotate({
-    description: "Tab to use. Default: yours, or the user's viewed tab.",
+  tabId: Schema.optional(PreviewTabId).annotate({
+    description: "Tab id. Default: yours, then the user's viewed tab.",
   }),
 };
 
@@ -169,37 +163,27 @@ export const PreviewAutomationOpenInput = Schema.Struct({
       description: "Reuse `tabId`, or your current tab. Default true. False makes a new tab.",
     }),
   ),
-  profileId: Schema.optional(
-    TrimmedNonEmptyString.check(Schema.isMaxLength(64)).annotate({
-      description: PROFILE_GUIDANCE,
-    }),
-  ).annotate({ description: PROFILE_GUIDANCE }),
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        !(input.tabId !== undefined && input.reuseExistingTab === false) ||
-        "tabId cannot be combined with reuseExistingTab=false.",
-    ),
-  )
-  .annotate({
-    description: "Opens the preview for this thread.",
-  });
+  profileId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))).annotate({
+    description: PROFILE_GUIDANCE,
+  }),
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      !(input.tabId !== undefined && input.reuseExistingTab === false) ||
+      "tabId cannot be combined with reuseExistingTab=false.",
+  ),
+);
 export type PreviewAutomationOpenInput = typeof PreviewAutomationOpenInput.Type;
 
 export const BrowserNavigationTarget = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("url").annotate({
-      description: "Go to a URL.",
-    }),
+    kind: Schema.Literal("url"),
     url: BoundedUrl.annotate({
       description: `Website URL. ${URL_GUIDANCE}`,
     }),
   }),
   Schema.Struct({
-    kind: Schema.Literal("environment-port").annotate({
-      description: "Go to a dev-server port in this environment.",
-    }),
+    kind: Schema.Literal("environment-port"),
     port: Schema.Int.check(Schema.isGreaterThan(0))
       .check(Schema.isLessThan(65_536))
       .annotate({ description: "Dev-server port here." }),
@@ -222,33 +206,20 @@ export const PreviewAutomationNavigateInput = Schema.Struct({
   url: Schema.optional(BoundedUrl).annotate({
     description: `Website URL. ${URL_GUIDANCE} For public pages.`,
   }),
-  target: Schema.optional(
-    BrowserNavigationTarget.annotate({
-      description:
-        "Target in this environment. Use {kind:'environment-port',port} for a dev server.",
-    }),
-  ).annotate({
-    description: "Target in this environment. Use {kind:'environment-port',port} for a dev server.",
+  target: Schema.optional(BrowserNavigationTarget).annotate({
+    description: "In-environment target. Use {kind:'environment-port',port} for a dev server.",
   }),
-  readiness: Schema.optional(
-    Schema.Literals(["load", "domContentLoaded", "none"]).annotate({
-      description: "Wait for 'load' (default), 'domContentLoaded', or 'none'.",
-    }),
-  ).annotate({
+  readiness: Schema.optional(Schema.Literals(["load", "domContentLoaded", "none"])).annotate({
     description: "Wait for 'load' (default), 'domContentLoaded', or 'none'.",
   }),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        Number(input.url !== undefined) + Number(input.target !== undefined) === 1 ||
-        "Provide exactly one of url or target.",
-    ),
-  )
-  .annotate({
-    description: "Go to `url` or `target`. Give exactly one.",
-  });
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      Number(input.url !== undefined) + Number(input.target !== undefined) === 1 ||
+      "Provide exactly one of url or target.",
+  ),
+);
 export type PreviewAutomationNavigateInput = typeof PreviewAutomationNavigateInput.Type;
 
 export const PreviewAutomationResizeInput = Schema.Struct({
@@ -257,63 +228,43 @@ export const PreviewAutomationResizeInput = Schema.Struct({
     description:
       "'fill' fits the panel. 'freeform' uses `width` and `height`. 'preset' uses a named device size.",
   }),
-  preset: Schema.optional(
-    PreviewViewportPresetId.annotate({
-      description: "Named device size.",
-    }),
-  ).annotate({
-    description: "Named device size. Only for mode 'preset'.",
+  preset: Schema.optional(PreviewViewportPresetId).annotate({
+    description: "Named device size. Mode 'preset' only.",
   }),
-  width: Schema.optional(
-    PreviewViewportSize.fields.width.annotate({
-      description: "Width in CSS pixels. Only for mode 'freeform'.",
-    }),
-  ).annotate({
-    description: "Width in CSS pixels. Only for mode 'freeform'.",
+  width: Schema.optional(PreviewViewportSize.fields.width).annotate({
+    description: "Width in CSS pixels. Mode 'freeform' only.",
   }),
-  height: Schema.optional(
-    PreviewViewportSize.fields.height.annotate({
-      description: "Height in CSS pixels. Only for mode 'freeform'.",
-    }),
-  ).annotate({
-    description: "Height in CSS pixels. Only for mode 'freeform'.",
+  height: Schema.optional(PreviewViewportSize.fields.height).annotate({
+    description: "Height in CSS pixels. Mode 'freeform' only.",
   }),
-  orientation: Schema.optional(
-    Schema.Literals(["portrait", "landscape"]).annotate({
-      description: "Preset orientation. Default: the preset's own.",
-    }),
-  ).annotate({
-    description: "Preset orientation. Not for 'fill' or 'freeform'.",
+  orientation: Schema.optional(Schema.Literals(["portrait", "landscape"])).annotate({
+    description: "Preset orientation. Default: its own. Not for 'fill' or 'freeform'.",
   }),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter((input) => {
-      const hasPreset = input.preset !== undefined;
-      const hasWidth = input.width !== undefined;
-      const hasHeight = input.height !== undefined;
-      if (hasWidth !== hasHeight) return "Custom dimensions require both width and height.";
-      if (input.mode === "fill") {
-        return !hasPreset && !hasWidth && input.orientation === undefined
-          ? true
-          : "Fill mode does not accept a preset, dimensions, or orientation.";
+}).check(
+  Schema.makeFilter((input) => {
+    const hasPreset = input.preset !== undefined;
+    const hasWidth = input.width !== undefined;
+    const hasHeight = input.height !== undefined;
+    if (hasWidth !== hasHeight) return "Custom dimensions require both width and height.";
+    if (input.mode === "fill") {
+      return !hasPreset && !hasWidth && input.orientation === undefined
+        ? true
+        : "Fill mode does not accept a preset, dimensions, or orientation.";
+    }
+    if (input.mode === "freeform") {
+      if (!hasWidth || !hasHeight || hasPreset || input.orientation !== undefined) {
+        return "Freeform mode requires width and height and does not accept a preset or orientation.";
       }
-      if (input.mode === "freeform") {
-        if (!hasWidth || !hasHeight || hasPreset || input.orientation !== undefined) {
-          return "Freeform mode requires width and height and does not accept a preset or orientation.";
-        }
-      } else if (!hasPreset || hasWidth || hasHeight) {
-        return "Preset mode requires a preset and does not accept custom dimensions.";
-      }
-      if (hasWidth && hasHeight && input.width! * input.height! > PREVIEW_VIEWPORT_MAX_AREA) {
-        return `Custom viewport area must not exceed ${PREVIEW_VIEWPORT_MAX_AREA} pixels.`;
-      }
-      return true;
-    }),
-  )
-  .annotate({
-    description: "Sets the tab size.",
-  });
+    } else if (!hasPreset || hasWidth || hasHeight) {
+      return "Preset mode requires a preset and does not accept custom dimensions.";
+    }
+    if (hasWidth && hasHeight && input.width! * input.height! > PREVIEW_VIEWPORT_MAX_AREA) {
+      return `Custom viewport area must not exceed ${PREVIEW_VIEWPORT_MAX_AREA} pixels.`;
+    }
+    return true;
+  }),
+);
 export type PreviewAutomationResizeInput = typeof PreviewAutomationResizeInput.Type;
 
 export const PreviewAutomationResizeResult = Schema.Struct({
@@ -332,8 +283,6 @@ export const PreviewAutomationSetColorSchemeInput = Schema.Struct({
   colorScheme: PreviewAutomationColorScheme.annotate({
     description: "'light', 'dark', or 'system' for the OS setting.",
   }),
-}).annotate({
-  description: "Sets prefers-color-scheme for the tab only.",
 });
 export type PreviewAutomationSetColorSchemeInput = typeof PreviewAutomationSetColorSchemeInput.Type;
 
@@ -344,14 +293,10 @@ export const PreviewAutomationSetColorSchemeResult = Schema.Struct({
 export type PreviewAutomationSetColorSchemeResult =
   typeof PreviewAutomationSetColorSchemeResult.Type;
 
-const Locator = TrimmedNonEmptyString.annotate({
-  description:
-    "'aria-ref=<ref>' from the last snapshot, or a Playwright role or text selector. Refs die on navigation, a new snapshot, or handoff. Take a new snapshot after a stale-ref error.",
-});
-
-const LegacySelector = TrimmedNonEmptyString.annotate({
-  description: "CSS selector. Prefer `locator`.",
-});
+const LOCATOR_GUIDANCE =
+  "'aria-ref=<ref>' from the last snapshot, or a Playwright selector. Refs die on navigation or a new snapshot.";
+const Locator = TrimmedNonEmptyString;
+const LegacySelector = TrimmedNonEmptyString;
 
 const PointerTargetFields = {
   ...PreviewAutomationTabTargetFields,
@@ -359,8 +304,7 @@ const PointerTargetFields = {
     description: "CSS selector. Prefer `locator`.",
   }),
   locator: Schema.optional(Locator).annotate({
-    description:
-      "'aria-ref=<ref>' from the last snapshot, or a Playwright role or text selector. Refs die on navigation, a new snapshot, or handoff. Take a new snapshot after a stale-ref error.",
+    description: LOCATOR_GUIDANCE,
   }),
   x: Schema.optional(
     Schema.Finite.annotate({
@@ -404,18 +348,11 @@ export const PreviewAutomationClickInput = Schema.Struct({
       description: "1 click, 2 double, 3 triple. Default 1.",
     }),
   ),
-})
-  .check(singlePointerTarget)
-  .annotate({
-    description: "One target only: `locator`, `selector`, or `x` plus `y`.",
-  });
+}).check(singlePointerTarget);
 export type PreviewAutomationClickInput = typeof PreviewAutomationClickInput.Type;
 
-export const PreviewAutomationHoverInput = Schema.Struct(PointerTargetFields)
-  .check(singlePointerTarget)
-  .annotate({
-    description: "One target only: `locator`, `selector`, or `x` plus `y`.",
-  });
+export const PreviewAutomationHoverInput =
+  Schema.Struct(PointerTargetFields).check(singlePointerTarget);
 export type PreviewAutomationHoverInput = typeof PreviewAutomationHoverInput.Type;
 
 export const PreviewAutomationSelectInput = Schema.Struct({
@@ -430,15 +367,13 @@ export const PreviewAutomationSelectInput = Schema.Struct({
     description: "Values or labels to pick. Many for a multi-select. Empty clears it.",
   }),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        Number(input.selector !== undefined) + Number(input.locator !== undefined) === 1 ||
-        "Provide exactly one of selector or locator.",
-    ),
-  )
-  .annotate({ description: "Picks options in one <select>." });
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      Number(input.selector !== undefined) + Number(input.locator !== undefined) === 1 ||
+      "Provide exactly one of selector or locator.",
+  ),
+);
 export type PreviewAutomationSelectInput = typeof PreviewAutomationSelectInput.Type;
 
 export const PreviewAutomationSelectResult = Schema.Struct({
@@ -448,18 +383,15 @@ export const PreviewAutomationSelectResult = Schema.Struct({
 });
 export type PreviewAutomationSelectResult = typeof PreviewAutomationSelectResult.Type;
 
-/** Its JSON schema keeps only the description on its last check. */
 const DescribedLocator = (description: string) =>
-  Schema.String.check(Schema.isTrimmed())
-    .check(Schema.isNonEmpty({ description }))
-    .annotateKey({ description });
+  Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()).annotateKey({ description });
 
 export const PreviewAutomationDragInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   source: DescribedLocator("Element to drag, such as aria-ref=<ref>."),
   target: DescribedLocator("Element to drop onto, such as aria-ref=<ref>."),
   timeoutMs: OptionalTimeoutMs,
-}).annotate({ description: "Drags `source` onto `target`." });
+});
 export type PreviewAutomationDragInput = typeof PreviewAutomationDragInput.Type;
 
 export const PreviewAutomationUploadInput = Schema.Struct({
@@ -474,17 +406,13 @@ export const PreviewAutomationUploadInput = Schema.Struct({
     description: "Set files on this <input type=file> instead of the open picker.",
   }),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        !(input.selector !== undefined && input.locator !== undefined) ||
-        "Provide at most one of selector or locator.",
-    ),
-  )
-  .annotate({
-    description: "Answers the open picker, or sets files on a file input.",
-  });
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      !(input.selector !== undefined && input.locator !== undefined) ||
+      "Provide at most one of selector or locator.",
+  ),
+);
 export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.Type;
 
 export const PreviewAutomationTypeInput = Schema.Struct({
@@ -502,36 +430,26 @@ export const PreviewAutomationTypeInput = Schema.Struct({
     }),
   ),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter(
-      (input) =>
-        !(input.selector !== undefined && input.locator !== undefined) ||
-        "Provide at most one of selector or locator.",
-    ),
-  )
-  .annotate({
-    description: "Types into the target, or the focused element if none.",
-  });
+}).check(
+  Schema.makeFilter(
+    (input) =>
+      !(input.selector !== undefined && input.locator !== undefined) ||
+      "Provide at most one of selector or locator.",
+  ),
+);
 export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
 
 export const PreviewAutomationPressInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  key: Schema.String.check(Schema.isTrimmed())
-    .check(
-      Schema.isNonEmpty({
-        description: "Key name, such as Enter, Escape, Tab, ArrowDown, or one char.",
-      }),
-    )
-    .annotateKey({
-      description: "Key name, such as Enter, Escape, Tab, ArrowDown, or one char.",
-    }),
+  key: Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()).annotateKey({
+    description: "Key name, such as Enter, Escape, Tab, ArrowDown, or one char.",
+  }),
   modifiers: Schema.optional(
     Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"])).annotate({
       description: "Keys held down with it.",
     }),
   ),
-}).annotate({ description: "Presses one key." });
+});
 export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type;
 
 export const PreviewAutomationScrollInput = Schema.Struct({
@@ -552,30 +470,20 @@ export const PreviewAutomationScrollInput = Schema.Struct({
   locator: Schema.optional(Locator).annotate({
     description: "Container to scroll. Default: the viewport.",
   }),
-})
-  .check(
-    Schema.makeFilter((input) => {
-      if (input.selector !== undefined && input.locator !== undefined) {
-        return "Provide at most one of selector or locator.";
-      }
-      return (
-        input.deltaX !== undefined || input.deltaY !== undefined || "Provide deltaX or deltaY."
-      );
-    }),
-  )
-  .annotate({
-    description: "Scrolls by `deltaX`, `deltaY`, or both.",
-  });
+}).check(
+  Schema.makeFilter((input) => {
+    if (input.selector !== undefined && input.locator !== undefined) {
+      return "Provide at most one of selector or locator.";
+    }
+    return input.deltaX !== undefined || input.deltaY !== undefined || "Provide deltaX or deltaY.";
+  }),
+);
 export type PreviewAutomationScrollInput = typeof PreviewAutomationScrollInput.Type;
 
 export const PreviewAutomationEvaluateInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   expression: Schema.String.check(Schema.isTrimmed())
-    .check(
-      Schema.isNonEmpty({
-        description: "JavaScript to run in the main frame, such as document.title.",
-      }),
-    )
+    .check(Schema.isNonEmpty())
     .check(Schema.isMaxLength(64_000))
     .annotateKey({
       description: "JavaScript to run in the main frame, such as document.title.",
@@ -588,8 +496,6 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
       description: "Return the value, not a ref. Default true.",
     }),
   ),
-}).annotate({
-  description: "Runs JavaScript in the page.",
 });
 export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
 
@@ -601,37 +507,27 @@ export const PreviewAutomationWaitForInput = Schema.Struct({
   locator: Schema.optional(Locator).annotate({
     description: "Selector that must match, such as role=button[name='Send'].",
   }),
-  text: Schema.optional(
-    TrimmedNonEmptyString.annotate({
-      description: "Text that must show on the page. Case counts.",
-    }),
-  ).annotate({
+  text: Schema.optional(TrimmedNonEmptyString).annotate({
     description: "Text that must show on the page. Case counts.",
   }),
-  urlIncludes: Schema.optional(
-    TrimmedNonEmptyString.annotate({
-      description: "Text that must be in the URL.",
-    }),
-  ).annotate({ description: "Text that must be in the URL." }),
+  urlIncludes: Schema.optional(TrimmedNonEmptyString).annotate({
+    description: "Text that must be in the URL.",
+  }),
   timeoutMs: OptionalTimeoutMs,
-})
-  .check(
-    Schema.makeFilter((input) => {
-      if (input.selector !== undefined && input.locator !== undefined) {
-        return "Provide at most one of selector or locator.";
-      }
-      return (
-        input.selector !== undefined ||
-        input.locator !== undefined ||
-        input.text !== undefined ||
-        input.urlIncludes !== undefined ||
-        "Provide at least one wait condition."
-      );
-    }),
-  )
-  .annotate({
-    description: "Waits until all given conditions match.",
-  });
+}).check(
+  Schema.makeFilter((input) => {
+    if (input.selector !== undefined && input.locator !== undefined) {
+      return "Provide at most one of selector or locator.";
+    }
+    return (
+      input.selector !== undefined ||
+      input.locator !== undefined ||
+      input.text !== undefined ||
+      input.urlIncludes !== undefined ||
+      "Provide at least one wait condition."
+    );
+  }),
+);
 export type PreviewAutomationWaitForInput = typeof PreviewAutomationWaitForInput.Type;
 
 export const PreviewAutomationElement = Schema.Struct({

@@ -11,7 +11,7 @@ export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `## T3 Code devices
 
-For iOS Simulators and Android Emulators here, call \`device_list\`, then \`device_open\`. The user sees the device in their Device panel. Drive it with the exact \`agent-device\` launcher and flags \`device_open\` returns. Keep those flags on every command. Prefer \`agent-device snapshot -i\` refs over coordinates. Use \`device_screenshot\` to see the screen. Use \`xcrun simctl\` or \`adb\` only for what these do not cover (builds, logs, ports). If a platform is unavailable, say so.`;
+For iOS Simulators and Android Emulators here, call \`device_list\`, then \`device_open\`. Drive the device with the exact \`agent-device\` launcher and flags it returns, on every command. Prefer \`agent-device snapshot -i\` refs over coordinates. Use \`device_screenshot\` to see the screen. Use \`xcrun simctl\` or \`adb\` only for builds, logs, and ports. If a platform is unavailable, say so.`;
 
 export interface T3CodeToolAvailability {
   readonly browser: boolean;

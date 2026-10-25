@@ -222,15 +222,15 @@ export function htmlRenderTheme(
 }
 
 export const HTML_RENDER_THEME_GUIDE = [
-  "Theme CSS variables on :root follow the user's theme live. Use them, not fixed colors:",
-  "--background, --foreground, --muted, --card, --popover, --secondary, --border, --input, --ring, --primary, --accent, --destructive, --warning, --success, --info, --code-background",
-  "(most have a matching -foreground. Accent, destructive, and warning also have -surface),",
+  "Theme CSS variables on :root follow the user's theme. Use them, not fixed colors:",
+  "--background, --foreground, --muted, --card, --popover, --secondary, --border, --ring, --primary, --accent, --destructive, --warning, --success, --info, --code-background",
+  "(most have a matching -foreground; accent, destructive, and warning also have -surface),",
   "--chart-1 to --chart-6, --radius, --font-sans, --font-mono.",
-  "The base stylesheet already sets background, text color, and font from them.",
+  "The base sheet sets background, text, and font.",
 ].join(" ");
 
 export const HTML_RENDER_LAYOUT_GUIDE = [
-  `The borderless frame sits on the thread background at reply width (${HTML_RENDER_COLUMN_WIDTH}px on desktop, about 360px on phones). Its left edge lines up with your reply text.`,
+  `The frame sits on the thread background at reply width (${HTML_RENDER_COLUMN_WIDTH}px on desktop, about 360px on phones), left edge with your text.`,
   "Leave html, body, and the outer element with no background color, no outer card, border, banner title, or side padding. This overrides fixed black page styles.",
   "A box that needs its own background gets 16px padding and var(--radius) corners. Give charts fixed pixel heights.",
   "Let content set the height. Do not use vh units or height:100% on html or body. Both are rejected or loop.",

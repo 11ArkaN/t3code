@@ -60,7 +60,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report the preview tab state: control owner, pending dialog, URL, title, loading, viewport, and size. With `tabId`, one tab. Without it, your current tab, or the user's viewed tab. `tabs` lists all tabs in this thread. `profiles` lists the logins `preview_open` accepts. Read any listed tab. Act only on your own tab, or an unclaimed tab with no human in control. A page open only in the user's local desktop app is not listed here. A remote environment cannot reach it. Say so instead of asking the user to reopen it here.",
+    "Report preview tab state: owner, pending dialog, URL, title, loading, viewport, and size. With `tabId`, one tab. Without it, your tab, or the user's viewed tab. `tabs` lists this thread's tabs. `profiles` lists logins for `preview_open`. Read any listed tab. Act only on your tab, or an unclaimed tab with no human in control. Tabs open only in the user's local desktop app are not listed and cannot be reached from a remote environment. Say so. Do not ask the user to reopen one here.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewToolFailure,
@@ -74,7 +74,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. `profileId` from `preview_status` picks saved logins. Another session's tabs can be read, not operated.",
+      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. `profileId` from `preview_status` picks saved logins. Another session's tabs can be read, not operated. If you opened a tab only for your own check, close it with `t3_preview_close` on its returned `tabId` before you reply.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -139,7 +139,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before you act. Works on a tab the user is driving. Returns page state, semantic elements, diagnostics, and screenshot size. Target one element with `locator='aria-ref=<ref>'` from `accessibilityTree`, even in frames. Get fresh refs after navigation, a new snapshot, or human takeover. Text caps near 20 KB. Use `preview_evaluate` for more. `includeImage=true` only when you must see the page. `save=true` writes a PNG and returns `screenshotPath`. Embed it as ![alt](screenshotPath) to show the user. Only a saved file can be shown.",
+      "Inspect a server preview tab for asked browser work. Never use it to check your own code edit. Works on a tab the user is driving. Returns page state, elements, diagnostics, and screenshot size. Target one element with `locator='aria-ref=<ref>'` from `accessibilityTree`, even in frames. Refs die on navigation, a new snapshot, or handoff. Text caps near 20 KB. Use `preview_evaluate` for more. `includeImage=true` only to see the page. `save=true` writes a PNG and returns `screenshotPath`. Embed it as ![alt](screenshotPath). Only a saved file can be shown.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -259,7 +259,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs click-level control: your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`.",
+      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Use page tools reached here to get data only. Never use a page's chart, save, or dashboard tool to show results.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

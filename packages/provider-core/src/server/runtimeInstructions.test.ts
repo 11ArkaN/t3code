@@ -16,7 +16,10 @@ describe("buildRuntimeInstructions", () => {
   it("waits on a PR only with the watch, never with a poll loop", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 
-    assert.include(instructions, "call watch_pull_request, then end your turn");
+    assert.include(
+      instructions,
+      "call watch_pull_request first, before checks, diffs, or branch updates",
+    );
     assert.include(instructions, "Never wait with sleep");
     assert.include(instructions, "call unwatch_pull_request");
   });

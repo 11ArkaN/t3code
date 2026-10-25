@@ -6,19 +6,19 @@ export const T3_CODE_ORCHESTRATION_SECTIONS: ReadonlyArray<string> = [
 
 Ordinary coding tasks need no T3 tools.
 
-- Use \`delegate_task\` for every subagent or delegate in T3 Code, including same-provider work and any named model. Never use native subagent tools, native agent types, or Workflow for delegated work here, even if a native agent claims the requested model. Call \`orchestrator_capabilities\` once first to pick the provider, model, and options. Reuse that result until a call fails or the user says providers changed. Put model settings in \`target.options\`, not only in the prompt. Use one delegate per model the user names.
-- For independent T3 delegated review rounds, call \`delegate_task\` again. That includes asking a reviewer to confirm a fix. Put the brief, prior findings, and open objections in the new task. Never send a new round with \`t3_thread_send\` to a \`childThreadId\`. Fix small follow-ups and nits yourself; do not start a review round for them.
-- After an async delegate, end your turn. Completion wakes you. Do not poll with \`task_status\`, \`sleep\`, watchers, Monitor, or ScheduleWakeup. If \`delegate_task\` fails or a provider is unavailable, report that. Never fall back to native subagents, Workflow, or provider CLIs in the shell.
-- If you are a delegated child or native subagent, do the work yourself. Do not delegate further unless your task says to.
-- For a child task in its own checkout, set \`isolation:"worktree"\`. Stop delegates with \`task_cancel\`.`,
-  `- \`t3_thread_launch\` and \`create_threads\` make new top-level threads. Use them only when the user asks for a separate or new thread. "Subagent", "delegate", and "parallel" never mean a new thread. For a new thread in its own worktree, set \`workspaceStrategy\` on \`t3_thread_launch\`. Never tell an agent to run \`git worktree add\`. No \`workspaceStrategy\` means the project root, not your worktree. \`t3_worktree_handoff\` moves this thread only.
-- Given a thread id, read it with \`t3_thread_read\` before you answer about it. Mention a thread only as \`[title](t3-thread://v1/<threadId>)\` with its exact id. Never give a bare thread id.
-- When a tool here needs a secret, call \`request_secret\` and pass its \`secretRef\` to that tool. Never ask for a secret in chat or invent one. Asked to schedule work? Call \`schedule_task\`. Do not run the job first.
-- Tool names may carry an MCP prefix. If T3 tools do not show in a first scan, try the known tool name once before you say they are absent.`,
-  `### Visuals and the preview browser
+- Subagents: use your native tool when the child uses your provider, a model it offers, and no settings beyond yours, and you wait in this turn (Claude \`Agent\`, \`run_in_background:false\`; Codex \`spawn_agent\`, then wait). Use \`delegate_task\` for another provider's model (a native type that runs one counts), user-asked settings, \`isolation:"worktree"\`, work past your turn, or \`delegate_task\` by name. Workflow only when named.
+- Before \`delegate_task\`, call \`orchestrator_capabilities\` once. Reuse it until a call fails or providers change. Settings go in \`target.options\`. One child per named model. If the provider is unavailable, say so. Never switch provider or model, or fall back to native tools, Workflow, or CLIs.
+- For independent T3 delegated review rounds, call \`delegate_task\` again with the brief, prior findings, and open objections. Never send a round with \`t3_thread_send\` to a \`childThreadId\`. Fix nits yourself. Told to ship, file, or merge without waiting for a delegate? \`task_cancel\` it. Start no replacement.
+- After an async delegate, end your turn. Completion wakes you. Do not poll with \`task_status\`, \`sleep\`, watchers, Monitor, or ScheduleWakeup. Stop delegates with \`task_cancel\`. Never \`t3_thread_interrupt\` a \`childThreadId\`.
+- Subagents and children: do the work yourself. Start no subagents unless your task says to.`,
+  `- \`t3_thread_launch\` and \`create_threads\` make new top-level threads. Use only when the user asks for a new thread. "Subagent", "delegate", and "parallel" never mean a new thread. For a worktree thread, set \`workspaceStrategy\`. Never tell an agent to run \`git worktree add\`. No strategy means project root.
+- Given a thread id, read it with \`t3_thread_read\` before you answer about it. Whenever your reply refers to another thread (given, read, messaged, launched, or found), link it as \`[title](t3-thread://v1/<threadId>)\` with its exact id, even when you do not name it. Never give a bare thread id.
+- A secret for a tool here: call \`request_secret\`, pass its \`secretRef\` to that tool. Never ask in chat or invent one. Asked to schedule? Call \`schedule_task\`. Do not run the job first.
+- T3 tools may load late. Try the name once before you call it absent.`,
+  `### Visuals and preview
 
-- To show a chart, table, diagram, or mockup in this thread, build one HTML page, check it with \`html_preview\`, then show it with \`html_render\`. Do not serve the page, open it in the preview, or save charts into a site instead. If the user wants an image file to use elsewhere, give a \`.png\` file, not an inline render.
-- Use \`preview_*\` tools only when the user asks for browser work or names a page or tab, or the task cannot be done without a browser. For public pages, use web fetch or search. Do not open the preview just to check your own edit. Close a preview tab you opened when you finish with it, unless the user is using it.`,
+- Pick where a visual goes. In this thread: one HTML page, \`html_preview\`, then \`html_render\`. Do not serve it, preview it, or use a page's own chart, save, or dashboard tool. Page tools give data only. An image to post, send, or use elsewhere: a \`.png\` file and its path. Never \`html_render\` that.
+- Call \`preview_*\` only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages: web fetch or search. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
@@ -30,7 +30,7 @@ export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## T3 Code browser
 
-The \`preview_*\` tools are the browser you share with the user. When you use them, call \`preview_status\` first, then \`preview_open\` if no tab can be automated. A closed preview is not a dead end. Prefer snapshot locators over coordinates. Read any listed tab. Act only on your own tab, or an \`unclaimed\` tab with no human in control. Read a \`human\` tab with \`preview_snapshot\`. Pass a \`profileId\` from \`preview_status\` to \`preview_open\` for saved logins. Switch to another browser only when the preview tools are absent or \`preview_open\` says unsupported, when the user or a named workflow asks for one, or after two failed preview calls on the same step. Then quote the error and switch without asking.
+The \`preview_*\` tools are the browser you share with the user. Call \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Read any listed tab. Act only on your tab, or an \`unclaimed\` tab with no human in control. Pass \`profileId\` for saved logins. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
 `;
 
 // ACP only: some ACP agents accept the injected MCP server but never expose

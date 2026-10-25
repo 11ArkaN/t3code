@@ -35,27 +35,27 @@ const guideDependencies = [
 export const PullRequestTargetInput = Schema.Struct({
   threadId: Schema.optional(
     ThreadId.annotate({
-      description: "Thread to act on. Omit for this thread.",
+      description: "Thread. Default: this thread.",
     }),
   ),
   url: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "PR web URL. Preferred. Host, repository, and number come from it.",
+      description: "PR URL. Preferred.",
     }),
   ),
   repository: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Repository path, such as owner/repo. Required with `number` when no `url`.",
+      description: "owner/repo. With `number`, when no `url`.",
     }),
   ),
   number: Schema.optional(
     PositiveInt.annotate({
-      description: "PR number. Required with `repository` when no `url`.",
+      description: "PR number. With `repository`, when no `url`.",
     }),
   ),
   host: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Repository host. Defaults to this project's host.",
+      description: "Host. Default: this project's.",
     }),
   ),
 });
@@ -277,7 +277,7 @@ export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.T
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
-    "Link a PR to this thread. T3 then shows its status and settles the thread when it merges. Pass the URL, or repository plus number. Safe to call twice. The result sets `alreadyLinked=true` the second time.",
+    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge. Safe to call twice (`alreadyLinked=true`).",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -307,9 +307,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
   description:
     "List PRs linked to a thread. Omit `threadId` for this thread. Shows last known state and stack order, bottom to top. Call only when you need the linked PRs. Do not call it as an end-of-work check.",
   parameters: Schema.Struct({
-    threadId: Schema.optional(
-      ThreadId.annotate({ description: "Thread to list. Omit for this thread." }),
-    ),
+    threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
   }),
   success: ListThreadPullRequestsResult,
   failure: PullRequestToolError,
@@ -323,7 +321,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch an open PR for this thread. Links it first if needed. T3 checks every two minutes. It wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on until the PR merges or closes, the thread settles, or you unwatch. Do not call this again on a wake. Subagents cannot watch. The parent thread owns the PR.",
+    "Watch an open PR for this thread. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Only comments after this call wake you, so handle old ones first. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on until merge, close, settle, or unwatch. Do not call this again on a wake. Subagents cannot watch.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,

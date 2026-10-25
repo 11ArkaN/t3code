@@ -107,7 +107,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Model options from `orchestrator_capabilities`. Use only options that model lists, such as Claude {effort:'max'} or Codex {reasoningEffort:'max'}. For the same provider and model, given values override inherited ones. [] or {} clears them.",
+        "Options that model lists in `orchestrator_capabilities`, such as {effort:'max'}. Same provider and model: given values override inherited ones. [] or {} clears them.",
     }),
   ),
 });
@@ -162,13 +162,13 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "Default 'shared': the parent checkout. 'worktree': a new checkout from the parent commit. Uncommitted edits are not copied.",
+        "'shared' (default): parent checkout. 'worktree': new checkout from the parent commit, setup run first. Uncommitted edits stay out.",
     }),
   ),
   mode: Schema.optional(
     Schema.Literals(["async", "wait"]).annotate({
       description:
-        "Default 'async'. Use 'wait' only if this turn needs the result now. A question or approval ends the wait with the task still running.",
+        "Default 'async'. 'wait' only if this turn needs the result. A question or approval ends the wait early.",
     }),
   ),
   timeoutMs: Schema.optional(Schema.Finite).annotate({
@@ -178,7 +178,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   runtimeMode: Schema.optional(
     OrchestratorMcpRuntimeMode.annotate({
       description:
-        "Omit unless the user asks for a supervised child. Narrow modes pause the child for human approval. They are not a read-only switch. Limit the child in the task text instead. A mode above yours is rejected.",
+        "Omit unless the user asks for a supervised child. Narrow modes pause for human approval, not read-only. Above yours is rejected.",
     }),
   ),
   interactionMode: Schema.optional(OrchestratorMcpInteractionMode),
@@ -207,25 +207,23 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   options: Schema.optional(
     Schema.Array(ProviderOptionSelection).annotate({
-      description:
-        "Stored model option selections for the child run, or its thread before a run starts. Omitted selections use provider defaults.",
+      description: "The child's stored model options.",
     }),
   ),
   summary: Schema.NullOr(Schema.String),
   resultContextTransferId: Schema.NullOr(ContextTransferId),
   hasPendingQuestion: Schema.Boolean.annotate({
     description:
-      "Blocking question ends mode=wait. Pass threadId=childThreadId to t3_pending_request_list, t3_pending_request_read (with requestId) and t3_pending_request_respond, or ask the user; the task's completion still wakes this thread.",
+      "A question blocks the child. It ends a wait. Answer via the t3_pending_request_* tools on childThreadId.",
   }),
   pendingApproval: Schema.NullOr(
     Schema.Struct({ requestId: RuntimeRequestId, kind: ProviderRequestKind, runId: RunId }),
   ).annotate({
     description:
-      "Identity of the oldest pending live approval for this task's own unfinished work, or null. Ends mode=wait without cancelling the child; completion still wakes this thread. This grants no approval authority. Read the fresh full request in childThreadId before responding: the record can outlive its provider callback. Decisions remain with the child's existing approval holder; pending request tools answer questions only.",
+      "Oldest pending approval for this task, or null. It ends a wait. It grants no approval rights.",
   }),
   waitTimedOut: Schema.Boolean.annotate({
-    description:
-      "True only on that mode=wait call when timeoutMs elapsed. The timeout does not cancel the child. Later task_status reads return false and use status for liveness.",
+    description: "True only on the wait call that timed out. The child keeps running.",
   }),
   next: Schema.optional(OrchestratorMcpRunningTaskNext),
 });
