@@ -141,7 +141,14 @@ describe("resolveSubagentTraits", () => {
     ],
     [
       "a selection for another model",
-      { ...codexAgent([{ id: "reasoningEffort", value: "high" }]), model: "other-model" },
+      {
+        ...codexAgent([]),
+        modelSelection: {
+          instanceId: codexInstance,
+          model: "other-model",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      },
       codex,
     ],
   ])("shows no labels for %s", (_, subagent, provider) => {
