@@ -1917,18 +1917,8 @@ export function deriveMessagesTimelineRows(input: {
       appendActiveWorkRows();
     }
 
-    // A stopped compaction's own divider already says it stopped.
-    if (
-      timelineEntry.kind === "event" &&
-      (timelineEntry.projectedItem.item.type === "run_interrupt_request" ||
-        (timelineEntry.projectedItem.item.type === "run_interrupt_result" &&
-          timelineEntry.projectedItem.item.runId !== null &&
-          compactionRuns.has(timelineEntry.projectedItem.item.runId) &&
-          compactedRunIds.has(timelineEntry.projectedItem.item.runId)))
-    ) {
-      continue;
-    }
-
+    // Fold rows come first: a fold can anchor on an interrupt request, which
+    // shows no row of its own.
     const groupFold = groupFoldsByAnchorEntryId.get(timelineEntry.id);
     if (groupFold) {
       nextRows.push({
@@ -1958,6 +1948,18 @@ export function deriveMessagesTimelineRows(input: {
         label: turnFold.label,
         expanded: foldExpanded(turnFold.foldKeys),
       });
+    }
+
+    // A stopped compaction's own divider already says it stopped.
+    if (
+      timelineEntry.kind === "event" &&
+      (timelineEntry.projectedItem.item.type === "run_interrupt_request" ||
+        (timelineEntry.projectedItem.item.type === "run_interrupt_result" &&
+          timelineEntry.projectedItem.item.runId !== null &&
+          compactionRuns.has(timelineEntry.projectedItem.item.runId) &&
+          compactedRunIds.has(timelineEntry.projectedItem.item.runId)))
+    ) {
+      continue;
     }
 
     if (collapsedEntryIds.has(timelineEntry.id)) {
