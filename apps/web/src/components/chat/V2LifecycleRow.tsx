@@ -335,8 +335,10 @@ export function EnvironmentSubagentAvatar({
       providers?.find((provider) => provider.instanceId === providerInstanceId)?.accentColor,
     ),
   );
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
   const badgeLabel = useAtomValue(providersAtom, (providers) => {
-    const entries = deriveProviderInstanceEntries(providers ?? EMPTY_SERVER_PROVIDERS);
+    const derived = deriveProviderInstanceEntries(providers ?? EMPTY_SERVER_PROVIDERS);
+    const entries = settings ? applyProviderInstanceSettings(derived, settings, null) : derived;
     const entry = entries.find((candidate) => candidate.instanceId === providerInstanceId);
     return entry !== undefined && shouldShowInstanceBadge(entry, entries)
       ? entry.displayName

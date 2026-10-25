@@ -13,6 +13,7 @@ import type {
   OrchestrationV2Subagent,
   OrchestrationV2TurnItem,
   ServerProvider,
+  ServerSettings,
 } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { AppState, Pressable, View, type ColorValue } from "react-native";
@@ -58,24 +59,29 @@ function SubagentElapsed({ agents }: { readonly agents: ReadonlyArray<AgentTimin
 function SubagentAvatar(props: {
   readonly item: SubagentItem;
   readonly providers: ReadonlyArray<ServerProvider>;
+  readonly providerInstances: ServerSettings["providerInstances"] | undefined;
   readonly surfaceColor: string;
 }) {
+  const toBadgeEntry = (candidate: ServerProvider) => {
+    const rawConfig = props.providerInstances?.[candidate.instanceId]?.config;
+    const instanceConfig =
+      rawConfig !== null && typeof rawConfig === "object"
+        ? (rawConfig as Readonly<Record<string, unknown>>)
+        : null;
+    const agentId = instanceConfig?.source === "local" ? undefined : instanceConfig?.agentId;
+    return {
+      driverKind: candidate.driver,
+      accentColor: normalizeProviderAccentColor(candidate.accentColor),
+      acpRegistryAgentId: typeof agentId === "string" ? agentId.trim() || undefined : undefined,
+      enabled: candidate.enabled,
+    };
+  };
   const provider = props.providers.find(
     (candidate) => candidate.instanceId === props.item.providerInstanceId,
   );
   const showBadge =
     provider !== undefined &&
-    shouldShowInstanceBadge(
-      {
-        driverKind: provider.driver,
-        accentColor: normalizeProviderAccentColor(provider.accentColor),
-        enabled: provider.enabled,
-      },
-      props.providers.map((candidate) => ({
-        driverKind: candidate.driver,
-        enabled: candidate.enabled,
-      })),
-    );
+    shouldShowInstanceBadge(toBadgeEntry(provider), props.providers.map(toBadgeEntry));
   return (
     <View
       accessible={false}
@@ -149,6 +155,7 @@ export function ThreadSubagentGroup(props: {
                 <SubagentAvatar
                   item={agent.item}
                   providers={config?.providers ?? EMPTY_PROVIDERS}
+                  providerInstances={config?.settings.providerInstances}
                   surfaceColor={props.edgeFadeColor}
                 />
               </View>
