@@ -265,7 +265,7 @@ export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.T
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
-    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge.",
+    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge. Delegated child: report at once. Put this URL and the head SHA from `git log -1 --format=%h` in your final line to the parent.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -309,7 +309,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch an open PR for this thread. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Handle old comments first. Only later ones wake you. Then end your turn. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch. Subagents cannot watch.",
+    "Watch an open PR for this thread. Delegated children and subagents: never call this. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Handle old comments first. Only later ones wake you. After this call, end your turn. Make no more calls except a required push. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,

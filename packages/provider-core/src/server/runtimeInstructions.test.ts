@@ -22,7 +22,9 @@ describe("buildRuntimeInstructions", () => {
     assert.include(instructions, "Watch only if asked to monitor or babysit");
     assert.notInclude(instructions, "merge it now");
     assert.include(instructions, "If ready, act. Do not watch.");
-    assert.include(instructions, "call watch_pull_request before checks or branch updates");
+    assert.include(instructions, "your first tool call is watch_pull_request");
+    assert.include(instructions, "never watch or poll, even if the brief says babysit");
+    assert.include(instructions, "After linking, a child reports at once");
     assert.include(instructions, "Never wait with sleep");
     assert.include(instructions, "call unwatch_pull_request");
   });
