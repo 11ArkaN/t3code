@@ -15,6 +15,7 @@ import {
   applyTerminalAttachStreamEvent,
   applyTerminalMetadataStreamEvent,
   nextTerminalAttachSeedState,
+  type TerminalBufferState,
 } from "./terminalSession.ts";
 
 export function createTerminalEnvironmentAtoms<R, E>(
@@ -112,6 +113,68 @@ export function createTerminalEnvironmentAtoms<R, E>(
       concurrency: lifecycleConcurrency,
     }),
   };
+}
+
+export interface TerminalLifecycleState {
+  readonly wasRunning: boolean;
+  /** The user has seen this terminal without operate permission. */
+  readonly observed: boolean;
+  readonly reopened: boolean;
+}
+
+export const INITIAL_TERMINAL_LIFECYCLE: TerminalLifecycleState = {
+  wasRunning: false,
+  observed: false,
+  reopened: false,
+};
+
+export type TerminalLifecycleEvent =
+  /** A viewer without operate permission received a snapshot of this terminal. */
+  | { readonly type: "observed" }
+  | { readonly type: "detached"; readonly canOperate: boolean }
+  | {
+      readonly type: "status";
+      readonly status: TerminalBufferState["status"];
+      readonly version: number;
+    }
+  | { readonly type: "reopen-failed" };
+
+export type TerminalLifecycleCommand = "exit" | "reopen" | null;
+
+export function transitionTerminalLifecycle(
+  state: TerminalLifecycleState,
+  event: TerminalLifecycleEvent,
+): { readonly state: TerminalLifecycleState; readonly command: TerminalLifecycleCommand } {
+  switch (event.type) {
+    case "observed":
+      return { state: { ...state, observed: true }, command: null };
+    case "detached":
+      return {
+        state: {
+          ...state,
+          // Losing operate while the shell runs leaves the viewer reading its history.
+          observed: state.observed || (!event.canOperate && state.wasRunning),
+          wasRunning: false,
+        },
+        command: null,
+      };
+    case "reopen-failed":
+      return { state: { ...state, reopened: false }, command: null };
+    case "status": {
+      if (event.version === 0) return { state, command: null };
+      if (event.status === "running" || event.status === "starting") {
+        return { state: { ...state, wasRunning: true, reopened: false }, command: null };
+      }
+      if (event.status !== "closed" && event.status !== "exited") return { state, command: null };
+      if (state.wasRunning) {
+        return { state: { ...state, wasRunning: false, reopened: true }, command: "exit" };
+      }
+      // An explicit visit can reopen a cached ended session. Granting a viewer
+      // operate permission must leave the history they were reading intact.
+      if (state.observed || state.reopened) return { state, command: null };
+      return { state: { ...state, reopened: true }, command: "reopen" };
+    }
+  }
 }
 
 export * from "./terminalSession.ts";
