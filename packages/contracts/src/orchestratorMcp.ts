@@ -40,21 +40,17 @@ import {
 import { ProviderOptionSelection, ProviderOptionSelectionValue } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
-const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
-  description: "Full task or message text.",
-});
-const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512)).annotate({
-  description: "Short display title.",
-});
+const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000));
+const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512));
 const OrchestratorMcpClientRequestId = TrimmedNonEmptyString.check(
   Schema.isMaxLength(256),
-).annotate({ description: "Retry key. Reuse it for retries of this same call." });
+).annotate({ description: "Retry key for this call only. A new call needs a new key." });
 
 // OpenCode 1.15 serializes nested MCP union objects as JSON strings; decode that form at the boundary.
 const OrchestratorMcpScheduleFromJsonString = Schema.fromJsonString(
   ScheduledTaskUpsertSchedule,
 ).annotate({
-  description: "JSON-text form of the schedule. Prefer the object form.",
+  description: "JSON-text schedule. Prefer the object form.",
 });
 
 const OrchestratorMcpSchedule = Schema.Union([
@@ -96,18 +92,14 @@ export const OrchestratorMcpTarget = Schema.Struct({
   ),
   driverKind: Schema.optional(
     ProviderDriverKind.annotate({
-      description: "Driver kind. Prefer `providerInstanceId`.",
+      description: "Prefer `providerInstanceId`.",
     }),
   ),
-  model: Schema.optional(
-    TrimmedNonEmptyString.annotate({
-      description: "Model id for that provider.",
-    }),
-  ),
+  model: Schema.optional(TrimmedNonEmptyString),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Model options from `orchestrator_capabilities`, such as {effort:'max'}. Same provider and model: given values override inherited. [] or {} clears.",
+        "Options from `orchestrator_capabilities`, such as {effort:'max'}. Given values override inherited. [] or {} clears.",
     }),
   ),
 });
@@ -153,26 +145,24 @@ export type OrchestratorMcpTerminalDelegatedTaskStatus =
   typeof OrchestratorMcpTerminalDelegatedTaskStatus.Type;
 
 export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
-  task: OrchestratorMcpPrompt.annotate({
-    description: "Full task for one child agent.",
-  }),
+  task: OrchestratorMcpPrompt,
   target: Schema.optional(OrchestratorMcpTarget),
   title: Schema.optional(OrchestratorMcpTitle),
   role: Schema.optional(OrchestratorMcpTaskRole),
   isolation: Schema.optional(
     Schema.Literals(["shared", "worktree"]).annotate({
       description:
-        "'shared' (default): parent checkout. 'worktree': new checkout from the parent commit, setup run first. The child starts there. Put no checkout setup in `task`. Uncommitted edits stay out.",
+        "'shared' (default): parent checkout. 'worktree': new prepared checkout from the parent commit. Use it for a separate checkout or PR per child. Never put `git worktree`, `cd`, or checkout setup in `task`. Uncommitted edits stay out.",
     }),
   ),
   mode: Schema.optional(
     Schema.Literals(["async", "wait"]).annotate({
       description:
-        "Default 'async'. 'wait' only if this turn needs the result. A question or approval ends the wait early.",
+        "Default 'async'. 'wait' only if this turn needs the result. A question or approval ends the wait.",
     }),
   ),
   timeoutMs: Schema.optional(Schema.Finite).annotate({
-    description: "Wait limit for mode 'wait'. Default 10 min. A timeout does not cancel the child.",
+    description: "Mode 'wait' only. Default 10 min. A timeout does not cancel the child.",
   }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
   runtimeMode: Schema.optional(
@@ -205,25 +195,20 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   latestTerminalResultContextTransferId: Schema.NullOr(ContextTransferId),
   providerInstanceId: ProviderInstanceId,
   model: Schema.NullOr(Schema.String),
-  options: Schema.optional(
-    Schema.Array(ProviderOptionSelection).annotate({
-      description: "The child's stored model options.",
-    }),
-  ),
+  options: Schema.optional(Schema.Array(ProviderOptionSelection)),
   summary: Schema.NullOr(Schema.String),
   resultContextTransferId: Schema.NullOr(ContextTransferId),
   hasPendingQuestion: Schema.Boolean.annotate({
     description:
-      "A question blocks the child. It ends a wait. Answer via the t3_pending_request_* tools on childThreadId.",
+      "A question blocks the child and ends a wait. Answer via `t3_pending_request_*` on `childThreadId`, or the user does.",
   }),
   pendingApproval: Schema.NullOr(
     Schema.Struct({ requestId: RuntimeRequestId, kind: ProviderRequestKind, runId: RunId }),
   ).annotate({
-    description:
-      "Oldest pending approval for this task, or null. It ends a wait. It grants no approval rights.",
+    description: "Oldest pending approval, or null. Ends a wait. Grants no approval rights.",
   }),
   waitTimedOut: Schema.Boolean.annotate({
-    description: "True only on the wait call that timed out. The child keeps running.",
+    description: "True only on the timed-out wait call. The child keeps running.",
   }),
   next: Schema.optional(OrchestratorMcpRunningTaskNext),
 });
@@ -527,7 +512,7 @@ export type OrchestratorMcpThreadInterruptResult = typeof OrchestratorMcpThreadI
 export const OrchestratorMcpCapabilitiesInput = Schema.Struct({
   search: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(200)).annotate({
-      description: "Text to match model ids and labels. Lists matches, not the short list.",
+      description: "Match model ids and labels. Replaces the short list.",
     }),
   ),
 });
@@ -584,15 +569,13 @@ export type OrchestratorMcpCapabilitiesResult = typeof OrchestratorMcpCapabiliti
 
 export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
   projectId: OrchestratorMcpProjectTarget,
-  prompt: OrchestratorMcpPrompt.annotate({
-    description: "Prompt for each run.",
-  }),
+  prompt: OrchestratorMcpPrompt,
   schedule: OrchestratorMcpSchedule,
   title: Schema.optional(OrchestratorMcpTitle),
-  enabled: Schema.optional(Schema.Boolean.annotate({ description: "Start on. Default true." })),
+  enabled: Schema.optional(Schema.Boolean.annotate({ description: "Default true." })),
   bindToCurrentThread: Schema.optional(
     Schema.Boolean.annotate({
-      description: "True (default): runs post in this thread. False: a new thread per run.",
+      description: "Default true: runs post in this thread. False: new thread per run.",
     }),
   ),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
@@ -611,11 +594,9 @@ export const OrchestratorMcpScheduledTask = Schema.Struct({
   lastRunStatus: ScheduledTaskRunStatus,
   webhookUrl: Schema.optional(Schema.String).annotate({
     description:
-      "Public URL to give the sender. Absent when this environment has no T3 Connect managed tunnel; the user must enable T3 Connect remote access first.",
+      "Public URL for the sender. Absent: no T3 Connect tunnel. The user must enable T3 Connect remote access.",
   }),
-  webhookSignature: Schema.optional(Schema.Literals(["none", "set"])).annotate({
-    description: "Whether requests must carry a valid signature.",
-  }),
+  webhookSignature: Schema.optional(Schema.Literals(["none", "set"])),
 });
 export type OrchestratorMcpScheduledTask = typeof OrchestratorMcpScheduledTask.Type;
 
@@ -625,8 +606,7 @@ export type OrchestratorMcpScheduleTaskResult = typeof OrchestratorMcpScheduleTa
 export const OrchestratorMcpListScheduledTasksInput = Schema.Struct({
   projectId: Schema.optional(
     ProjectId.annotate({
-      description:
-        "List only this project. Default: your thread's project, or all projects outside a thread.",
+      description: "Default: your thread's project, or all outside a thread.",
     }),
   ),
 });
@@ -655,31 +635,23 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
     description: "Card title, such as 'GitHub webhook secret'.",
   }),
   reason: TrimmedNonEmptyString.annotate({
-    description: "What it is for, and where the user gets it. One or two sentences.",
+    description: "What it is for and where to get it.",
   }),
-  placeholder: Schema.optional(TrimmedNonEmptyString).annotate({
-    description: "Input hint, such as 'Paste your GitHub token'.",
-  }),
-  delivery: Schema.optional(Schema.Literals(["secretRef", "file"])).annotate({
-    description:
-      'secretRef (default): for a T3 tool that takes one. file: for a shell CLI; the result is a private file path to read inside your command, e.g. CLOUDFLARE_API_TOKEN="$(cat <file>)" wrangler whoami.',
-  }),
+  placeholder: Schema.optional(TrimmedNonEmptyString),
   timeoutMs: Schema.optional(
     Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
-  ).annotate({ description: "Wait limit. Default 10 min." }),
+  ).annotate({ description: "Default 10 min." }),
   clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
-    description:
-      "Reuse for a retry of this same ask, so the user sees one card. New id to ask again after a timeout or cancel.",
+    description: "Retry key for this ask. New key after a timeout or cancel.",
   }),
 });
 export type OrchestratorMcpRequestSecretInput = typeof OrchestratorMcpRequestSecretInput.Type;
 
 export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
-    status: Schema.Literal("saved").annotate({ description: "secretRef holds the value." }),
+    status: Schema.Literal("saved"),
     secretRef: SecretRef.annotate({
-      description:
-        "Pass it to a tool that accepts a secretRef; it works once, and you never see the value.",
+      description: "One-use. Pass to a tool that accepts a secretRef. You never see the value.",
     }),
   }),
   Schema.Struct({
@@ -692,7 +664,7 @@ export const OrchestratorMcpRequestSecretResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literals(["declined", "cancelled", "timed_out"]).annotate({
       description:
-        "declined: the user chose not to. cancelled: the request ended with the run. timed_out: the user did not answer in time; the card is closed, so ask again with a new clientRequestId if still needed.",
+        "declined: user chose not to. cancelled: ended with the run. timed_out: no answer in time. Ask again with a new `clientRequestId` if still needed.",
     }),
   }),
 ]);

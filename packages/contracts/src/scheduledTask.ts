@@ -24,9 +24,7 @@ const TimeOfDay = TrimmedNonEmptyString.check(
 
 export const MIN_SCHEDULED_TASK_INTERVAL_MS = 60_000;
 
-const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
-  description: "Interval in ms.",
-});
+const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0));
 
 const ScheduledTaskIntervalSchedule = Schema.Struct({
   type: Schema.Literal("interval"),
@@ -42,7 +40,7 @@ const ScheduledTaskFixedTimeSchedule = Schema.Struct({
         description: "Weekday. 0 is Sunday, 6 is Saturday.",
       }),
     ).annotate({
-      description: "Weekdays. Default: every day.",
+      description: "Default: every day.",
     }),
   ),
 });
@@ -51,9 +49,7 @@ const ScheduledTaskWebhookSignatureFields = {
   header: TrimmedNonEmptyString.annotate({
     description: "Header with the signature, such as x-hub-signature-256.",
   }),
-  encoding: Schema.Literals(["hex", "base64"]).annotate({
-    description: "Digest encoding in the header.",
-  }),
+  encoding: Schema.Literals(["hex", "base64"]),
   prefix: Schema.String.annotate({
     description: "Text before the digest, such as 'sha256='. Empty for none.",
   }),
@@ -70,7 +66,7 @@ export const MAX_WEBHOOK_DELIVERY_AGE_MINUTES = 24 * 60;
 const WebhookMaxDeliveryAgeMinutes = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAX_WEBHOOK_DELIVERY_AGE_MINUTES }),
 ).annotate({
-  description: "Skip requests held offline longer than this many minutes. Null runs all.",
+  description: "Skip requests held offline over this many minutes. Null: run all.",
 });
 
 export function isWebhookDedupeTemplate(template: string): boolean {
@@ -89,7 +85,7 @@ const ScheduledTaskWebhookDedupe = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 10, maximum: 3600 })),
   ),
 }).annotate({
-  description: "Replay and coalesce key templates, plus a window in seconds (default 120).",
+  description: "Replay and coalesce key templates. Window in seconds, default 120.",
 });
 
 export const MAX_WEBHOOK_FILTERS = 16;
@@ -120,7 +116,7 @@ export const ScheduledTaskWebhookFilter = Schema.Union([
   Schema.Struct({ path: WebhookFilterPath, op: Schema.Literal("exists") }),
 ]).annotate({
   description:
-    "Paths look like headers.x-event or body.action. Values compare as strings. Objects pass only 'exists'. With `[]`, a test passes if any item does (notEquals: none).",
+    "Path: `headers.x-event` or `body.action`. String compare. Objects pass only 'exists'. With `[]`, any item passes (notEquals: none).",
 });
 export type ScheduledTaskWebhookFilter = typeof ScheduledTaskWebhookFilter.Type;
 export type ScheduledTaskWebhookFilterOp = ScheduledTaskWebhookFilter["op"];
@@ -128,8 +124,7 @@ export type ScheduledTaskWebhookFilterOp = ScheduledTaskWebhookFilter["op"];
 const ScheduledTaskWebhookFilters = Schema.Array(ScheduledTaskWebhookFilter)
   .check(Schema.isMaxLength(MAX_WEBHOOK_FILTERS))
   .annotate({
-    description:
-      "Run only if all filters match. Max 16. No field keeps stored filters. [] clears them.",
+    description: "All must match. Max 16. Omitted: keep stored. [] clears.",
   });
 
 const ScheduledTaskWebhookSchedule = Schema.Struct({
@@ -139,8 +134,7 @@ const ScheduledTaskWebhookSchedule = Schema.Struct({
   dedupe: Schema.optional(ScheduledTaskWebhookDedupe),
   filters: Schema.optional(ScheduledTaskWebhookFilters),
 }).annotate({
-  description:
-    "Run on each webhook request. The prompt can use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}}, and {{request}}.",
+  description: "Run on each webhook request.",
 });
 
 const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
@@ -150,16 +144,15 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
       Schema.Struct({
         ...ScheduledTaskWebhookSignatureFields,
         secret: Schema.optional(TrimmedNonEmptyString).annotate({
-          description: "Signing secret. Default: the stored one.",
+          description: "Default: stored secret.",
         }),
         secretRef: Schema.optional(SecretRef).annotate({
-          description:
-            "`secretRef` from `request_secret`. Use instead of `secret`. Spent by this save.",
+          description: "From `request_secret`. Instead of `secret`. Spent by this save.",
         }),
       }),
     ),
   ).annotate({
-    description: "Signature check. Null or none: URL token only.",
+    description: "Null or omitted: URL token only.",
   }),
   maxDeliveryAgeMinutes: Schema.optional(Schema.NullOr(WebhookMaxDeliveryAgeMinutes)),
   dedupe: Schema.optional(ScheduledTaskWebhookDedupe),
@@ -174,9 +167,7 @@ export const ScheduledTaskSchedule = Schema.Union([
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskWebhookSchedule,
-]).annotate({
-  description: "Trigger object with type 'interval', 'fixed_time', or 'webhook'.",
-});
+]);
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
 export const ScheduledTaskUpsertSchedule = Schema.Union([
@@ -185,14 +176,12 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
     everyMs: ScheduledTaskIntervalMs.check(
       Schema.isGreaterThanOrEqualTo(MIN_SCHEDULED_TASK_INTERVAL_MS),
     ).annotate({
-      description: "Interval in ms. Min 60000.",
+      description: "Min 60000.",
     }),
   }),
   ScheduledTaskFixedTimeSchedule,
   ScheduledTaskUpsertWebhookSchedule,
-]).annotate({
-  description: "Trigger object with type 'interval', 'fixed_time', or 'webhook'.",
-});
+]);
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 
 export const ScheduledTaskRunStatus = Schema.Literals(["never", "running", "succeeded", "failed"]);

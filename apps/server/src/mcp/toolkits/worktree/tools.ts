@@ -27,7 +27,7 @@ const WorktreeToolFailure = Schema.Union([WorktreeMcpFailure, OrchestratorMcpFai
 
 const WorktreeHandoffTool = Tool.make("t3_worktree_handoff", {
   description:
-    "Move THIS thread into a new git worktree. Makes a new branch and runs the project setup script by default. For a separate agent in a worktree, use `t3_thread_launch` with `workspaceStrategy`. Call this last in your turn. The move ends the live session. Pass `continuationPrompt` to keep working in the worktree next turn. Without it, the thread waits for a message. The worktree stays after the thread is deleted. Fails if this thread already has a worktree.",
+    "Move THIS thread into a new git worktree on a new branch. Runs the setup script by default. A separate agent in a worktree: `t3_thread_launch` with `workspaceStrategy`. Call last in your turn. The move ends the live session. `continuationPrompt` resumes work there next turn. Without it, the thread waits. The worktree stays after the thread is deleted. Fails if this thread has a worktree.",
   parameters: WorktreeMcpHandoffInput,
   success: WorktreeMcpHandoffResult,
   failure: WorktreeToolFailure,
@@ -42,7 +42,7 @@ const WorktreeHandoffTool = Tool.make("t3_worktree_handoff", {
 
 const WorktreeStatusTool = Tool.make("t3_worktree_status", {
   description:
-    "Report this thread's worktree binding: attached or not, worktree path and branch, project root, and the server default for `startFromOrigin`. Check this before `t3_worktree_handoff`.",
+    "Report this thread's worktree: attached or not, path, branch, project root, and the `startFromOrigin` default. Check before `t3_worktree_handoff`.",
   // No `parameters`: Tool.make defaults to Tool.EmptyParams, which serializes
   // to a top-level `type: "object"` JSON Schema. An explicit empty
   // Schema.Struct({}) serializes to `anyOf: [object, array]`, which is not a

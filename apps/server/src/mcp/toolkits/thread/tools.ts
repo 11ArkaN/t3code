@@ -30,7 +30,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
 const ThreadOrganizeTool = Tool.make("t3_thread_organize", {
   description:
-    "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies when your turn ends well. A failed turn or a queued message leaves it active.",
+    "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     action: Schema.Literals([
@@ -187,7 +187,7 @@ const ThreadConfigurationTool = Tool.make("t3_thread_configuration", {
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Set a thread's provider, model, and options. Omit `threadId` for this thread. Permission modes do not change. Pick values from `orchestrator_capabilities`.",
+    "Set a thread's provider, model, and options. Omit `threadId` for this thread. Permission modes do not change. Values from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     modelSelection: ModelSelection,
@@ -238,7 +238,7 @@ const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
 const ThreadSearchTool = Tool.make("t3_thread_search", {
   ...commandTool,
   description:
-    "Search active threads by title, branch, PR, and project, then message text, with snippets. Subagent threads are skipped. One project only: `projectId`, else yours. Outside a thread, no `projectId` searches all projects. Not exhaustive.",
+    "Search active threads by title, branch, PR, and project, then message text. Subagent threads are skipped. One project: `projectId`, else yours. Outside a thread, no `projectId` means all projects. Not exhaustive.",
   parameters: Schema.Struct({
     ...OrchestrationSearchThreadsInput.fields,
     projectId: Schema.optional(ProjectId),
@@ -264,7 +264,7 @@ const ThreadSearchTool = Tool.make("t3_thread_search", {
 const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
   ...commandTool,
   description:
-    "Run one scheduled task now. Needs a full-access or default caller. Returns the thread for this run, or null if it did not start. Success means the run started, not that it finished.",
+    "Run one scheduled task now. Needs a full-access or default caller. Returns its thread, or null if it did not start. Success means started, not finished.",
   parameters: Schema.Struct({ taskId: ScheduledTaskId }),
   success: Schema.Struct({
     taskId: ScheduledTaskId,

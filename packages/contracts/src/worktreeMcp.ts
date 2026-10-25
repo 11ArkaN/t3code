@@ -4,29 +4,25 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /** Uses the managed worktree folder; handoff detaches the provider, ending this turn and resuming there next run. */
 export const WorktreeMcpHandoffInput = Schema.Struct({
-  branch: TrimmedNonEmptyString.annotate({
-    description: "New branch name, such as 'feature/my-change'.",
-  }),
+  branch: TrimmedNonEmptyString,
   baseRef: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Ref to start from. Default: the checked-out branch.",
+      description: "Default: checked-out branch.",
     }),
   ),
   startFromOrigin: Schema.optional(
     Schema.Boolean.annotate({
-      description:
-        "True: fetch and start from the remote ref, not the local one. Default: the server setting.",
+      description: "True: fetch, start from the remote ref. Default: server setting.",
     }),
   ),
   runSetupScript: Schema.optional(
     Schema.Boolean.annotate({
-      description: "Run the setup script after the move. Default true.",
+      description: "Default true.",
     }),
   ),
   continuationPrompt: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
-      description:
-        "Next-turn message after the move. Pass the work left to resume in the worktree. None: wait for a message.",
+      description: "Work to resume in the worktree next turn. Omitted: thread waits.",
     }),
   ),
 });
@@ -78,16 +74,12 @@ export const WorktreeMcpHandoffResult = Schema.Struct({
 export type WorktreeMcpHandoffResult = typeof WorktreeMcpHandoffResult.Type;
 
 export const WorktreeMcpStatusResult = Schema.Struct({
-  attached: Schema.Boolean.annotate({
-    description: "True when this thread is already attached to a git worktree.",
-  }),
+  attached: Schema.Boolean,
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   branch: Schema.NullOr(TrimmedNonEmptyString),
-  projectWorkspaceRoot: TrimmedNonEmptyString.annotate({
-    description: "Root of the project's main workspace checkout.",
-  }),
+  projectWorkspaceRoot: TrimmedNonEmptyString,
   defaultStartFromOrigin: Schema.Boolean.annotate({
-    description: "Server default used by t3_worktree_handoff when startFromOrigin is omitted.",
+    description: "`startFromOrigin` default for `t3_worktree_handoff`.",
   }),
 });
 export type WorktreeMcpStatusResult = typeof WorktreeMcpStatusResult.Type;
