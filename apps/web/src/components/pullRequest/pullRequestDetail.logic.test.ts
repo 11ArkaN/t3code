@@ -953,6 +953,50 @@ describe("a second ask into the same composer", () => {
     ).toBe("check the migration first\n\nWhy the cache key?");
   });
 
+  it("keeps an earlier selection when another selection is added to the agent", () => {
+    const pullRequest = {
+      number: 25009,
+      title: "Add the pull requests page",
+      url: "https://github.com/pingdotgg/t3code/pull/25009",
+      headBranch: "feat/page",
+      baseBranch: "main",
+      state: "open" as const,
+      isDraft: false,
+    };
+    const selection = (line: number, request: string) =>
+      buildAddSelectionToAgentHandoff({
+        ...pullRequest,
+        request,
+        comment: {
+          id: `pull-request-selection:ChatTerminalDrawers.tsx:${line}:${line}`,
+          sectionId: "pull-request:25009",
+          sectionTitle: "PR #25009 review",
+          filePath: "apps/web/src/components/chat/ChatTerminalDrawers.tsx",
+          startIndex: line - 1,
+          endIndex: line - 1,
+          rangeLabel: `L${line}`,
+          text: request,
+          diff: "",
+        },
+      });
+    const first = selection(25, "First selection: preserve this context.");
+    const second = selection(26, "Second selection: keep both.");
+
+    const prompt = handoffPrompt(
+      { prompt: first.prompt, lastHandoffPrompt: first.prompt },
+      second.prompt,
+    );
+    const comments = handoffReviewComments(first.reviewComments, second.reviewComments);
+
+    expect.soft(prompt).toContain(first.prompt);
+    expect.soft(prompt).toContain(second.prompt);
+    expect(comments.map((comment) => comment.id)).toEqual([
+      "pull-request-context:25009",
+      "pull-request-selection:ChatTerminalDrawers.tsx:25:25",
+      "pull-request-selection:ChatTerminalDrawers.tsx:26:26",
+    ]);
+  });
+
   it("keeps the lines the reader marked up in the thread themselves", () => {
     const own = chip("file-comment:3");
     const next = handoffReviewComments(
