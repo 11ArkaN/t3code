@@ -76,7 +76,7 @@ const queueEntry = Schema.Struct({
   text: Schema.String,
   truncated: Schema.Boolean,
 });
-export const QUEUE_READ_ACTIONS = ["list", "read"] as const;
+const QUEUE_READ_ACTIONS = ["list", "read"] as const;
 const QueueTool = Tool.make("t3_queue", {
   ...commandTool,
   description:
