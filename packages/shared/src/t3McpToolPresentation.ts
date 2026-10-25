@@ -395,6 +395,55 @@ export function resolveT3McpToolDefinition(
   return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? T3_MCP_TOOLS[name]! : null;
 }
 
+type SummaryInput = Readonly<Record<string, unknown>>;
+
+const byAction =
+  (summaries: Readonly<Record<string, T3McpToolSummaryAction>>) =>
+  ({ action }: SummaryInput) =>
+    typeof action === "string" ? summaries[action] : undefined;
+
+/** Action tools summarize each call by the action it ran, not by the tool name. */
+const ACTION_SUMMARIES: Readonly<
+  Record<string, (input: SummaryInput) => T3McpToolSummaryAction | undefined>
+> = {
+  t3_queue: byAction({
+    list: "queue-list",
+    read: "queue-read",
+    edit: "queue-edit",
+    cancel: "queue-cancel",
+    reorder: "queue-reorder",
+    promote_to_steer: "queue-steer",
+  }),
+  t3_pending_request: byAction({
+    list: "question-list",
+    read: "question-read",
+    respond: "question-respond",
+  }),
+  t3_thread_transfer: byAction({
+    fork: "thread-fork",
+    merge_back: "thread-merge",
+    status: "thread-transfers",
+  }),
+  t3_thread_configure: ({ modelSelection }) =>
+    modelSelection === undefined ? "thread-configuration" : "thread-configure",
+  schedule_task: ({ scheduledTaskId }) =>
+    scheduledTaskId === undefined ? "schedule-create" : "schedule-update",
+};
+
+export function resolveT3McpSummaryAction(
+  toolName: string | null | undefined,
+  input: unknown,
+): T3McpToolSummaryAction | null {
+  const definition = resolveT3McpToolDefinition(toolName);
+  if (definition === null) return null;
+  const summarize = ACTION_SUMMARIES[resolveT3McpToolName(toolName!) ?? ""];
+  const fromInput =
+    summarize !== undefined && typeof input === "object" && input !== null
+      ? summarize(input as SummaryInput)
+      : undefined;
+  return fromInput ?? definition.summaryAction;
+}
+
 export function resolveT3McpToolPresentation(
   toolName: string | null | undefined,
 ): T3McpToolPresentation | null {

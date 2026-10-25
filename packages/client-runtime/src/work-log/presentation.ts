@@ -10,6 +10,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import {
+  resolveT3McpSummaryAction,
   resolveT3McpToolDefinition,
   type T3McpToolDefinition,
   type T3McpToolSummaryAction,
@@ -545,7 +546,10 @@ export function summarizeToolGroup(entries: ReadonlyArray<WorkLogPresentationEnt
   >();
   const sources = new Map<string, ToolActivitySource>();
   for (const entry of entries) {
-    const t3Action = resolveT3McpToolDefinition(workEntryToolName(entry))?.summaryAction ?? null;
+    const t3Action = resolveT3McpSummaryAction(
+      workEntryToolName(entry),
+      t3ToolSummaryCall(entry).input,
+    );
     if (entry.toolSource && t3Action === null) {
       sources.set(entry.toolSource.key, entry.toolSource);
       continue;
