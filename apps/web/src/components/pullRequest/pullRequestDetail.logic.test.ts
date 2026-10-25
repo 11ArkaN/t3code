@@ -69,7 +69,6 @@ import {
   writePullRequestDetailSnapshot,
   readableFailure,
 } from "./pullRequestDetail.logic";
-import type { ReviewCommentContext } from "~/reviewCommentContext";
 
 describe("pull request checkout commands", () => {
   it("quotes shell metacharacters in Forgejo repository URLs", () => {
@@ -931,7 +930,7 @@ describe("a second ask into the same composer", () => {
         diff: "",
       },
     });
-  const fixFinding = () =>
+  const fixFinding = (body = "rename the helper") =>
     buildFixFindingHandoff({
       ...pullRequest(),
       finding: {
@@ -947,7 +946,7 @@ describe("a second ask into the same composer", () => {
             {
               id: "tc1",
               author: { login: "reviewer", name: null, avatarUrl: null },
-              body: "rename the helper",
+              body,
               createdAt: "2026-07-03T00:00:00Z",
               url: null,
             },
@@ -970,6 +969,10 @@ describe("a second ask into the same composer", () => {
       target,
       hand: (...tasks: ReadonlyArray<FixFindingsHandoff>) => {
         for (const task of tasks) last = writeHandoffToComposer(store, target, last, task);
+      },
+      // A reload keeps the persisted draft but forgets what the last handoff wrote.
+      reload: () => {
+        last = undefined;
       },
       prompt: () => draft()?.prompt ?? "",
       chips: () => draft()?.reviewComments ?? [],
@@ -1021,6 +1024,65 @@ describe("a second ask into the same composer", () => {
       "page.tsx",
       "page.tsx",
     ]);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("keeps a selection added before a reload when another is added after it", () => {
+    const composerState = composer();
+    composerState.hand(selection(1, "why this?"));
+    composerState.reload();
+    composerState.hand(selection(2, "and this?"));
+
+    expect(composerState.prompt()).toMatch(/^why this\? \[.*\n\nand this\? \[/su);
+    expect(composerState.chips().map((chip) => chip.filePath)).toEqual([
+      "PR #42",
+      "page.tsx",
+      "page.tsx",
+    ]);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("still replaces an explanation after a reload", () => {
+    const composerState = composer();
+    const finding = fixFinding();
+    composerState.hand(explain());
+    composerState.reload();
+    composerState.hand(finding);
+
+    expect(composerState.chips()).toEqual(finding.reviewComments);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("hands the same finding's instructions once when it is fixed twice", () => {
+    const composerState = composer();
+    const finding = fixFinding();
+    composerState.hand(finding, fixFinding("use a map instead"));
+
+    expect(composerState.prompt().split(finding.prompt)).toHaveLength(2);
+    expect(composerState.chips()).toHaveLength(1);
+    expect(composerState.chips()[0]?.text).toBe("reviewer: use a map instead");
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("adds a new request about the same selection", () => {
+    const composerState = composer();
+    composerState.hand(selection(1, "why this?"), selection(1, "and why not a map?"));
+
+    expect(composerState.prompt()).toMatch(/^why this\? \[.*\n\nand why not a map\?/su);
+    expect(composerState.chips().map((chip) => chip.filePath)).toEqual(["PR #42", "page.tsx"]);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("sends a finding's latest comments when it is fixed again", () => {
+    const composerState = composer();
+    composerState.hand(fixFinding(), selection(1, "why this?"), fixFinding("use a map instead"));
+
+    expect(composerState.chips().map((chip) => chip.filePath)).toEqual([
+      "page.tsx",
+      "PR #42",
+      "page.tsx",
+    ]);
+    expect(composerState.chips()[0]?.text).toBe("reviewer: use a map instead");
     expect(composerState.referencedChips()).toEqual(composerState.chips());
   });
 

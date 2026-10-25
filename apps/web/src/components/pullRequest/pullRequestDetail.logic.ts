@@ -828,6 +828,27 @@ export interface ComposerHandoff {
 }
 
 const HANDOFF_COMMENT_ID_PREFIX = "pull-request-";
+const HANDOFF_CONTEXT_ID_PREFIX = "pull-request-context:";
+const APPENDED_COMMENT_ID_PREFIXES = [
+  "pull-request-selection:",
+  "pull-request-guide:",
+  "pull-request-finding:",
+];
+
+// After a reload only the persisted chips say whether the last handoff piled up.
+function appendedLast(comments: ReadonlyArray<ReviewCommentContext>): boolean {
+  const handed = comments.filter(
+    (comment) =>
+      comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX) &&
+      !comment.id.startsWith(HANDOFF_CONTEXT_ID_PREFIX),
+  );
+  return (
+    handed.length > 0 &&
+    handed.every((comment) =>
+      APPENDED_COMMENT_ID_PREFIXES.some((prefix) => comment.id.startsWith(prefix)),
+    )
+  );
+}
 
 const joinPrompts = (...parts: ReadonlyArray<string>) =>
   parts.filter((part) => part.trim().length > 0).join("\n\n");
@@ -851,12 +872,24 @@ export function writeHandoffToComposer(
   // An edited contribution is the reader's text now.
   const owned = tail.length > 0 && (existing === tail || existing.endsWith(`\n\n${tail}`));
   const kept = owned ? existing.slice(0, -tail.length).replace(/\n\n$/u, "") : existing;
-  const extend = last?.appends === true && task.appends === true;
-  const contribution = joinPrompts(owned && extend ? tail : "", task.prompt);
+  const existingComments = draft?.reviewComments ?? [];
+  const extend =
+    task.appends === true &&
+    (last === undefined ? appendedLast(existingComments) : last.appends === true);
+  const existingIds = new Set(existingComments.map((comment) => comment.id));
+  // Fixing the same findings again refreshes their chips without repeating the instructions.
+  const repeated =
+    extend &&
+    (task.reviewComments ?? []).length > 0 &&
+    (task.reviewComments ?? []).every((comment) => existingIds.has(comment.id)) &&
+    existing.includes(task.prompt);
+  const contribution = joinPrompts(owned && extend ? tail : "", repeated ? "" : task.prompt);
   store.setPrompt(target, joinPrompts(kept, contribution));
-  const keptComments = (draft?.reviewComments ?? []).filter(
-    (comment) => extend || !comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX),
-  );
+  const incoming = new Map((task.reviewComments ?? []).map((comment) => [comment.id, comment]));
+  const keptComments = existingComments
+    .filter((comment) => extend || !comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX))
+    // A chip handed again carries the host's latest text.
+    .map((comment) => incoming.get(comment.id) ?? comment);
   const keptIds = new Set(keptComments.map((comment) => comment.id));
   // The store drops references to removed chips and appends references to new ones.
   store.setReviewComments(target, [
