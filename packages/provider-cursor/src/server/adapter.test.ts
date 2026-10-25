@@ -1,3 +1,7 @@
+import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
+import * as NodePath from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import type { InteractionUpdate } from "@cursor/sdk";
@@ -38,6 +42,26 @@ import * as CursorAgentSdk from "./CursorAgentSdk.ts";
 import { ConfigurationError } from "./sdk.ts";
 
 const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
+
+// The SDK does not export its grep result converter, so load it from the installed ESM chunk.
+const loadInstalledCursorGrepResultConverter = () => {
+  const sdkEntry = NodeModule.createRequire(import.meta.url).resolve("@cursor/sdk");
+  const chunk = NodeFS.readFileSync(
+    NodePath.join(NodePath.dirname(sdkEntry), "../esm/689.js"),
+    "utf8",
+  );
+  const anchor = chunk.search(
+    /function [\w$]+\(e\)\{if\(e\?\.result\?\.case\)switch\(e\.result\.case\)\{case"content":return\{type:"content"/,
+  );
+  assert.isAtLeast(anchor, 0, "Cursor SDK grep result converter not found");
+  let depth = 0;
+  let end = chunk.indexOf("{", anchor);
+  for (; end < chunk.length; end++) {
+    if (chunk[end] === "{") depth++;
+    if (chunk[end] === "}" && --depth === 0) break;
+  }
+  return new Function(`return (${chunk.slice(anchor, end + 1)})`)() as (result: unknown) => unknown;
+};
 
 describe("CursorAdapterV2", () => {
   it.effect.each([
@@ -1337,6 +1361,54 @@ describe("CursorAdapterV2", () => {
             status: "error",
             error: "File path was not provided.",
           },
+        },
+      },
+    );
+  });
+
+  it("keeps grouped grep content matches through the installed Cursor SDK converter", () => {
+    const convertGrepResult = loadInstalledCursorGrepResultConverter();
+
+    assert.deepEqual(
+      convertGrepResult({
+        result: {
+          case: "content",
+          value: {
+            matches: [
+              {
+                file: "src/one.ts",
+                matches: [
+                  { lineNumber: 10, content: "before one", isContextLine: true },
+                  { lineNumber: 11, content: "needle one", isContextLine: false },
+                  { lineNumber: 12, content: "after one", isContextLine: true },
+                ],
+              },
+              {
+                file: "src/two.ts",
+                matches: [{ lineNumber: 3, content: "needle two", isContextLine: false }],
+              },
+            ],
+            totalLines: 4,
+            totalMatchedLines: 7,
+            clientTruncated: true,
+            ripgrepTruncated: false,
+          },
+        },
+      }),
+      {
+        type: "content",
+        output: {
+          matches: [
+            {
+              file: "src/one.ts",
+              lineNumber: 11,
+              line: "needle one",
+              beforeContext: ["before one"],
+              afterContext: ["after one"],
+            },
+            { file: "src/two.ts", lineNumber: 3, line: "needle two" },
+          ],
+          totalMatches: 7,
         },
       },
     );
