@@ -6,16 +6,16 @@ export const T3_CODE_ORCHESTRATION_SECTIONS: ReadonlyArray<string> = [
 
 Ordinary coding tasks need no T3 tools.
 
-- Subagents: use your native tool when the child uses your provider, a model it offers, and no settings beyond yours, and you wait in this turn (Claude \`Agent\` always with \`run_in_background:false\`; Codex \`spawn_agent\`, then wait). Use \`delegate_task\` for another provider's model, user-asked settings, a separate checkout (\`isolation:"worktree"\`), work past your turn, or \`delegate_task\` by name. A native type running another provider's model counts too. Workflow only when asked.
+- Subagents: use your native tool when the child uses your provider, a model it offers, and no settings beyond yours, and you wait in this turn (Claude \`Agent\` always with \`run_in_background:false\`; Codex \`spawn_agent\`, then wait). Use \`delegate_task\` for another provider's model, user-asked settings, a separate checkout (\`isolation:"worktree"\`), background work, or \`delegate_task\` by name. A native type running another provider's model counts too. Workflow only when asked.
 - Before \`delegate_task\`, call \`orchestrator_capabilities\` once. Again only after an error or a user-named provider change. Settings go in \`target.options\`. One child per named model. Provider or model unavailable: say so. Never switch unasked, or fall back to native tools, Workflow, or CLIs. Never make a child's checkout in the shell or in \`task\`.
 - Every new delegate review or re-check is a new \`delegate_task\` (brief, findings, objections), never a \`t3_thread_send\`. Fix small review findings yourself; start no delegate for them. When told to proceed without a delegate, \`task_cancel\` it. Start no replacement.
-- After an async delegate, end your turn. Completion wakes you. Do not poll with \`task_status\`, \`sleep\`, watchers, Monitor, or ScheduleWakeup. Stop delegates with \`task_cancel\`. Never \`t3_thread_interrupt\` a \`childThreadId\`.
+- Follow a running delegate's \`next\`. Do not poll it (\`task_status\`, \`sleep\`, watchers, Monitor, ScheduleWakeup). Stop delegates with \`task_cancel\`, never \`t3_thread_interrupt\` on a \`childThreadId\`.
 - If you are a subagent or child, do the work yourself. Start no subagents unless your task says to.`,
   `- \`t3_thread_launch\` and \`create_threads\` make new top-level threads, only when the user asks for a new thread. "Subagent", "delegate", and "parallel" never mean one. Worktree thread: set \`workspaceStrategy\`; shell worktrees do not bind it, and no checkout setup in its prompt. No \`workspaceStrategy\`: project root, not your worktree.
 - Given a thread id, \`t3_thread_read\` it before you answer about it.
+- In your reply, a thread's first mention is its \`link\` verbatim. No \`link\`: \`[title](t3-thread://v1/<exact id>)\`. Never a plain title or bare id.
 - A secret for a tool here: \`request_secret\`, then pass its \`secretRef\`. Never ask in chat or invent one. When asked only to schedule, \`schedule_task\` without running its prompt.
-- T3 tools may load late. Try the name once before you call it absent.
-- Mention every thread as a link at first mention: its \`link\` from a tool result, or \`[title](t3-thread://v1/<threadId>)\` with the exact id. Never a bare id or plain title.`,
+- T3 tools may load late. Try the name once before you call it absent.`,
   `### Visuals and preview
 
 - Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
