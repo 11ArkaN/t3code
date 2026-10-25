@@ -376,7 +376,12 @@ export type BuildThreadActionItemsThread = Pick<
   Partial<
     Pick<
       SidebarThreadSummary,
-      "pullRequests" | "sideChat" | "linkedPullRequest" | "branchPullRequest" | "opens" | "latestUserMessageAt"
+      | "pullRequests"
+      | "sideChat"
+      | "linkedPullRequest"
+      | "branchPullRequest"
+      | "opens"
+      | "latestUserMessageAt"
     >
   > & {
     updatedAt: string;
@@ -397,8 +402,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   // Callers order these: recents by last use, search results by rank.
   const listable = makeSideChatListingFilter(input.threads);
   const visibleThreads = input.threads.filter(
-    (thread) =>
-      thread.archivedAt === null && !isSidebarSubagentThread(thread) && listable(thread),
+    (thread) => thread.archivedAt === null && !isSidebarSubagentThread(thread) && listable(thread),
   );
 
   return visibleThreads.map((thread) => {
