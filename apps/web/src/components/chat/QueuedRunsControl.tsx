@@ -106,6 +106,9 @@ export function QueuedRunsControl({
   const activeRun = workflow?.activeRun ?? null;
   const canReorder = workflow?.canReorder === true;
   const canSend = workflow?.canSendNow === true || workflow?.canPromoteToSteer === true;
+  const nextSteerable = queued.find(
+    ({ steerRejectionReason }) => workflow?.canSendNow || steerRejectionReason === null,
+  );
   const queuedImageUrlById = new Map(
     queuedImageAttachmentUrls.flatMap((url, index) => {
       const resource = queuedImageAttachmentResources[index];
@@ -116,7 +119,7 @@ export function QueuedRunsControl({
     (message) => message.inputIntent === "queued_turn" && !acknowledgedMessageIds.has(message.id),
   );
   const items = [
-    ...queued.map(({ run, text, attachments, context }, serverIndex) => ({
+    ...queued.map(({ run, text, attachments, context, steerRejectionReason }, serverIndex) => ({
       key: run.id,
       runId: run.id,
       messageId: run.userMessageId,
@@ -133,6 +136,7 @@ export function QueuedRunsControl({
           name: attachment.name,
           url: queuedImageUrlById.get(attachment.id) ?? null,
         })),
+      steerRejectionReason,
       pending: false,
     })),
     ...optimisticQueued.map((message) => ({
@@ -151,6 +155,7 @@ export function QueuedRunsControl({
           name: attachment.name,
           url: attachment.previewUrl ?? null,
         })),
+      steerRejectionReason: null,
       pending: true,
     })),
   ];
@@ -195,9 +200,8 @@ export function QueuedRunsControl({
 
   useImperativeHandle(ref, () => ({
     steerNext(repeat) {
-      const next = queued[0];
-      if (!next || !canSend) return false;
-      if (!repeat && busyRunId === null) void sendQueuedMessage(next.run.id);
+      if (!nextSteerable || !canSend) return false;
+      if (!repeat && busyRunId === null) void sendQueuedMessage(nextSteerable.run.id);
       return true;
     },
     // Leave the key to caret navigation while editing.
@@ -446,7 +450,12 @@ export function QueuedRunsControl({
                             <Button
                               size="xs"
                               variant="ghost-muted"
-                              disabled={item.runId === null || busyRunId !== null || !canSend}
+                              disabled={
+                                item.runId === null ||
+                                busyRunId !== null ||
+                                !canSend ||
+                                (!workflow?.canSendNow && item.steerRejectionReason !== null)
+                              }
                               onClick={() => {
                                 if (item.runId !== null) {
                                   void sendQueuedMessage(item.runId);
@@ -458,7 +467,9 @@ export function QueuedRunsControl({
                             </Button>
                           </TooltipTrigger>
                           <TooltipPopup>
-                            {`${workflow?.canSendNow ? "Start a turn with this message" : "Send as a steer instead"}${item.serverIndex === 0 && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
+                            {!workflow?.canSendNow && item.steerRejectionReason
+                              ? item.steerRejectionReason
+                              : `${workflow?.canSendNow ? "Start a turn with this message" : "Send as a steer instead"}${item.runId === nextSteerable?.run.id && props.steerShortcutLabel ? ` (${props.steerShortcutLabel})` : ""}`}
                           </TooltipPopup>
                         </Tooltip>
                         <Tooltip>

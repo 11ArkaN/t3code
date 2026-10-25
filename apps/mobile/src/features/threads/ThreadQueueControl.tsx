@@ -210,7 +210,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           No messages waiting in this queue.
         </Text>
       ) : null}
-      {queuedRuns.map(({ run, text, attachments, context }, index) => {
+      {queuedRuns.map(({ run, text, attachments, context, steerRejectionReason }, index) => {
         const layout = dragRows?.find((row) => row.id === run.id);
         const offset =
           sourceLayout?.y !== undefined &&
@@ -228,6 +228,7 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
           isEditing: editing?.runId === run.id,
           isGuestMessage: context?.guest !== undefined,
           queuedCount: queuedRuns.length,
+          steerRejectionReason,
           text,
         });
         const title =
@@ -335,6 +336,9 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                             {
                               id: "steer",
                               title: workflow?.canSendNow ? "Send now" : "Steer now",
+                              ...(!workflow?.canSendNow && steerRejectionReason
+                                ? { subtitle: steerRejectionReason }
+                                : {}),
                               attributes: { disabled: !controls.canSend },
                               image: Platform.OS === "ios" ? "arrow.turn.left.up" : "arrow_upward",
                             },
@@ -409,6 +413,9 @@ export function ThreadQueueSheet({ route }: StaticScreenProps<QueueTarget>) {
                           ? `Send message ${index + 1} now`
                           : `Steer with message ${index + 1} now`
                       }
+                      {...(!workflow?.canSendNow && steerRejectionReason
+                        ? { accessibilityHint: steerRejectionReason }
+                        : {})}
                       disabled={!controls.canSend}
                       onPress={() => void act(run.id, "steer")}
                       className="shrink-0 justify-center self-stretch pl-4 active:opacity-70 disabled:opacity-40"

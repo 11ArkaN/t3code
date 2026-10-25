@@ -1,12 +1,13 @@
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
-import type { ComponentProps } from "react";
+import { createRef, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { page } from "vite-plus/test/browser";
 
 const state = vi.hoisted(() => ({
   projection: null as unknown,
   workflow: null as unknown,
+  runCommand: vi.fn(async (_value: unknown) => undefined),
 }));
 
 vi.mock(import("@t3tools/client-runtime/state/thread-workflows"), async (importOriginal) => ({
@@ -21,7 +22,7 @@ vi.mock(import("../../state/entities"), async (importOriginal) => ({
 
 vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useAtomCommand: (() => async () => undefined) as never,
+  useAtomCommand: (() => state.runCommand) as never,
 }));
 
 vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
@@ -31,11 +32,12 @@ vi.mock(import("../../assets/assetUrls"), async (importOriginal) => ({
 }));
 
 import { render as renderUi } from "../../../test/render";
-import { QueuedRunsControl } from "./QueuedRunsControl";
+import { QueuedRunsControl, type QueuedRunsControlHandle } from "./QueuedRunsControl";
 
 function setup() {
   state.projection = null;
   state.workflow = null;
+  state.runCommand.mockClear();
 }
 
 const baseProps = {
@@ -74,11 +76,13 @@ it("previews assistant quotes as readable text and preserves the citation when e
     queuedRuns: [
       {
         run: { id: "run:quote-only", userMessageId: "message:quote-only" },
+        steerRejectionReason: null,
         text: quote,
         attachments: [],
       },
       {
         run: { id: "run:quote-and-text", userMessageId: "message:quote-and-text" },
+        steerRejectionReason: null,
         text: quoteAndText,
         attachments: [],
       },
@@ -95,5 +99,51 @@ it("previews assistant quotes as readable text and preserves the citation when e
   await page.getByRole("button", { name: "Edit queued message", exact: true }).nth(1).click();
   expect(onEditQueuedRun).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ text: quoteAndText }),
+  );
+});
+
+it.each([false, true])("gates queued command sending with send-now %s", async (canSendNow) => {
+  setup();
+  state.projection = { projection: { messages: [] } };
+  state.workflow = {
+    activeRun: { id: "run:active" },
+    canSendNow,
+    canPromoteToSteer: !canSendNow,
+    canReorder: true,
+    queuedRuns: [
+      {
+        run: { id: "run:goal", userMessageId: "message:goal" },
+        text: "/goal finish the refactor",
+        attachments: [],
+        steerRejectionReason: "Goal commands must run as a separate turn.",
+      },
+      {
+        run: { id: "run:plain", userMessageId: "message:plain" },
+        text: "Also update the docs",
+        attachments: [],
+        steerRejectionReason: null,
+      },
+    ],
+  };
+  const ref = createRef<QueuedRunsControlHandle>();
+  await using _screen = await renderQueue({ ref });
+
+  const steerButtons = page.getByRole("button", {
+    name: canSendNow ? "Send now" : "Steer",
+    exact: true,
+  });
+  if (canSendNow) await expect.element(steerButtons.nth(0)).toBeEnabled();
+  else await expect.element(steerButtons.nth(0)).toBeDisabled();
+  await expect.element(steerButtons.nth(1)).toBeEnabled();
+
+  expect(ref.current?.steerNext(false)).toBe(true);
+  expect(state.runCommand).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      input: expect.objectContaining(
+        canSendNow
+          ? { runId: "run:goal" }
+          : { queuedRunId: "run:plain", targetRunId: "run:active" },
+      ),
+    }),
   );
 });

@@ -24,6 +24,7 @@ export function resolveThreadQueueRowControls(input: {
   /** A guest's message keeps the guest's words; the owner can cancel it, not rewrite it. */
   readonly isGuestMessage?: boolean;
   readonly queuedCount: number;
+  readonly steerRejectionReason: string | null;
   readonly text: string;
 }): ThreadQueueRowControls {
   const mutationEnabled = !input.busy;
@@ -36,7 +37,10 @@ export function resolveThreadQueueRowControls(input: {
     canEdit: mutationEnabled && !isEditing && input.isGuestMessage !== true,
     canMoveDown: mutationEnabled && input.canReorder && input.index < input.queuedCount - 1,
     canMoveUp: mutationEnabled && input.canReorder && input.index > 0,
-    canSend: mutationEnabled && (input.canPromoteToSteer || input.canSendNow) && !isEditing,
+    canSend:
+      mutationEnabled &&
+      !isEditing &&
+      (input.canSendNow || (input.canPromoteToSteer && input.steerRejectionReason === null)),
     dismissAccessibilityLabel: REMOVE_QUEUED_MESSAGE_ACCESSIBILITY_LABEL,
     // Editing and sending keep the original text so quoted citations stay linked.
     displayText: assistantCitationsToPlainText(input.text),
