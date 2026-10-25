@@ -53,6 +53,24 @@ describe("V2 client presentation", () => {
     expect(effectiveSnoozed(active, { now: "2026-06-20T00:05:00.000Z" })).toBe(false);
   });
 
+  it("flags an async question as answerable while the run keeps Working", () => {
+    const runId = RunId.make("run-async-question-indicator");
+    const shell = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      latestRunId: runId,
+      activeRunId: runId,
+      status: "running",
+      pendingRuntimeRequest: {
+        id: RuntimeRequestId.make("request-async-question-indicator"),
+        kind: "user_input",
+        createdAt: v2ThreadShell.updatedAt,
+        blocking: false,
+      },
+    });
+    expect(isThreadWorking(shell)).toBe(true);
+    expect(shell.hasPendingQuestion).toBe(true);
+  });
+
   it("keeps blocking and legacy questions out of Working", () => {
     for (const capability of [{ blocking: true }, {}]) {
       const shell = presentThreadShell(environmentId, {
