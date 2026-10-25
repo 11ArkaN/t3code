@@ -265,7 +265,7 @@ export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.T
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
   description:
-    "Link a PR to this thread. Pass the URL, or repository plus number. T3 shows its status and settles the thread on merge. Delegated child: report at once. Put this URL and the head SHA from `git log -1 --format=%h` in your final line to the parent.",
+    "Link a PR to this thread. Pass the URL, or repository plus number. Host tools do not link for you. T3 shows its status and settles the thread on merge.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
