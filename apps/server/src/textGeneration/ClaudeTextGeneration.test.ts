@@ -342,6 +342,37 @@ it.layer(layerClaudeTextGenerationTest)("ClaudeTextGeneration", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect.each([
+    [
+      "malformed JSON",
+      `--settings '{"env":'`,
+      "The --settings launch argument is not a JSON object.",
+    ],
+    ["no value", "--settings", "The --settings launch argument needs a JSON object or file path."],
+  ] as const)("rejects a --settings launch arg with %s", ([, launchArgs, detail]) =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({ structured_output: { title: "Unused" } }),
+        claudeConfig: { launchArgs },
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(
+            textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Name this thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            }),
+          );
+
+          expect(error.detail).toBe(detail);
+        }),
+    ),
+  );
+
   it.effect("runs Claude text generation with the configured CLAUDE_CONFIG_DIR", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
