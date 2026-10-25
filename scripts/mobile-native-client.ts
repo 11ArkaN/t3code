@@ -768,7 +768,7 @@ export const resolveArtifact = Effect.fn("nativeClient.resolveArtifact")(functio
     ((yield* HostProcess.Platform) === "darwin" && (yield* HostProcess.Architecture) === "arm64");
   if (!canBuild)
     return yield* new NativeClientError({
-      message: `No cached client for ${key}, and this machine cannot build it. Run vp run mobile:install ios on an Apple silicon Mac with this checkout once, or test on Android.`,
+      message: `No cached client for ${key}, and this machine cannot build it. Run vp run mobile:install ios --artifact on an Apple silicon Mac with this checkout once, or test on Android.`,
     });
   const log = yield* BuildLog;
   yield* Console.error(

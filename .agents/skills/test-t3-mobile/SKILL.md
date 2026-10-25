@@ -92,7 +92,8 @@ vp run mobile:install android --artifact --abi arm64-v8a
 `physical: true` phone or an emulator on a host that lists iOS `available` (a
 Mac), and `x86_64` for an emulator on a Linux host. If install fails with
 `NO_MATCHING_ABIS`, use the other ABI. `install` replaces an existing client and
-keeps its pairings. iOS works the same way with
+keeps its pairings; on `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, uninstall it first,
+which clears them. iOS works the same way with
 `vp run mobile:install ios --artifact` when the local or shared cache has this
 fingerprint, or builds it as a background task on an Apple silicon Mac;
 otherwise it names the next step.
