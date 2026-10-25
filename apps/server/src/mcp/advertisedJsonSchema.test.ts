@@ -4,7 +4,7 @@ import { Tool } from "effect/ai";
 
 import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 
-it("drops JSON noise but keeps null where it is required", () => {
+it("drops JSON noise, merges tagged unions, and keeps null where it is required", () => {
   const Every = Schema.Struct({ ms: Schema.Int });
   const tool = Tool.make("example", {
     parameters: Schema.Struct({
@@ -31,18 +31,13 @@ it("drops JSON noise but keeps null where it is required", () => {
       limit: { type: "integer" },
       every: { type: "object", properties: { ms: { type: "integer" } }, required: ["ms"] },
       target: {
-        anyOf: [
-          {
-            type: "object",
-            properties: { kind: { type: "string", enum: ["url"] }, url: { type: "string" } },
-            required: ["kind", "url"],
-          },
-          {
-            type: "object",
-            properties: { kind: { type: "string", enum: ["number"] }, number: { type: "integer" } },
-            required: ["kind", "number"],
-          },
-        ],
+        type: "object",
+        properties: {
+          kind: { type: "string", enum: ["url", "number"] },
+          url: { type: "string" },
+          number: { type: "integer" },
+        },
+        required: ["kind"],
       },
     },
     required: ["beforeRunId", "every"],
