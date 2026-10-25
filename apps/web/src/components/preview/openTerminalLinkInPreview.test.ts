@@ -8,7 +8,6 @@ import { openTerminalLinkInPreview } from "./openTerminalLinkInPreview";
 vi.mock("~/previewStateStore", () => ({
   applyPreviewServerSnapshot: vi.fn(),
   isPreviewSupportedInRuntime: () => true,
-  onPreviewSessionsChanged: () => () => {},
 }));
 
 vi.mock("~/rightPanelStore", () => ({
