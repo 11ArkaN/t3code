@@ -55,7 +55,7 @@ describe("V2 client presentation", () => {
 
   it("flags an async question as answerable while the run keeps Working", () => {
     const runId = RunId.make("run-async-question-indicator");
-    const shell = presentThreadShell(environmentId, {
+    const asking = {
       ...v2ThreadShell,
       latestRunId: runId,
       activeRunId: runId,
@@ -66,9 +66,21 @@ describe("V2 client presentation", () => {
         createdAt: v2ThreadShell.updatedAt,
         blocking: false,
       },
-    });
+    } as const;
+    const shell = presentThreadShell(environmentId, asking);
     expect(isThreadWorking(shell)).toBe(true);
     expect(shell.hasPendingQuestion).toBe(true);
+
+    const answered = presentThreadShell(environmentId, { ...asking, pendingRuntimeRequest: null });
+    expect(isThreadWorking(answered)).toBe(true);
+    expect(answered.hasPendingQuestion).toBe(false);
+
+    const completed = presentThreadShell(environmentId, {
+      ...asking,
+      activeRunId: null,
+      status: "completed",
+    });
+    expect(completed.hasPendingQuestion).toBe(false);
   });
 
   it("keeps blocking and legacy questions out of Working", () => {
