@@ -210,11 +210,13 @@ export type TimeLockedWork = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect
 
 /**
  * Times the work `body` passes to `timed`, typically inside a lock, and records once `body`
- * exits, after its locks are released. Lock wait is excluded; nothing records if no work started.
+ * exits, after its locks are released. Lock wait is excluded. If no work started, `unstarted`
+ * decides between recording a zero duration and recording nothing.
  */
 export const withMetricsAfterLock = <A, E, R>(
   options: WithMetricsOptions,
   body: (timed: TimeLockedWork) => Effect.Effect<A, E, R>,
+  unstarted: "record" | "skip" = "record",
 ): Effect.Effect<A, E, R> =>
   Effect.suspend(() => {
     let duration: Duration.Duration | undefined;
@@ -227,6 +229,8 @@ export const withMetricsAfterLock = <A, E, R>(
         ),
       );
     return Effect.onExit(body(timed), (exit) =>
-      duration === undefined ? Effect.void : recordMetrics(options, duration, exit),
+      duration === undefined && unstarted === "skip"
+        ? Effect.void
+        : recordMetrics(options, duration ?? Duration.zero, exit),
     );
   });

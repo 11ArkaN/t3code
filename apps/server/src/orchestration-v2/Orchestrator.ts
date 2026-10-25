@@ -12413,26 +12413,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore),
     dispatch: dispatchWithReceipt,
     autoArmLimitRecovery: (input) =>
-      withMetricsAfterLock(orchestrationCommandMetrics("thread.metadata.update"), (timed) =>
-        threadDispatch.withLock(
-          input.threadId,
-          Effect.gen(function* () {
-            const thread = yield* projectionStore
-              .getThread(input.threadId)
-              .pipe(
-                Effect.mapError(
-                  (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
-                ),
-              );
-            // Stop or an explicit recovery choice can commit after the sweep reads its candidate.
-            if (
-              thread.limitRecovery?.runId === input.limitRecovery.runId &&
-              thread.limitRecovery.resetAt === input.limitRecovery.resetAt
-            )
-              return;
-            yield* timed(dispatchWithReceiptEffect({ type: "thread.metadata.update", ...input }));
-          }),
-        ),
+      withMetricsAfterLock(
+        orchestrationCommandMetrics("thread.metadata.update"),
+        (timed) =>
+          threadDispatch.withLock(
+            input.threadId,
+            Effect.gen(function* () {
+              const thread = yield* projectionStore
+                .getThread(input.threadId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
+                  ),
+                );
+              // Stop or an explicit recovery choice can commit after the sweep reads its candidate.
+              if (
+                thread.limitRecovery?.runId === input.limitRecovery.runId &&
+                thread.limitRecovery.resetAt === input.limitRecovery.resetAt
+              )
+                return;
+              yield* timed(dispatchWithReceiptEffect({ type: "thread.metadata.update", ...input }));
+            }),
+          ),
+        "skip",
       ),
     searchThreadStream: (input) =>
       projectionStore

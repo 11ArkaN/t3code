@@ -63,3 +63,43 @@ it.effect("records locked work after the lock is released, excluding lock wait",
     assert.equal(duration?.state.sum, 2000);
   }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())),
 );
+
+it.effect("records interruption while waiting for the lock unless unstarted work is skipped", () =>
+  Effect.gen(function* () {
+    const semaphore = yield* Semaphore.make(1);
+    const releaseHolder = yield* Deferred.make<void>();
+    const holder = yield* Effect.forkChild(semaphore.withPermit(Deferred.await(releaseHolder)));
+    const waiting = (unstarted: "record" | "skip", commandType: string) =>
+      Effect.forkChild(
+        withMetricsAfterLock(
+          {
+            counter: orchestrationCommandsTotal,
+            timer: orchestrationCommandDuration,
+            attributes: { commandType },
+          },
+          (timed) => semaphore.withPermit(timed(Effect.void)),
+          unstarted,
+        ),
+      );
+    const recorded = yield* waiting("record", "thread.create");
+    const skipped = yield* waiting("skip", "thread.metadata.update");
+    yield* Effect.yieldNow;
+    yield* Fiber.interrupt(recorded);
+    yield* Fiber.interrupt(skipped);
+    yield* Deferred.succeed(releaseHolder, undefined);
+    yield* Fiber.join(holder);
+
+    const snapshots = yield* Metric.snapshot;
+    const counters = snapshots.filter((snapshot) => snapshot.type === "Counter");
+    assert.deepEqual(
+      counters.map((snapshot) => ({
+        attributes: snapshot.attributes,
+        count: snapshot.state.count,
+      })),
+      [{ attributes: { commandType: "thread.create", outcome: "interrupt" }, count: 1 }],
+    );
+    const durations = snapshots.filter((snapshot) => snapshot.type === "Histogram");
+    assert.lengthOf(durations, 1);
+    assert.equal(durations[0]?.state.sum, 0);
+  }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())),
+);

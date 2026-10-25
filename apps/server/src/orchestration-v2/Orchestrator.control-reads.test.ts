@@ -1428,3 +1428,35 @@ it.effect("meters successful and rejected dispatches once with bounded command l
     }
   }).pipe(Effect.provide(layerTest), Effect.provideService(Metric.MetricRegistry, new Map())),
 );
+
+it.effect("meters a dispatch that fails before taking its thread lock", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const result = yield* orchestrator
+      .dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("dispatch-metrics-missing-thread"),
+        threadId: ThreadId.make("thread:dispatch-metrics-missing"),
+        messageId: MessageId.make("dispatch-metrics-missing-message"),
+        text: "Hello",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.result);
+    assert.isTrue(Result.isFailure(result));
+
+    const snapshots = (yield* Metric.snapshot).filter(
+      (snapshot) =>
+        snapshot.id === "t3_orchestration_commands_total" ||
+        snapshot.id === "t3_orchestration_command_duration",
+    );
+    const counter = snapshots.find((snapshot) => snapshot.type === "Counter");
+    assert.deepEqual(counter?.attributes, { commandType: "message.dispatch", outcome: "failure" });
+    assert.equal(counter?.state.count, 1);
+    const duration = snapshots.find((snapshot) => snapshot.type === "Histogram");
+    assert.equal(duration?.state.count, 1);
+    assert.equal(duration?.state.sum, 0);
+  }).pipe(Effect.provide(layerTest), Effect.provideService(Metric.MetricRegistry, new Map())),
+);
