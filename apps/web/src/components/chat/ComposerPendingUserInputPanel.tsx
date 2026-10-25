@@ -1,6 +1,6 @@
 import { type RuntimeRequestId, type ScopedThreadRef } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
-import { useStableCallback } from "~/hooks/useStableCallback";
+import { memo, type Ref, useEffect, useRef, useState } from "react";
+import { commandScopeRef } from "~/shortcuts/dispatcher";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
@@ -23,6 +23,8 @@ interface PendingUserInputPanelProps {
   onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
   onDismiss: (requestId: RuntimeRequestId) => void;
+  /** Attached to each question card; the card remounts per request. */
+  ref?: Ref<HTMLDivElement>;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -36,6 +38,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   onToggleOption,
   onAdvance,
   onDismiss,
+  ref,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -54,6 +57,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
       onDismiss={onDismiss}
+      ref={ref}
     />
   );
 });
@@ -69,6 +73,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onToggleOption,
   onAdvance,
   onDismiss,
+  ref,
 }: {
   prompt: PendingUserInput;
   cwd: string | undefined;
@@ -80,12 +85,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
   onDismiss: (requestId: RuntimeRequestId) => void;
+  ref: Ref<HTMLDivElement> | undefined;
 }) {
   // Message-mode requests remain answerable after their provider turn ends.
   const canRespond = prompt.responseCapability !== "not_resumable";
   const responseDisabled = disabled || isResponding || !canRespond;
   const autoAdvanceTimerRef = useRef<number | null>(null);
-  const advance = useStableCallback(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
     questionId: string;
     optionValue: string;
@@ -101,6 +106,18 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       !customAnswerActive && progress.selectedOptionValues.includes(option.value ?? option.label),
   );
   const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
+  // A pick only advances its own question while it may still be answered, so moving to another
+  // question (Previous, Next, a resolved request), losing permission, or unmounting cancels it.
+  useEffect(() => {
+    const clearAutoAdvance = () => {
+      if (autoAdvanceTimerRef.current !== null) {
+        window.clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
+      }
+    };
+    if (disabled || activeQuestion?.id === undefined) clearAutoAdvance();
+    return clearAutoAdvance;
+  }, [activeQuestion?.id, disabled]);
 
   if (
     optimisticSingleSelect &&
@@ -113,17 +130,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     setOptimisticSingleSelect(null);
   }
 
-  useEffect(() => {
-    const clearAutoAdvance = () => {
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
-      }
-    };
-    if (disabled || activeQuestion?.id === undefined) clearAutoAdvance();
-    return clearAutoAdvance;
-  }, [activeQuestion?.id, disabled]);
-
   const handleOptionSelection = (questionId: string, optionValue: string) => {
     if (disabled || isResponding) return;
     if (activeQuestion?.multiSelect) {
@@ -132,50 +138,46 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
     setOptimisticSingleSelect({ questionId, optionValue });
     onToggleOption(questionId, optionValue);
-    if (autoAdvanceTimerRef.current !== null) {
-      window.clearTimeout(autoAdvanceTimerRef.current);
-    }
+    if (autoAdvanceTimerRef.current !== null) window.clearTimeout(autoAdvanceTimerRef.current);
     autoAdvanceTimerRef.current = window.setTimeout(() => {
       autoAdvanceTimerRef.current = null;
-      advance();
+      onAdvance();
     }, 200);
   };
-
-  const selectOptionFromShortcut = useEffectEvent(handleOptionSelection);
-
-  useEffect(() => {
-    if (!activeQuestion || responseDisabled || isCollapsed) return;
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-      if (
-        target instanceof HTMLElement &&
-        target.closest('[contenteditable]:not([contenteditable="false"])')
-      ) {
-        return;
-      }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
-      const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
-      const option = activeQuestion.options[optionIndex];
-      if (!option) return;
-      event.preventDefault();
-      selectOptionFromShortcut(activeQuestion.id, option.value ?? option.label);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isCollapsed, responseDisabled]);
 
   if (!activeQuestion) {
     return null;
   }
 
+  const optionShortcutScope = (node: HTMLDivElement | null) =>
+    commandScopeRef(
+      {},
+      {
+        onKeyDown: (event) => {
+          if (event.metaKey || event.ctrlKey || event.altKey) return false;
+          const target = event.target;
+          if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+            return false;
+          }
+          if (
+            target instanceof HTMLElement &&
+            target.closest('[contenteditable]:not([contenteditable="false"])')
+          ) {
+            return false;
+          }
+          const digit = Number.parseInt(event.key, 10);
+          if (Number.isNaN(digit) || digit < 1 || digit > 9) return false;
+          const option = activeQuestion.options[digit - 1];
+          if (!option) return false;
+          event.preventDefault();
+          handleOptionSelection(activeQuestion.id, option.value ?? option.label);
+        },
+      },
+    )(node);
+
   return (
     <Collapsible
+      ref={ref}
       open={!isCollapsed}
       onOpenChange={(open) => {
         setCollapsedQuestionId(open ? null : activeQuestion.id);
@@ -230,7 +232,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
+          <ComposerBanner.Body
+            ref={responseDisabled || isCollapsed ? undefined : optionShortcutScope}
+            className="pe-1 pb-1 wrap-anywhere"
+          >
             <ChatMarkdown
               text={activeQuestion.question}
               cwd={cwd}
