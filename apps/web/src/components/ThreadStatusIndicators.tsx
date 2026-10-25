@@ -815,9 +815,11 @@ export function ThreadStatusLabel({
   compact?: boolean;
 }) {
   const label = status.questionDotClass ? `${status.label} · Question waiting` : status.label;
-  const questionDot = status.questionDotClass ? (
-    <span className={`size-1.5 shrink-0 rounded-full ${status.questionDotClass}`} />
-  ) : null;
+  // Overlaps the status dot's corner so it adds no width to the row.
+  const questionDot = (position: string) =>
+    status.questionDotClass ? (
+      <span className={`absolute size-1.5 rounded-full ${position} ${status.questionDotClass}`} />
+    ) : null;
   if (compact) {
     return (
       <Tooltip>
@@ -826,7 +828,7 @@ export function ThreadStatusLabel({
             <span
               role="img"
               aria-label={label}
-              className={`inline-flex h-3.5 min-w-3.5 shrink-0 items-center justify-center gap-0.5 ${status.colorClass}`}
+              className={`relative inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
             />
           }
         >
@@ -835,7 +837,7 @@ export function ThreadStatusLabel({
               status.pulse ? "motion-safe:animate-status-pulse" : ""
             }`}
           />
-          {questionDot}
+          {questionDot("top-0 right-0")}
         </TooltipTrigger>
         <TooltipPopup side="top">{label}</TooltipPopup>
       </Tooltip>
@@ -853,12 +855,14 @@ export function ThreadStatusLabel({
           />
         }
       >
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-            status.pulse ? "motion-safe:animate-status-pulse" : ""
-          }`}
-        />
-        {questionDot}
+        <span className="relative size-1.5 shrink-0">
+          <span
+            className={`block size-1.5 rounded-full ${status.dotClass} ${
+              status.pulse ? "motion-safe:animate-status-pulse" : ""
+            }`}
+          />
+          {questionDot("-top-0.5 -right-1")}
+        </span>
         <span className="hidden md:inline">{status.label}</span>
       </TooltipTrigger>
       <TooltipPopup side="top">{label}</TooltipPopup>
