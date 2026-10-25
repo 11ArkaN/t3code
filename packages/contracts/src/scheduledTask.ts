@@ -116,7 +116,7 @@ export const ScheduledTaskWebhookFilter = Schema.Union([
   Schema.Struct({ path: WebhookFilterPath, op: Schema.Literal("exists") }),
 ]).annotate({
   description:
-    "Path: `headers.x-event` or `body.action`. String compare. Objects pass only 'exists'. With `[]`, any item passes (notEquals: none).",
+    "Path: `headers.x-event` or `body.action`. String compare. Objects pass only 'exists'. A `[]` segment matches any array item. `notEquals` passes only if no item equals.",
 });
 export type ScheduledTaskWebhookFilter = typeof ScheduledTaskWebhookFilter.Type;
 export type ScheduledTaskWebhookFilterOp = ScheduledTaskWebhookFilter["op"];
@@ -159,7 +159,7 @@ const ScheduledTaskUpsertWebhookSchedule = Schema.Struct({
   filters: Schema.optional(ScheduledTaskWebhookFilters),
 }).annotate({
   description:
-    "Run on each webhook request. The prompt can use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}}, and {{request}}.",
+    "Run per webhook request. Prompt can use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}}, {{request}}.",
 });
 
 /** Accept legacy sub-minute schedules so users can still manage them. */
