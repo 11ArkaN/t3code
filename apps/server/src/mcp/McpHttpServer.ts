@@ -749,8 +749,6 @@ const HANDOFF_TOOLS: ReadonlySet<string> = new Set([
   "t3_thread_launch",
   "t3_thread_send",
   "t3_thread_send_attachments",
-  "t3_thread_fork",
-  "t3_thread_merge_back",
   "schedule_task",
   "run_scheduled_task_now",
 ]);
@@ -761,10 +759,21 @@ const INPUT_TARGET_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   t3_pending_request: new Set(["respond"]),
 };
 
+/** Tool actions that hand work over and name the receiving thread in their result. */
+const RESULT_TARGET_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  t3_thread_transfer: new Set(["fork", "merge_back"]),
+};
+
+const hasAction = (
+  actions: Readonly<Record<string, ReadonlySet<string>>>,
+  tool: string,
+  args: unknown,
+) =>
+  actions[tool]?.has(String((args as { readonly action?: unknown } | null | undefined)?.action)) ===
+  true;
+
 const isInputTargetHandoff = (tool: string, args: unknown) =>
-  INPUT_TARGET_ACTIONS[tool]?.has(
-    String((args as { readonly action?: unknown } | null | undefined)?.action),
-  ) === true;
+  hasAction(INPUT_TARGET_ACTIONS, tool, args);
 
 const resultThreadKeys = ["childThreadId", "targetThreadId", "boundThreadId", "threadId"] as const;
 
@@ -852,7 +861,10 @@ const withToolAnalytics =
           result: McpSchema.CallToolResult | undefined,
           durationMs: number,
         ) {
-          const handoff = HANDOFF_TOOLS.has(tool) || isInputTargetHandoff(tool, args);
+          const handoff =
+            HANDOFF_TOOLS.has(tool) ||
+            isInputTargetHandoff(tool, args) ||
+            hasAction(RESULT_TARGET_ACTIONS, tool, args);
           const outcome = toolOutcome(result);
           // Agents call status, read, and preview tools in tight loops, so an
           // event per successful call floods analytics. Only failures count there.

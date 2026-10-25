@@ -127,91 +127,92 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       };
     }),
   ),
-  t3_thread_fork: writesThread((input) =>
-    Effect.gen(function* () {
-      const { threads, projection } = yield* readThread(input.threadId);
-      const commandId = yield* newCommandId();
-      const targetThreadId = ThreadId.make(`${commandId}:fork`);
-      const result = yield* threads
-        .dispatch({
-          type: "thread.fork",
-          commandId,
-          sourceThreadId: projection.thread.id,
-          targetThreadId,
-          sourcePoint: input.sourcePoint,
-          ...(input.title === undefined ? {} : { title: input.title }),
-          createdBy: "agent",
-          creationSource: "mcp",
-        })
-        .pipe(Effect.mapError(dispatchFailure));
-      return { sequence: result.sequence, targetThreadId };
-    }),
-  ),
-  t3_thread_merge_back: McpToolAccess.writesThreads(
-    (input) => [input.targetThreadId, input.sourceThreadId],
-    (input) =>
+  t3_thread_transfer: McpToolAccess.either(
+    (input) => input.action === "status",
+    McpToolAccess.reads((input) =>
       Effect.gen(function* () {
-        const context = yield* readThread(input.targetThreadId);
-        const source = yield* readThread(input.sourceThreadId);
-        const result = yield* context.threads
-          .dispatch({
-            type: "thread.merge_back",
-            commandId: yield* newCommandId(),
-            sourceThreadId: source.projection.thread.id,
-            targetThreadId: input.targetThreadId,
-            sourcePoint: input.sourcePoint,
-            createdBy: "agent",
-            creationSource: "mcp",
-          })
-          .pipe(Effect.mapError(dispatchFailure));
-        return { sequence: result.sequence, targetThreadId: input.targetThreadId };
+        const { projection } = yield* readThread(input.threadId, ["contextTransfers"]);
+        return {
+          transfers: projection.contextTransfers.map(
+            ({ id, sourceThreadId, targetThreadId, status }) => ({
+              id,
+              sourceThreadId,
+              targetThreadId,
+              status,
+            }),
+          ),
+        };
       }),
+    ),
+    McpToolAccess.writesThreads(
+      (input) => [input.threadId, input.targetThreadId],
+      (input) =>
+        Effect.gen(function* () {
+          const sourcePoint = yield* required(input.sourcePoint, "sourcePoint");
+          const { threads, projection } = yield* readThread(input.threadId);
+          const commandId = yield* newCommandId();
+          if (input.action === "merge_back") {
+            const targetThreadId = yield* required(input.targetThreadId, "targetThreadId");
+            yield* readThread(targetThreadId);
+            const result = yield* threads
+              .dispatch({
+                type: "thread.merge_back",
+                commandId,
+                sourceThreadId: projection.thread.id,
+                targetThreadId,
+                sourcePoint,
+                createdBy: "agent",
+                creationSource: "mcp",
+              })
+              .pipe(Effect.mapError(dispatchFailure));
+            return { sequence: result.sequence, targetThreadId };
+          }
+          const targetThreadId = ThreadId.make(`${commandId}:fork`);
+          const result = yield* threads
+            .dispatch({
+              type: "thread.fork",
+              commandId,
+              sourceThreadId: projection.thread.id,
+              targetThreadId,
+              sourcePoint,
+              ...(input.title === undefined ? {} : { title: input.title }),
+              createdBy: "agent",
+              creationSource: "mcp",
+            })
+            .pipe(Effect.mapError(dispatchFailure));
+          return { sequence: result.sequence, targetThreadId };
+        }),
+    ),
   ),
-  t3_thread_transfers: McpToolAccess.reads((input) =>
-    Effect.gen(function* () {
-      const { projection } = yield* readThread(input.threadId, ["contextTransfers"]);
-      return {
-        transfers: projection.contextTransfers.map(
-          ({ id, sourceThreadId, targetThreadId, status }) => ({
-            id,
-            sourceThreadId,
-            targetThreadId,
-            status,
-          }),
-        ),
-      };
-    }),
-  ),
-  t3_thread_configuration: McpToolAccess.reads((input) =>
-    Effect.gen(function* () {
-      const {
-        projection: { thread },
-      } = yield* readThread(input.threadId);
-      return {
-        threadId: thread.id,
-        modelSelection: thread.modelSelection,
-        runtimeMode: thread.runtimeMode,
-        interactionMode: thread.interactionMode,
-      };
-    }),
-  ),
-  t3_thread_configure: writesThread((input) =>
-    Effect.gen(function* () {
-      const {
-        threads,
-        projection: { thread },
-      } = yield* readThread(input.threadId);
-      const type = modelSelectionCommandType(thread.providerInstanceId, input.modelSelection);
-      const result = yield* threads
-        .dispatch({
-          type,
+  t3_thread_configure: McpToolAccess.either(
+    (input) => input.modelSelection === undefined,
+    McpToolAccess.reads((input) =>
+      Effect.gen(function* () {
+        const {
+          projection: { thread },
+        } = yield* readThread(input.threadId);
+        return {
           threadId: thread.id,
-          commandId: yield* newCommandId(),
-          modelSelection: input.modelSelection,
-        })
-        .pipe(Effect.mapError(dispatchFailure));
-      return { sequence: result.sequence };
-    }),
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+        };
+      }),
+    ),
+    writesThread((input) =>
+      Effect.gen(function* () {
+        const modelSelection = yield* required(input.modelSelection, "modelSelection");
+        const {
+          threads,
+          projection: { thread },
+        } = yield* readThread(input.threadId);
+        const type = modelSelectionCommandType(thread.providerInstanceId, modelSelection);
+        const result = yield* threads
+          .dispatch({ type, threadId: thread.id, commandId: yield* newCommandId(), modelSelection })
+          .pipe(Effect.mapError(dispatchFailure));
+        return { sequence: result.sequence };
+      }),
+    ),
   ),
   t3_pending_request: McpToolAccess.either(
     (input) => input.action !== "respond",

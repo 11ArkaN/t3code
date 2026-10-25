@@ -139,69 +139,48 @@ const PendingRequestTool = Tool.make("t3_pending_request", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true);
 
-const ThreadConfigurationTool = Tool.make("t3_thread_configuration", {
-  ...commandTool,
-  description: "Read a thread's provider, model, and modes. Omit `threadId` for this thread.",
-  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
-  success: Schema.Struct({
-    threadId: ThreadId,
-    modelSelection: ModelSelection,
-    runtimeMode: RuntimeMode,
-    interactionMode: ProviderInteractionMode,
-  }),
-})
-  .annotate(Tool.Readonly, true)
-  .annotate(Tool.Destructive, false);
+const threadConfiguration = Schema.Struct({
+  threadId: ThreadId,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,
   description:
-    "Set a thread's provider, model, and options. Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
+    "Read a thread's provider, model, and modes, or set its provider, model, and options with `modelSelection`. Omit `threadId` for this thread. Permission modes stay. Values from `orchestrator_capabilities`.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
-    modelSelection: ModelSelection,
+    modelSelection: Schema.optional(ModelSelection),
   }),
+  success: Schema.Union([threadConfiguration, OrchestrationV2DispatchCommandResult]),
 }).annotate(Tool.Destructive, true);
 
-const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId: ThreadId });
-const ThreadForkTool = Tool.make("t3_thread_fork", {
+const ThreadTransferTool = Tool.make("t3_thread_transfer", {
   ...commandTool,
   description:
-    "Fork a thread from a stable run or checkpoint. Omit `threadId` for this thread. Keeps source setup. No turn has run yet.",
+    "Move context between threads. Omit `threadId` for this thread. fork: copy it from `sourcePoint` into a new thread with the same setup; no turn runs yet. merge_back: merge it from `sourcePoint` into a related `targetThreadId` in the same project. status: its context transfers.",
   parameters: Schema.Struct({
+    action: Schema.Literals(["fork", "merge_back", "status"]),
     threadId: Schema.optional(ThreadId),
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
+    sourcePoint: Schema.optional(OrchestrationV2ThreadForkSourcePoint),
+    targetThreadId: Schema.optional(ThreadId),
     title: Schema.optional(TrimmedNonEmptyString),
   }),
-  success: transferResult,
+  success: Schema.Union([
+    Schema.Struct({ sequence: NonNegativeInt, targetThreadId: ThreadId }),
+    Schema.Struct({
+      transfers: Schema.Array(
+        Schema.Struct({
+          id: OrchestrationV2ContextTransfer.fields.id,
+          sourceThreadId: OrchestrationV2ContextTransfer.fields.sourceThreadId,
+          targetThreadId: OrchestrationV2ContextTransfer.fields.targetThreadId,
+          status: OrchestrationV2ContextTransfer.fields.status,
+        }),
+      ),
+    }),
+  ]),
 }).annotate(Tool.Destructive, true);
-const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
-  ...commandTool,
-  description:
-    "Merge context from one thread into a related thread in the same project. Omit `sourceThreadId` for this thread.",
-  parameters: Schema.Struct({
-    sourceThreadId: Schema.optional(ThreadId),
-    targetThreadId: ThreadId,
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
-  }),
-  success: transferResult,
-}).annotate(Tool.Destructive, true);
-const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
-  ...commandTool,
-  description: "Read context transfer status for a thread. Omit `threadId` for this thread.",
-  parameters: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
-  success: Schema.Struct({
-    transfers: Schema.Array(
-      Schema.Struct({
-        id: OrchestrationV2ContextTransfer.fields.id,
-        sourceThreadId: OrchestrationV2ContextTransfer.fields.sourceThreadId,
-        targetThreadId: OrchestrationV2ContextTransfer.fields.targetThreadId,
-        status: OrchestrationV2ContextTransfer.fields.status,
-      }),
-    ),
-  }),
-})
-  .annotate(Tool.Readonly, true)
-  .annotate(Tool.Destructive, false);
 
 const ThreadSearchTool = Tool.make("t3_thread_search", {
   ...commandTool,
@@ -249,11 +228,8 @@ const ScheduledTaskRunTool = Tool.make("run_scheduled_task_now", {
 export const ThreadToolkit = Toolkit.make(
   ScheduledTaskRunTool,
   ThreadSearchTool,
-  ThreadForkTool,
-  ThreadMergeBackTool,
-  ThreadTransfersTool,
-  ThreadConfigurationTool,
   ThreadConfigureTool,
+  ThreadTransferTool,
   ThreadOrganizeTool,
   PendingRequestTool,
   QueueTool,
