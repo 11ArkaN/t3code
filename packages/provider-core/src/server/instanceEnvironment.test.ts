@@ -85,11 +85,11 @@ describe("makeInjectedSecrets", () => {
     expect(secrets.redactText("pin=42 long=abc-redacted-xyz token=redacted 4 2")).toBe(
       "pin=[redacted PIN] long=[redacted LONG] token=[redacted TOKEN] 4 2",
     );
-    expect(secrets.redact({ text: "42", keep: 7, list: ["x"] })).toEqual({
-      text: "[redacted PIN]",
-      keep: 7,
-      list: ["x"],
-    });
+    const redacted = secrets.redact(JSON.parse('{"42":"redacted","__proto__":{"a":"42"},"n":7}'));
+    expect(JSON.stringify(redacted)).toBe(
+      '{"[redacted PIN]":"[redacted TOKEN]","__proto__":{"a":"[redacted PIN]"},"n":7}',
+    );
+    expect(Object.getPrototypeOf(redacted)).toBe(Object.prototype);
   });
 
   it("replaces a value split across chunks and releases tails that never complete it", () => {

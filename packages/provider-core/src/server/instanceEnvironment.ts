@@ -40,7 +40,7 @@ export class InjectedSecrets extends Context.Reference<{
   readonly put: (key: unknown, secrets: ReadonlyArray<InjectedSecret>) => void;
   readonly remove: (key: unknown) => void;
   readonly redactText: (text: string) => string;
-  /** Rebuilds plain objects and arrays only where a string changed. */
+  /** Rebuilds plain objects and arrays only where a string or key changed. */
   readonly redact: <A>(value: A) => A;
   /** Holds back a raw tail that could begin a secret, so a value split across chunks is still replaced. */
   readonly redactChunk: (
@@ -91,15 +91,15 @@ export function makeInjectedSecrets(): (typeof InjectedSecrets)["Service"] {
     if (value === null || typeof value !== "object") return value;
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return value;
-    let next: Record<string, unknown> | undefined;
-    for (const [key, entry] of Object.entries(value)) {
+    let changed = false;
+    const entries = Object.entries(value).map(([key, entry]) => {
+      const redactedKey = redactText(key);
       const redacted = redactUnknown(entry);
-      if (redacted !== entry) {
-        next ??= { ...value };
-        next[key] = redacted;
-      }
-    }
-    return next ?? value;
+      if (redactedKey !== key || redacted !== entry) changed = true;
+      return [redactedKey, redacted] as const;
+    });
+    // fromEntries defines own data properties, so a "__proto__" key stays a key.
+    return changed ? Object.fromEntries(entries) : value;
   };
   return {
     put: (key, secrets) => {
