@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useClosedViewStore } from "./closedViewStore";
 import { reopenClosedView } from "./reopenClosedView";
 import {
+  closeSideChatTabIfGone,
   migratePersistedRightPanelState,
   pullRequestSurface,
   pullRequestSurfaceId,
@@ -185,6 +186,25 @@ describe("rightPanelStore", () => {
     expect(surfaceIds(refB)).toEqual(["file:src/app.ts"]);
     expect(surfaceIds(refA)).toEqual([]);
     unregister();
+  });
+
+  it("closes a restored side chat tab only once a live shell says it is gone", () => {
+    useRightPanelStore.getState().openAside(refA, "side");
+    const tabs = () =>
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      );
+    const sideChat = { deletedAt: null, sideChat: true };
+
+    // A cached or reconnecting shell may not have the side chat yet, or may be stale.
+    for (const shell of [null, { ...sideChat, deletedAt: "deleted" }, { deletedAt: null }]) {
+      expect(closeSideChatTabIfGone(refA, "side", { live: false, shell })).toBe(false);
+    }
+    expect(closeSideChatTabIfGone(refA, "side", { live: true, shell: sideChat })).toBe(false);
+    expect(tabs()).toEqual(["aside:side"]);
+
+    expect(closeSideChatTabIfGone(refA, "side", { live: true, shell: null })).toBe(true);
+    expect(tabs()).toEqual([]);
   });
 
   it("keeps several side chats open as peer tabs and reloads only well-formed ones", () => {

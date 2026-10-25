@@ -279,6 +279,29 @@ export interface OpenInPanelOptions {
   readonly inOwnPanel?: boolean;
 }
 
+/**
+ * Whether a side chat tab names a thread that is gone: deleted, promoted, or missing. A restored
+ * tab can name a side chat a cached shell does not have yet, so only a live shell can say so.
+ */
+export function isSideChatTabGone(input: {
+  readonly live: boolean;
+  readonly shell: { readonly deletedAt: unknown; readonly sideChat?: boolean | undefined } | null;
+}): boolean {
+  const { live, shell } = input;
+  return live && (shell === null || shell.deletedAt !== null || shell.sideChat !== true);
+}
+
+/** Closes `threadId`'s side chat tab in `parentRef`'s panel when it is gone; returns whether. */
+export function closeSideChatTabIfGone(
+  parentRef: ScopedThreadRef,
+  threadId: string,
+  input: Parameters<typeof isSideChatTabGone>[0],
+): boolean {
+  const gone = isSideChatTabGone(input);
+  if (gone) useRightPanelStore.getState().closeSurface(parentRef, `aside:${threadId}`);
+  return gone;
+}
+
 export function registerEmbeddedPanelHost(
   childRef: ScopedThreadRef,
   hostRef: ScopedThreadRef,

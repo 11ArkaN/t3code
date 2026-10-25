@@ -161,6 +161,8 @@ import {
   selectThreadPanelOpen,
   selectThreadRightPanelState,
   registerEmbeddedPanelHost,
+  closeSideChatTabIfGone,
+  isSideChatTabGone,
   useRightPanelStore,
 } from "../rightPanelStore";
 import { isPreviewSupportedInRuntime, useThreadPreviewState } from "../previewStateStore";
@@ -4148,12 +4150,10 @@ function SideChatPanel(props: {
   const live = isThreadRouteSnapshotAuthoritative(
     useEnvironmentShellStatus(parentRef.environmentId),
   );
-  const gone = live && (shell === null || shell.deletedAt !== null || !shell.sideChat);
+  const gone = isSideChatTabGone({ live, shell });
   useEffect(() => {
-    if (gone) {
-      useRightPanelStore.getState().closeSurface(parentRef, `aside:${threadId}`);
-    }
-  }, [gone, parentRef, threadId]);
+    closeSideChatTabIfGone(parentRef, threadId, { live, shell });
+  }, [live, parentRef, shell, threadId]);
   // Files, attachments and pull requests this side chat opens show in the
   // parent's panel. What only its own panel can show, such as a browser it owns
   // or its turn diff, opens it as a full thread, where that panel renders.
