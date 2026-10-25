@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- The grep converter is read synchronously from the installed SDK chunk.
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
@@ -43,11 +44,11 @@ import { ConfigurationError } from "./sdk.ts";
 
 const decodeCursorSettings = Schema.decodeEffect(CursorSettings);
 
-// The SDK does not export its grep result converter, so load it from the installed ESM chunk.
-const loadInstalledCursorGrepResultConverter = () => {
+// The SDK does not export its grep result converter, so load it from the installed chunk.
+const loadInstalledCursorGrepResultConverter = (build: "esm" | "cjs" = "esm") => {
   const sdkEntry = NodeModule.createRequire(import.meta.url).resolve("@cursor/sdk");
   const chunk = NodeFS.readFileSync(
-    NodePath.join(NodePath.dirname(sdkEntry), "../esm/689.js"),
+    NodePath.join(NodePath.dirname(sdkEntry), `../${build}/689.js`),
     "utf8",
   );
   const anchor = chunk.search(
@@ -1413,4 +1414,66 @@ describe("CursorAdapterV2", () => {
       },
     );
   });
+
+  it.each(["esm", "cjs"] as const)(
+    "converts legacy, malformed, and gapped grep content results in the %s build",
+    (build) => {
+      const convertGrepResult = loadInstalledCursorGrepResultConverter(build);
+      const convertContent = (value: unknown) =>
+        convertGrepResult({ result: { case: "content", value } });
+
+      const legacyMatch = { file: "a.ts", lineNumber: 2, line: "hit", beforeContext: ["w"] };
+      assert.deepEqual(convertContent({ matches: [legacyMatch], totalMatches: 1 }), {
+        type: "content",
+        output: { matches: [legacyMatch], totalMatches: 1 },
+      });
+
+      assert.deepEqual(
+        convertContent({
+          matches: [
+            {
+              file: "a.ts",
+              matches: [null, { content: 5 }, { lineNumber: "4", content: "kept" }],
+            },
+            { file: 7, matches: [{ lineNumber: 1, content: "dropped" }] },
+          ],
+        }),
+        { type: "content", output: { matches: [{ file: "a.ts", line: "kept" }], totalMatches: 0 } },
+      );
+
+      assert.deepEqual(
+        convertContent({
+          matches: [
+            {
+              file: "a.ts",
+              matches: [
+                { lineNumber: 10, content: "first", isContextLine: false },
+                { lineNumber: 11, content: "after first", isContextLine: true },
+                { lineNumber: 48, content: "before second", isContextLine: true },
+                { lineNumber: 50, content: "second", isContextLine: false },
+                { lineNumber: 90, content: "stray", isContextLine: true },
+              ],
+            },
+          ],
+          totalMatchedLines: 2,
+        }),
+        {
+          type: "content",
+          output: {
+            matches: [
+              { file: "a.ts", lineNumber: 10, line: "first", afterContext: ["after first"] },
+              {
+                file: "a.ts",
+                lineNumber: 50,
+                line: "second",
+                beforeContext: ["before second"],
+                afterContext: ["stray"],
+              },
+            ],
+            totalMatches: 2,
+          },
+        },
+      );
+    },
+  );
 });

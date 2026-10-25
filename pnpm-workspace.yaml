@@ -236,6 +236,7 @@ overrides:
   "@clerk/expo-native-components": 0.4.0
   expo-sharing: 58.0.19
   expo-widgets: 58.0.20
+  "@cursor/sdk": 1.0.35
   "@ff-labs/fff-node": 0.11.0
   "@legendapp/list": 3.3.5
   "@pierre/diffs": 1.6.1
@@ -366,6 +367,8 @@ patchedDependencies:
   "@expo/metro-config@58.0.14": patches/@expo__metro-config@58.0.14.patch
   expo-sharing@58.0.19: patches/expo-sharing@58.0.19.patch
   expo-widgets@58.0.20: patches/expo-widgets@58.0.20.patch
+  # Grouped grep content results (file + per-line matches) keep their lines, context and total.
+  "@cursor/sdk@1.0.35": patches/@cursor__sdk@1.0.35.patch
   "@ff-labs/fff-node@0.11.0": patches/@ff-labs__fff-node@0.11.0.patch
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch
   # Exports the dependency-light subpaths mobile and the web diff parser import, and keeps
