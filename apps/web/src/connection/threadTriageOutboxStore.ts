@@ -42,6 +42,8 @@ export const browserThreadTriageOutboxStore = makeThreadTriageOutboxStore({
                       () =>
                         new Promise<void>((release) => {
                           lock.release = release;
+                          // Cancellation may finish before a granted lock's callback runs.
+                          if (lock.controller.signal.aborted) release();
                           granted();
                         }),
                     )

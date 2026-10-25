@@ -109,47 +109,53 @@ describe("browser thread triage storage", () => {
     }),
   );
 
-  it.effect("cancels a pending lock request before it can write", () =>
-    Effect.gen(function* () {
-      const requested = yield* Queue.unbounded<{
-        signal: AbortSignal | undefined;
-        grant: () => Promise<void>;
-      }>();
-      const setItem = vi.fn();
-      vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem } });
-      vi.stubGlobal("navigator", {
-        locks: {
-          request: (
-            _name: string,
-            options: LockOptions | (() => Promise<unknown>),
-            callback?: () => Promise<unknown>,
-          ) =>
-            new Promise((resolve, reject) => {
-              const signal = typeof options === "function" ? undefined : options.signal;
-              const acquired = typeof options === "function" ? options : callback!;
-              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-              Queue.offerUnsafe(requested, {
-                signal,
-                grant: async () => {
-                  if (!signal?.aborted) resolve(await acquired());
-                },
-              });
-            }),
-        },
-      });
+  it.effect.each(["queued", "already granted"] as const)(
+    "cancels a lock request before it can write (%s)",
+    (state) =>
+      Effect.gen(function* () {
+        const requested = yield* Queue.unbounded<{
+          signal: AbortSignal | undefined;
+          grant: () => Promise<void>;
+        }>();
+        const setItem = vi.fn();
+        vi.stubGlobal("window", { localStorage: { getItem: () => null, setItem } });
+        vi.stubGlobal("navigator", {
+          locks: {
+            request: (
+              _name: string,
+              options: LockOptions | (() => Promise<unknown>),
+              callback?: () => Promise<unknown>,
+            ) =>
+              new Promise((resolve, reject) => {
+                const signal = typeof options === "function" ? undefined : options.signal;
+                const acquired = typeof options === "function" ? options : callback!;
+                if (state === "queued") {
+                  signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+                }
+                Queue.offerUnsafe(requested, {
+                  signal,
+                  grant: async () => {
+                    if (state === "already granted" || !signal?.aborted) resolve(await acquired());
+                  },
+                });
+              }),
+          },
+        });
 
-      const saving = yield* browserThreadTriageOutboxStore.put(queuedSettle).pipe(Effect.forkChild);
-      const request = yield* Queue.take(requested);
-      try {
-        // A broken uninterruptible acquisition must still be released after the assertion.
-        yield* Effect.sync(() => saving.interruptUnsafe());
-        expect(request.signal?.aborted).toBe(true);
-      } finally {
-        yield* Effect.promise(request.grant);
-        yield* Fiber.interrupt(saving);
-      }
-      expect(setItem).not.toHaveBeenCalled();
-    }),
+        const saving = yield* browserThreadTriageOutboxStore
+          .put(queuedSettle)
+          .pipe(Effect.forkChild);
+        const request = yield* Queue.take(requested);
+        try {
+          // A broken uninterruptible acquisition must still be released after the assertion.
+          yield* Effect.sync(() => saving.interruptUnsafe());
+          expect(request.signal?.aborted).toBe(true);
+        } finally {
+          yield* Effect.promise(request.grant);
+          yield* Fiber.interrupt(saving);
+        }
+        expect(setItem).not.toHaveBeenCalled();
+      }),
   );
 
   it.effect("uses the caller's logger during a locked storage read", () =>
