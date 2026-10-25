@@ -3,12 +3,18 @@ import { assert, describe, it } from "@effect/vitest";
 import { buildRuntimeInstructions } from "./runtimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
-  it("links PRs the agent creates, takes over, or pushes to, and no others", () => {
+  it("links only PRs T3 does not link from a create command, and no read-only ones", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 
-    assert.include(instructions, "Link each PR you create, take over, or push to");
-    assert.include(instructions, "one link_pull_request per PR");
-    assert.include(instructions, "Skip PRs you only read or review");
+    assert.include(
+      instructions,
+      "T3 links a PR that one gh pr create or glab mr create command prints.",
+    );
+    assert.include(
+      instructions,
+      "Call link_pull_request for any other PR you create (in a loop, via an API), take over, or push to.",
+    );
+    assert.include(instructions, "Skip PRs you only read, review, or mention.");
     assert.notInclude(instructions, "git log -1");
     assert.notInclude(instructions, "work on");
     // Listing linked PRs as an end-of-work check found nothing to add in audited threads.
@@ -18,23 +24,20 @@ describe("buildRuntimeInstructions", () => {
   it("waits on a PR only with the watch, never with a poll loop", () => {
     const instructions = buildRuntimeInstructions({ harness: "Codex" });
 
-    assert.notInclude(instructions, "Creation, pending checks, or a merge ask alone is not enough");
-    assert.include(instructions, "Links and watches persist across pushes.");
     // The wake message itself carries the do-not-re-watch rule.
     assert.notInclude(instructions, "On a wake");
     assert.include(
       instructions,
-      "Call watch_pull_request when asked to monitor or babysit, or when work you were asked to do, such as a merge, still waits on checks or reviews, even after an earlier unwatch",
+      "When asked to babysit or monitor, or when your task, such as a merge, waits on checks or reviews, even after an earlier unwatch: push any needed branch update, call watch_pull_request, and end your turn.",
     );
     assert.notInclude(instructions, "merge it now");
     assert.include(instructions, "Otherwise act now or hand back.");
-    assert.include(instructions, "then watch and end your turn");
-    assert.include(instructions, "never watch, even if the brief says babysit");
+    assert.include(instructions, "Never wait with sleep");
+    // Children cannot see watch_pull_request, so they only need the no-poll rule and the report.
     assert.include(
       instructions,
-      "A child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>.",
+      "A delegated child never polls, even when asked to babysit, and ends with: PR <full URL>, head <SHA>, checks and reviews <state>.",
     );
-    assert.include(instructions, "Never wait with sleep");
     assert.include(instructions, "call unwatch_pull_request");
   });
 });
