@@ -90,10 +90,7 @@ import { ClaudeExecutableFileCheck } from "../../provider/Drivers/ClaudeExecutab
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
-import {
-  makeProviderFailure,
-  NATIVE_SESSION_STALLED_FAILURE_CODE,
-} from "@t3tools/provider-core/server/failure";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
@@ -6356,7 +6353,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.isEmpty(harness.terminalEvents());
         yield* TestClock.adjust("61 seconds");
 
-        // Turn start reads this persisted code to open a fresh session instead of resuming.
         assert.deepEqual(
           harness
             .terminalEvents()
@@ -6366,10 +6362,19 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               event.failure?.retryable,
               event.threadDisposition,
             ]),
-          [["failed", NATIVE_SESSION_STALLED_FAILURE_CODE, true, "broken"]],
+          [["failed", "native_session_stalled", true, "broken"]],
         );
         yield* TestClock.adjust("10 minutes");
         assert.lengthOf(harness.terminalEvents(), 1);
+        const stalled = harness.events.findLast(
+          (event) => event.type === "provider_thread.updated",
+        )?.providerThread;
+        assert.isDefined(stalled);
+        // A failed resume makes turn start open a fresh session with a summary handoff.
+        const resumed = yield* Effect.exit(
+          harness.runtime.resumeThread({ providerThread: stalled }),
+        );
+        assert.isTrue(Exit.isFailure(resumed));
       }).pipe(
         Effect.scoped,
         Effect.provide(
@@ -6528,7 +6533,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
       assert.deepEqual(
         harness.terminalEvents().map((event) => event.failure?.code),
-        [NATIVE_SESSION_STALLED_FAILURE_CODE],
+        ["native_session_stalled"],
       );
     }).pipe(
       Effect.scoped,
@@ -6574,7 +6579,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
       assert.deepEqual(
         harness.terminalEvents().map((event) => event.failure?.code),
-        [NATIVE_SESSION_STALLED_FAILURE_CODE],
+        ["native_session_stalled"],
       );
     }).pipe(
       Effect.scoped,
@@ -6636,7 +6641,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         harness.terminalEvents().map((event) => [event.status, event.failure?.code]),
         [
           ["completed", undefined],
-          ["failed", NATIVE_SESSION_STALLED_FAILURE_CODE],
+          ["failed", "native_session_stalled"],
         ],
       );
     }).pipe(
@@ -6670,7 +6675,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
       assert.deepEqual(
         harness.terminalEvents().map((event) => [event.status, event.failure?.code]),
-        [["failed", NATIVE_SESSION_STALLED_FAILURE_CODE]],
+        [["failed", "native_session_stalled"]],
       );
     }).pipe(
       Effect.scoped,

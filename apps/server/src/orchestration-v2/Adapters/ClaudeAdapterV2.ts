@@ -177,7 +177,6 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   makeProviderFailure,
   makeProviderRetryTurnItem,
-  NATIVE_SESSION_STALLED_FAILURE_CODE,
 } from "@t3tools/provider-core/server/failure";
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
 import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/server/attachmentPrompt";
@@ -9597,7 +9596,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           yield* finalizeActiveTurnAfterQueryExit(live, undefined, {
             stalledFailure: makeProviderFailure({
               class: "transport_error",
-              code: NATIVE_SESSION_STALLED_FAILURE_CODE,
+              code: "native_session_stalled",
               message: "Claude made no progress for ten minutes. Send again to retry.",
               retryable: true,
             }),

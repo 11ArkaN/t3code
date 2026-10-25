@@ -28,8 +28,6 @@ export class ContextHandoffBudgetError extends Schema.TaggedError<ContextHandoff
 
 export const MAX_PROVIDER_FAILURE_MESSAGE_LENGTH = 4_096;
 const MAX_PROVIDER_FAILURE_CODE_LENGTH = 128;
-// A turn failed because its native session stopped progressing; resuming it repeats the stall.
-export const NATIVE_SESSION_STALLED_FAILURE_CODE = "native_session_stalled";
 
 const DEFAULT_PROVIDER_FAILURE_MESSAGE = "Provider turn failed.";
 
