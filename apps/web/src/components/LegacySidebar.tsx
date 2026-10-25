@@ -188,6 +188,7 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
+  canMarkThreadUnread,
   deleteSelectedThreadEntries,
   filterSidebarV2VisibleThreads,
   getSidebarThreadIdsToPrewarm,
@@ -1817,12 +1818,19 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     const hasRunningThread = selectedThreadEntries.some(
       ({ thread }) => !threadRuntimeCanArchive(thread.runtime),
     );
+    const markUnreadEntries = selectedThreadEntries.filter(({ thread }) =>
+      canMarkThreadUnread(thread),
+    );
     const canOperateSelection = selectedThreadEntries.every(({ threadRef }) =>
       readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
     );
 
     const clicked = await api.contextMenu.show(
-      buildMultiSelectThreadContextMenuItems({ count, hasRunningThread }).map((item) =>
+      buildMultiSelectThreadContextMenuItems({
+        count,
+        markUnreadCount: markUnreadEntries.length,
+        hasRunningThread,
+      }).map((item) =>
         item.id === "archive" || item.id === "delete"
           ? { ...item, disabled: item.disabled || !canOperateSelection }
           : item,
@@ -1831,7 +1839,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     );
 
     if (clicked === "mark-unread") {
-      for (const { threadRef } of selectedThreadEntries) {
+      for (const { threadRef } of markUnreadEntries) {
         markThreadUnread(threadRef);
       }
       clearSelection();
