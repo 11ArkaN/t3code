@@ -264,8 +264,7 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description:
-    "Link a PR to this thread. Pass the URL, or repository plus number. Host tools do not link for you. T3 shows its status and settles the thread on merge.",
+  description: "Link a PR to this thread. T3 shows its status and settles the thread on merge.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -279,7 +278,7 @@ const LinkPullRequestTool = Tool.make("link_pull_request", {
 
 const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   description:
-    "Remove a PR link from this thread. Pass the URL, or repository plus number. Succeeds with `wasLinked=false` when it was not linked.",
+    "Remove a PR link from this thread. Succeeds with `wasLinked=false` when it was not linked.",
   parameters: PullRequestTargetInput,
   success: UnlinkPullRequestResult,
   failure: PullRequestToolError,
@@ -293,7 +292,7 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
   description:
-    "List PRs linked to a thread, with last known state and stack order (bottom to top). Omit `threadId` for this thread. Call only when you need that list. Never as an end-of-work check.",
+    "List PRs linked to a thread, with last known state and stack order (bottom to top). Call only when you need that list. Never as an end-of-work check.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId.annotate({ description: "Thread. Default: this thread." })),
   }),
@@ -309,7 +308,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Watch an open PR for this thread. Delegated children and subagents: never call this. Links it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Handle old comments first. Only later ones wake you. After this call, end your turn. Make no more calls except a required push. A wake is not a merge decision. Check readiness yourself. The watch stays on across wakes and pushes until merge, close, settle, or unwatch.",
+    "Watch an open PR for this thread, linking it first if needed. T3 wakes you on failed checks, passed required checks, new comments or reviews, or conflicts. Handle old comments first. Only later ones wake you. After this call, end your turn. A wake is not a merge decision. Check readiness yourself.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
@@ -323,8 +322,7 @@ const WatchPullRequestTool = Tool.make("watch_pull_request", {
   .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromSubagents);
 
 const UnwatchPullRequestTool = Tool.make("unwatch_pull_request", {
-  description:
-    "Stop watching a PR for this thread. It stays linked. Pass the URL, or repository plus number.",
+  description: "Stop watching a PR for this thread. It stays linked.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
