@@ -11,6 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
@@ -259,8 +260,26 @@ it.effect("retries a partial project deletion without repeating child events or 
           ],
         );
       }
+
+      const snapshots = (yield* Metric.snapshot).filter(
+        (snapshot) =>
+          snapshot.attributes?.commandType === "thread.delete" &&
+          (snapshot.id === "t3_orchestration_commands_total" ||
+            snapshot.id === "t3_orchestration_command_duration"),
+      );
+      assert.deepEqual(
+        snapshots
+          .filter((snapshot) => snapshot.type === "Counter")
+          .map((snapshot) => [snapshot.attributes?.outcome, snapshot.state.count]),
+        [
+          ["success", 2],
+          ["failure", 1],
+        ],
+      );
+      const duration = snapshots.find((snapshot) => snapshot.type === "Histogram");
+      assert.equal(duration?.state.count, 3);
     }).pipe(Effect.provide(layerServices));
-  }).pipe(Effect.provide(layerDatabase)),
+  }).pipe(Effect.provide(layerDatabase), Effect.provideService(Metric.MetricRegistry, new Map())),
 );
 
 it.effect(

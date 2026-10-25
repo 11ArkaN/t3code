@@ -407,6 +407,7 @@ export const make = Effect.gen(function* () {
   const deleteChildThread = Effect.fn("ProjectService.deleteChildThread")(function* (
     input: ProjectDeleteInput,
     threadId: ThreadId,
+    timed: TimeLockedWork,
   ) {
     yield* legacyImporter.ensureTranscript(threadId);
     const projection = yield* threadProjections.getThreadRecords(threadId, [
@@ -425,33 +426,39 @@ export const make = Effect.gen(function* () {
       commandId: CommandId.make(`${input.commandId}:delete-thread:${threadId}`),
       threadId,
     };
-    const now = yield* DateTime.now;
-    const plan = yield* planThreadDeletion({
-      command,
-      projection,
-      attachmentIds: yield* threadProjections.getThreadAttachmentIds(threadId),
-      now,
-      idAllocator,
-    });
-    const committed = yield* eventSink.commitCommand({
-      commandId: command.commandId,
-      commandType: command.type,
-      threadId,
-      acceptedAt: now,
-      events: plan.events,
-      effects: plan.effects,
-    });
-    if (
-      committed.receipt.threadId !== command.threadId ||
-      committed.receipt.commandType !== command.type
-    ) {
-      return yield* Effect.fail("The thread deletion command ID belongs to a different command.");
-    }
-    if (committed.receipt.status === "rejected") {
-      return yield* Effect.fail(
-        committed.receipt.error ?? "Thread deletion was previously rejected.",
-      );
-    }
+    yield* timed(
+      Effect.gen(function* () {
+        const now = yield* DateTime.now;
+        const plan = yield* planThreadDeletion({
+          command,
+          projection,
+          attachmentIds: yield* threadProjections.getThreadAttachmentIds(threadId),
+          now,
+          idAllocator,
+        });
+        const committed = yield* eventSink.commitCommand({
+          commandId: command.commandId,
+          commandType: command.type,
+          threadId,
+          acceptedAt: now,
+          events: plan.events,
+          effects: plan.effects,
+        });
+        if (
+          committed.receipt.threadId !== command.threadId ||
+          committed.receipt.commandType !== command.type
+        ) {
+          return yield* Effect.fail(
+            "The thread deletion command ID belongs to a different command.",
+          );
+        }
+        if (committed.receipt.status === "rejected") {
+          return yield* Effect.fail(
+            committed.receipt.error ?? "Thread deletion was previously rejected.",
+          );
+        }
+      }),
+    );
   });
 
   const deleteChildThreads = Effect.fn("ProjectService.deleteChildThreads")(function* (
@@ -475,14 +482,16 @@ export const make = Effect.gen(function* () {
     yield* Effect.forEach(
       projectThreads,
       (thread) =>
-        threadCommands
-          .withLock(thread.id, deleteChildThread(input, thread.id))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new ProjectOperationError({ operation: "delete-thread", projectId, cause }),
-            ),
+        withMetricsAfterLock(
+          orchestrationCommandMetrics("thread.delete"),
+          (timed) => threadCommands.withLock(thread.id, deleteChildThread(input, thread.id, timed)),
+          // Already-deleted or moved threads dispatch no thread.delete.
+          "skip",
+        ).pipe(
+          Effect.mapError(
+            (cause) => new ProjectOperationError({ operation: "delete-thread", projectId, cause }),
           ),
+        ),
       { concurrency: 1, discard: true },
     );
   });
