@@ -1308,7 +1308,7 @@ const CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS = `
 
 ### Background work you wait on
 
-To wait for a background command or Monitor you started (tests, a build), call \`t3_background_wait\` with its task ID before you end your turn. Do not mark work you leave running. For PR checks, use \`watch_pull_request\`.
+To wait for a background command or Monitor you started (tests, a build), call \`t3_background_wait\` with its task ID before you end your turn. Do not mark work you leave running. To wait on PR checks, use \`watch_pull_request\`.
 `;
 
 export function makeClaudeQueryOptions(input: {
