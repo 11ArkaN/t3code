@@ -13,6 +13,20 @@ function latestUpdatedAt(link: ThreadPullRequestLink): number {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+/** Visible links, open ones first, then most recently updated. */
+export function threadPullRequestsOpenFirst(
+  links: ReadonlyArray<ThreadPullRequestLink>,
+): ReadonlyArray<ThreadPullRequestLink> {
+  return visibleThreadPullRequests(links)
+    .map((link) => ({
+      link,
+      open: link.snapshot === null || link.snapshot.state === "open" ? 1 : 0,
+      updatedAt: latestUpdatedAt(link),
+    }))
+    .sort((left, right) => right.open - left.open || right.updatedAt - left.updatedAt)
+    .map((entry) => entry.link);
+}
+
 export interface ThreadSearchPullRequest {
   readonly number: number;
   readonly title: string | null;

@@ -90,6 +90,7 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
+  ThreadPullRequestNumbers,
   ThreadPullRequestsMiniList,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
@@ -902,14 +903,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   // Closing here, not just masking, keeps the menu from reopening when the button returns.
   if (snoozeMenuOpenRaw && !showSnoozeButton) setSnoozeMenuOpen(false);
   const snoozeMenuOpen = snoozeMenuOpenRaw && showSnoozeButton;
+  const openPr = (event: ReactMouseEvent<HTMLElement>, url: string, inRightPanel: boolean) => {
+    const openedInRightPanel = openPrLink(event, url, inRightPanel ? threadRef : undefined);
+    if (openedInRightPanel && inRightPanel && !props.isRouteThread) {
+      onThreadActivate(threadRef);
+    }
+  };
   const handlePrClick = (event: ReactMouseEvent<HTMLElement>, targetUrl?: string) => {
     const url = targetUrl ?? pr?.url ?? currentLinkedPr?.url;
     if (!url) return;
-    const showInRightPanel = targetUrl !== undefined || openPullRequestsInRightPanel;
-    const openedInRightPanel = openPrLink(event, url, showInRightPanel ? threadRef : undefined);
-    if (openedInRightPanel && showInRightPanel && !props.isRouteThread) {
-      onThreadActivate(threadRef);
-    }
+    openPr(event, url, targetUrl !== undefined || openPullRequestsInRightPanel);
   };
 
   const rowSurfaceClassName = cn(
@@ -1034,6 +1037,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         onOpenPullRequest={handlePrClick}
       />
     ) : null;
+  const cardPrBadge =
+    prBadgeShape !== null && (prBadgeShape.kind === "stack" || prBadgeShape.others > 0) ? (
+      <ThreadPullRequestNumbers
+        badge={prBadgeShape}
+        pullRequests={thread.pullRequests}
+        onOpenList={handlePrListClick}
+        onOpenPullRequest={(event, url) => openPr(event, url, openPullRequestsInRightPanel)}
+      />
+    ) : (
+      prBadge
+    );
   const terminalStatusIcon = (
     <ThreadTerminalStatusButton
       threadRef={threadRef}
@@ -1474,8 +1488,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             {metaLineEmpty ? null : (
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
                 {/* The PR takes the branch's slot; the hover card still shows the branch. */}
-                {prBadge ? (
-                  prBadge
+                {cardPrBadge ? (
+                  cardPrBadge
                 ) : thread.branch ? (
                   <span className="flex min-w-0 flex-1">
                     <MiddleTruncate value={thread.branch} showTitle={false} />
