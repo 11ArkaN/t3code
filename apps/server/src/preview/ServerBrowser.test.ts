@@ -86,7 +86,7 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
   const events = new NodeEvents.EventEmitter();
   return {
     on: vi.fn((name: string, listener: () => void) => events.on(name, listener)),
-    emit: (name: string) => events.emit(name),
+    emit: (name: string, ...args: unknown[]) => events.emit(name, ...args),
     detach: vi.fn(async () => {}),
     send: vi.fn(async (method: string, input?: unknown): Promise<Record<string, unknown>> => {
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
@@ -238,7 +238,10 @@ function makeEncoderPage() {
     document: { createElement: () => canvas },
     Path2D: function Path2D() {},
     MediaRecorder: FakeMediaRecorder,
-    createImageBitmap: async () => ({ width: 1280, height: 800, close() {} }),
+    createImageBitmap: async () => {
+      await decodeGate?.promise;
+      return { width: 1280, height: 800, close() {} };
+    },
     atob,
     Blob,
     performance,
@@ -259,6 +262,7 @@ const contexts: ReturnType<typeof makeContext>[] = [];
 const encoderStreams: Array<{ frameRate: number | undefined; bitsPerSecond: number }> = [];
 const contextRequests: Array<{ profileId: string; isolated: boolean }> = [];
 let contextGate: PromiseWithResolvers<void> | null = null;
+let decodeGate: PromiseWithResolvers<void> | null = null;
 let pageCopy = "";
 let keyCopy = "";
 let focusedFrame: ReturnType<typeof makeFrame> | null = null;
@@ -367,6 +371,7 @@ beforeEach(() => {
   encoderStreams.length = 0;
   contextRequests.length = 0;
   contextGate = null;
+  decodeGate = null;
   contextFailure = null;
   initialNavigation = null;
   pageCopy = "";
@@ -521,6 +526,35 @@ it.live.each([
         expect(encoderStreams).toEqual([{ frameRate, bitsPerSecond }]);
       }),
     ).pipe(Effect.provide(layer)),
+);
+
+// Chrome sends the next screencast frame only after the previous one is acked.
+it.live("recordings keep receiving screencast frames while the encoder decodes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      yield* broker.invoke({ scope, tabId, operation: "recordingStart", input: {} });
+      const session = contexts[0]!.sessions.find((candidate) =>
+        candidate.send.mock.calls.some(([method]) => method === "Page.startScreencast"),
+      )!;
+      decodeGate = Promise.withResolvers<void>();
+      for (const sessionId of [1, 2, 3]) {
+        session.emit("Page.screencastFrame", {
+          data: "ZnJhbWU=",
+          sessionId,
+          metadata: { deviceWidth: 1280 },
+        });
+      }
+      yield* Effect.promise(() =>
+        vi.waitFor(() =>
+          expect(
+            session.send.mock.calls.filter(([method]) => method === "Page.screencastFrameAck"),
+          ).toHaveLength(3),
+        ),
+      );
+      decodeGate.resolve();
+    }),
+  ).pipe(Effect.provide(layer)),
 );
 
 it.live("enforces provider ownership and explicit targets when a session has multiple tabs", () =>
