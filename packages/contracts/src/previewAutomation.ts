@@ -438,6 +438,7 @@ export const PreviewAutomationActInput = Schema.Struct({
   ]),
   ...PreviewAutomationTabTargetFields,
   locator: Schema.optional(Locator),
+  selector: Schema.optional(LegacySelector),
   x: Schema.optional(Schema.Finite),
   y: Schema.optional(Schema.Finite),
   button: Schema.optional(Schema.Literals(["left", "right", "middle"])),

@@ -372,6 +372,9 @@ it.effect("checks each preview_act action against that action's own input", () =
       });
       expect(click.isError).toBe(false);
       expect(inputs[0]).toEqual({ locator: "text=Send" });
+
+      yield* callTool("preview_act", { action: "type", selector: "#name", text: "Ada" });
+      expect(inputs.at(-2)).toEqual({ selector: "#name", text: "Ada" });
     }),
   ).pipe(Effect.provide(layerTest)),
 );
