@@ -34,7 +34,6 @@ import {
   pullRequestConversationItems,
   handoffPrompt,
   handoffReviewComments,
-  stripPullRequestHandoffReferences,
   isPullRequestVerdictStale,
   isStackedPullRequestBase,
   loadingPullRequestCheckoutCommand,
@@ -903,12 +902,16 @@ describe("a second ask into the same composer", () => {
     diff: "",
   });
 
-  it("replaces what the last one left, chips included", () => {
+  it("keeps what the last one left and attaches the pull request once", () => {
     const next = handoffReviewComments(
-      [chip("pull-request-context:41"), chip("pull-request-selection:page.tsx:1:2")],
-      [chip("pull-request-context:42")],
+      [chip("pull-request-context:42"), chip("pull-request-selection:page.tsx:1:2")],
+      [chip("pull-request-context:42"), chip("pull-request-selection:page.tsx:3:4")],
     );
-    expect(next.map((comment) => comment.id)).toEqual(["pull-request-context:42"]);
+    expect(next.map((comment) => comment.id)).toEqual([
+      "pull-request-context:42",
+      "pull-request-selection:page.tsx:1:2",
+      "pull-request-selection:page.tsx:3:4",
+    ]);
   });
 
   it("keeps a reader's own pull request reference when a later handoff lands", () => {
@@ -923,7 +926,7 @@ describe("a second ask into the same composer", () => {
     });
     const prompt = `Look at this. ${formatInlineContextReference(reviewCommentContextReference(own))} `;
 
-    expect(stripPullRequestHandoffReferences(prompt, [own])).toBe(prompt);
+    expect(handoffPrompt({ prompt, lastHandoffPrompt: undefined }, "")).toBe(prompt);
     expect(
       handoffReviewComments([own], [chip("pull-request-context:42")]).map((comment) => comment.id),
     ).toEqual([own.id, "pull-request-context:42"]);
@@ -941,7 +944,7 @@ describe("a second ask into the same composer", () => {
     ).toBe("Explain this pull request, the caching especially.");
   });
 
-  it("replaces only its own sentence under text the reader typed", () => {
+  it("adds the next ask under text the reader typed and the last ask", () => {
     expect(
       handoffPrompt(
         {
@@ -950,7 +953,16 @@ describe("a second ask into the same composer", () => {
         },
         "Why the cache key?",
       ),
-    ).toBe("check the migration first\n\nWhy the cache key?");
+    ).toBe("check the migration first\n\nExplain this pull request.\n\nWhy the cache key?");
+  });
+
+  it("does not repeat an ask that is already in the composer", () => {
+    expect(
+      handoffPrompt(
+        { prompt: "Explain this pull request.", lastHandoffPrompt: "Explain this pull request." },
+        "Explain this pull request.",
+      ),
+    ).toBe("Explain this pull request.");
   });
 
   it("keeps an earlier selection when another selection is added to the agent", () => {
@@ -1005,6 +1017,7 @@ describe("a second ask into the same composer", () => {
     );
     expect(next.map((comment) => comment.id)).toEqual([
       "file-comment:3",
+      "pull-request-finding:t1",
       "pull-request-context:42",
     ]);
   });
