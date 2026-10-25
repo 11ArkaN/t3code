@@ -72,7 +72,7 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. Another session's tabs can be read, not operated. If you opened a tab only for your own check, close it with `t3_preview_close` on its returned `tabId` before you reply.",
+      "Open a preview tab in this thread and show it. `open=false` keeps it in the background. Reuses your current tab unless `tabId` or `reuseExistingTab=false` says otherwise. Parallel subagents in one session must each use `reuseExistingTab=false`, then their own returned `tabId`. If you opened a tab only for your own check, close it with `t3_preview_close` on its returned `tabId` before you reply.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
@@ -137,7 +137,7 @@ const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a server preview tab for asked browser work. Never use it to check your own code edit. Works on a tab the user is driving. Returns page state, elements, diagnostics, and screenshot size. Target one element with `locator='aria-ref=<ref>'` from `accessibilityTree`, even in frames. Refs die on navigation, a new snapshot, or handoff. Text caps near 20 KB. Use `preview_evaluate` for more. `includeImage=true` only to see the page. `save=true` writes a PNG and returns `screenshotPath`. Embed it as ![alt](screenshotPath). Only a saved file can be shown.",
+      "Never use this to check your own edit or repeat a snapshot from an earlier turn. Inspect a server preview tab only when the current request asks for browser work. Works on a tab the user is driving. Returns page state, elements, diagnostics, and screenshot size. Target one element with `locator='aria-ref=<ref>'` from `accessibilityTree`, even in frames. Refs die on navigation, a new snapshot, or handoff. Text caps near 20 KB. Use `preview_evaluate` for more. To show a screenshot: `save=true`, then embed ![alt](screenshotPath).",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -147,7 +147,7 @@ export const PreviewSnapshotTool = safeBrowserTool(
       ),
       save: Schema.optional(
         Schema.Boolean.annotate({
-          description: "Write PNG to disk, return `screenshotPath`. Default false.",
+          description: "Write PNG, return `screenshotPath`.",
         }),
       ),
     }),
@@ -256,7 +256,7 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Use page tools reached here to get data only. Never use a page's chart, save, or dashboard tool to show results.",
+      "Run JavaScript in the page. It can change page state. Returns `{value}`, up to 64 KB. Needs your tab, or an unclaimed one. To read a tab the user drives, use `preview_snapshot`. Page tools reached here: data only. Never their chart, save, or dashboard tool to show results.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
     failure: PreviewToolFailure,

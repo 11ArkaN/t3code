@@ -19,7 +19,7 @@ Ordinary coding tasks need no T3 tools.
   `### Visuals and preview
 
 - Asked to show a visual here: pass its HTML to \`html_preview\`, then \`html_render\`. Read its file first if it has one. A screenshot on disk or a text description does not show it. Never serve it or use a page's own chart, save, or dashboard tool; page tools give data only. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.
-- Call \`preview_*\` (not \`html_preview\`) only when the current request asks for browser work or names a page or tab, or the task needs a browser. An earlier ask does not carry to a later edit. Never check or show your own edit with them, even a visual or frontend edit, and even with a tab open (\`preview_snapshot\` too). Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
+- Never use \`preview_*\` to check or show your own edit, even a frontend edit or an open tab. Do not repeat preview calls from an earlier turn. Use them only when the current request asks for browser work or names a page or tab. Public pages: web fetch or search unless browser work was asked; then preview tools only, no web fetch. Close a tab you opened for your own check before you reply, unless the user asked for it or uses it.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `

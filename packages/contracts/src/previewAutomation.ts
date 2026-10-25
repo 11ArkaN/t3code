@@ -20,7 +20,7 @@ const PROFILE_GUIDANCE =
   "Profile id or name from preview_status, for a new tab. Default: the user's. A tab keeps its profile.";
 const OptionalTimeoutMs = Schema.optional(
   Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(60_000)),
-).annotate({ description: "Default 15000, max 60000 ms." });
+).annotate({ description: "Default 15000." });
 
 export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
   "status",
@@ -134,11 +134,9 @@ export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 export const PreviewAutomationDialogInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   accept: Schema.Boolean.annotate({
-    description: "True accepts the dialog. False dismisses it.",
+    description: "True accepts. False dismisses.",
   }),
-  promptText: Schema.optional(Schema.String).annotate({
-    description: "Text for a prompt dialog.",
-  }),
+  promptText: Schema.optional(Schema.String),
 });
 export type PreviewAutomationDialogInput = typeof PreviewAutomationDialogInput.Type;
 
@@ -188,7 +186,7 @@ export const BrowserNavigationTarget = Schema.Union([
       .annotate({ description: "Dev-server port here." }),
     protocol: Schema.optional(
       Schema.Literals(["http", "https"]).annotate({
-        description: "Protocol. Default http.",
+        description: "Default http.",
       }),
     ),
     path: Schema.optional(
@@ -209,7 +207,7 @@ export const PreviewAutomationNavigateInput = Schema.Struct({
     description: "In-environment target. Use {kind:'environment-port',port} for a dev server.",
   }),
   readiness: Schema.optional(Schema.Literals(["load", "domContentLoaded", "none"])).annotate({
-    description: "Wait for 'load' (default), 'domContentLoaded', or 'none'.",
+    description: "Default 'load'. 'none': return at once.",
   }),
   timeoutMs: OptionalTimeoutMs,
 }).check(
@@ -228,13 +226,13 @@ export const PreviewAutomationResizeInput = Schema.Struct({
       "'fill' fits the panel. 'freeform' uses `width` and `height`. 'preset' uses a named device size.",
   }),
   preset: Schema.optional(PreviewViewportPresetId).annotate({
-    description: "Named device size. Mode 'preset' only.",
+    description: "Mode 'preset' only.",
   }),
   width: Schema.optional(PreviewViewportSize.fields.width).annotate({
-    description: "Width in CSS pixels. Mode 'freeform' only.",
+    description: "CSS pixels. Mode 'freeform' only.",
   }),
   height: Schema.optional(PreviewViewportSize.fields.height).annotate({
-    description: "Height in CSS pixels. Mode 'freeform' only.",
+    description: "CSS pixels. Mode 'freeform' only.",
   }),
   orientation: Schema.optional(Schema.Literals(["portrait", "landscape"])).annotate({
     description: "Preset orientation. Default: its own. Not for 'fill' or 'freeform'.",
@@ -279,9 +277,7 @@ export type PreviewAutomationColorScheme = typeof PreviewAutomationColorScheme.T
 
 export const PreviewAutomationSetColorSchemeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  colorScheme: PreviewAutomationColorScheme.annotate({
-    description: "'light', 'dark', or 'system' for the OS setting.",
-  }),
+  colorScheme: PreviewAutomationColorScheme,
 });
 export type PreviewAutomationSetColorSchemeInput = typeof PreviewAutomationSetColorSchemeInput.Type;
 
@@ -415,7 +411,7 @@ export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.T
 
 export const PreviewAutomationTypeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  text: Schema.String.annotate({ description: "Literal text to insert." }),
+  text: Schema.String,
   selector: Schema.optional(LegacySelector).annotate({
     description: "CSS selector for the input. Prefer `locator`.",
   }),
@@ -442,11 +438,7 @@ export const PreviewAutomationPressInput = Schema.Struct({
   key: Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()).annotateKey({
     description: "Key name, such as Enter, Escape, Tab, ArrowDown, or one char.",
   }),
-  modifiers: Schema.optional(
-    Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"])).annotate({
-      description: "Keys held down with it.",
-    }),
-  ),
+  modifiers: Schema.optional(Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"]))),
 });
 export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type;
 
@@ -486,12 +478,10 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
     .annotateKey({
       description: "JavaScript to run in the main frame, such as document.title.",
     }),
-  awaitPromise: Schema.optional(
-    Schema.Boolean.annotate({ description: "Wait for a returned Promise. Default true." }),
-  ),
+  awaitPromise: Schema.optional(Schema.Boolean.annotate({ description: "Default true." })),
   returnByValue: Schema.optional(
     Schema.Boolean.annotate({
-      description: "Return the value, not a ref. Default true.",
+      description: "False returns a ref. Default true.",
     }),
   ),
 });
@@ -508,9 +498,7 @@ export const PreviewAutomationWaitForInput = Schema.Struct({
   text: Schema.optional(TrimmedNonEmptyString).annotate({
     description: "Text that must show on the page. Case counts.",
   }),
-  urlIncludes: Schema.optional(TrimmedNonEmptyString).annotate({
-    description: "Text that must be in the URL.",
-  }),
+  urlIncludes: Schema.optional(TrimmedNonEmptyString),
   timeoutMs: OptionalTimeoutMs,
 }).check(
   Schema.makeFilter((input) => {

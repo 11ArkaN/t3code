@@ -29,12 +29,12 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
     html: Html,
     width: Schema.optional(
       Schema.Int.annotate({
-        description: `Width in CSS pixels, 240 to 1600. Default ${HTML_RENDER_COLUMN_WIDTH}. Use about 390 for phones.`,
+        description: `CSS pixels, 240 to 1600. Default ${HTML_RENDER_COLUMN_WIDTH}. Use about 390 for phones.`,
       }),
     ),
     appearance: Schema.optional(
       Schema.Literals(["dark", "light"]).annotate({
-        description: "Theme to preview. Defaults to dark.",
+        description: "Default dark.",
       }),
     ),
   }),
@@ -77,7 +77,7 @@ const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
     title: Schema.String.check(
       Schema.isMinLength(1),
       Schema.isMaxLength(HTML_RENDER_MAX_TITLE_LENGTH),
-    ).annotate({ description: "Short name for the page." }),
+    ),
     height: Schema.Int.annotate({
       description: `Frame height in CSS pixels, ${HTML_RENDER_MIN_HEIGHT} to ${HTML_RENDER_MAX_HEIGHT}. Use the contentHeight from html_preview.`,
     }),
