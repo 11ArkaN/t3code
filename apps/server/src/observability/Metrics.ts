@@ -150,10 +150,9 @@ const recordMetrics =
   /* Instrumentation must not create its own span for every recorded operation. */
   Effect.fnUntraced(function* (
     options: WithMetricsOptions,
-    startedAt: bigint,
+    duration: Duration.Duration,
     exit: Exit.Exit<unknown, unknown>,
   ) {
-    const duration = Duration.nanos((yield* Clock.monotonicTimeNanos) - startedAt);
     const baseAttributes =
       typeof options.attributes === "function" ? options.attributes() : (options.attributes ?? {});
 
@@ -180,13 +179,18 @@ const recordMetrics =
     }
   });
 
+const elapsedSince = (startedAt: bigint) =>
+  Effect.map(Clock.monotonicTimeNanos, (now) => Duration.nanos(now - startedAt));
+
 // Monotonic timing ignores clock corrections; exit finalizers count interruptions.
 const withMetricsImpl = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   options: WithMetricsOptions,
 ): Effect.Effect<A, E, R> =>
   Effect.flatMap(Clock.monotonicTimeNanos, (startedAt) =>
-    Effect.onExit(effect, (exit) => recordMetrics(options, startedAt, exit)),
+    Effect.onExit(effect, (exit) =>
+      Effect.flatMap(elapsedSince(startedAt), (duration) => recordMetrics(options, duration, exit)),
+    ),
   );
 
 export const withMetrics: {
@@ -195,3 +199,34 @@ export const withMetrics: {
   ): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   <A, E, R>(effect: Effect.Effect<A, E, R>, options: WithMetricsOptions): Effect.Effect<A, E, R>;
 } = dual(2, withMetricsImpl);
+
+export const orchestrationCommandMetrics = (commandType: string): WithMetricsOptions => ({
+  counter: orchestrationCommandsTotal,
+  timer: orchestrationCommandDuration,
+  attributes: { commandType },
+});
+
+export type TimeLockedWork = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+
+/**
+ * Times the work `body` passes to `timed`, typically inside a lock, and records once `body`
+ * exits, after its locks are released. Lock wait is excluded; nothing records if no work started.
+ */
+export const withMetricsAfterLock = <A, E, R>(
+  options: WithMetricsOptions,
+  body: (timed: TimeLockedWork) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.suspend(() => {
+    let duration: Duration.Duration | undefined;
+    const timed: TimeLockedWork = (effect) =>
+      Effect.flatMap(Clock.monotonicTimeNanos, (startedAt) =>
+        Effect.onExit(effect, () =>
+          Effect.map(elapsedSince(startedAt), (elapsed) => {
+            duration = elapsed;
+          }),
+        ),
+      );
+    return Effect.onExit(body(timed), (exit) =>
+      duration === undefined ? Effect.void : recordMetrics(options, duration, exit),
+    );
+  });

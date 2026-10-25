@@ -142,9 +142,9 @@ import * as ProviderContinuationRequests from "@t3tools/provider-core/server/Pro
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import {
-  orchestrationCommandDuration,
-  orchestrationCommandsTotal,
-  withMetrics,
+  orchestrationCommandMetrics,
+  type TimeLockedWork,
+  withMetricsAfterLock,
 } from "../observability/Metrics.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
@@ -11901,7 +11901,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     };
   });
 
-  const dispatchWithReceiptRaw = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
+  const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
     command: OrchestrationV2ServerCommand,
   ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
     yield* Effect.annotateCurrentSpan({
@@ -12116,20 +12116,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     } satisfies OrchestratorV2DispatchResult;
   });
 
-  const dispatchWithReceiptEffect = (command: OrchestrationV2ServerCommand) =>
-    dispatchWithReceiptRaw(command).pipe(
-      withMetrics({
-        counter: orchestrationCommandsTotal,
-        timer: orchestrationCommandDuration,
-        attributes: { commandType: command.type },
-      }),
-    );
-
-  // dispatchWithReceiptRaw owns the dispatch span; this wrapper selects the thread locks.
-  const dispatchWithReceipt = Effect.fnUntraced(function* (command: OrchestrationV2ServerCommand) {
+  // dispatchWithReceiptEffect owns the dispatch span; this wrapper selects the thread locks.
+  const dispatchWithReceiptLocked = Effect.fnUntraced(function* (
+    command: OrchestrationV2ServerCommand,
+    timed: TimeLockedWork,
+  ) {
     const dispatch = threadDispatch.withLock(
       commandThreadId(command),
-      dispatchWithReceiptEffect(command),
+      timed(dispatchWithReceiptEffect(command)),
     );
     if (
       command.type !== "message.dispatch" ||
@@ -12146,6 +12140,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ? dispatch
       : threadDispatch.withLock(parentThreadId, dispatch);
   });
+
+  const dispatchWithReceipt = (command: OrchestrationV2ServerCommand) =>
+    withMetricsAfterLock(orchestrationCommandMetrics(command.type), (timed) =>
+      dispatchWithReceiptLocked(command, timed),
+    );
 
   const handleRunUpdate = Effect.fn("Orchestrator.handleRunUpdate")(
     function* (stored: OrchestrationV2StoredEvent) {
@@ -12414,24 +12413,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore),
     dispatch: dispatchWithReceipt,
     autoArmLimitRecovery: (input) =>
-      threadDispatch.withLock(
-        input.threadId,
-        Effect.gen(function* () {
-          const thread = yield* projectionStore
-            .getThread(input.threadId)
-            .pipe(
-              Effect.mapError(
-                (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
-              ),
-            );
-          // Stop or an explicit recovery choice can commit after the sweep reads its candidate.
-          if (
-            thread.limitRecovery?.runId === input.limitRecovery.runId &&
-            thread.limitRecovery.resetAt === input.limitRecovery.resetAt
-          )
-            return;
-          yield* dispatchWithReceiptEffect({ type: "thread.metadata.update", ...input });
-        }),
+      withMetricsAfterLock(orchestrationCommandMetrics("thread.metadata.update"), (timed) =>
+        threadDispatch.withLock(
+          input.threadId,
+          Effect.gen(function* () {
+            const thread = yield* projectionStore
+              .getThread(input.threadId)
+              .pipe(
+                Effect.mapError(
+                  (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
+                ),
+              );
+            // Stop or an explicit recovery choice can commit after the sweep reads its candidate.
+            if (
+              thread.limitRecovery?.runId === input.limitRecovery.runId &&
+              thread.limitRecovery.resetAt === input.limitRecovery.resetAt
+            )
+              return;
+            yield* timed(dispatchWithReceiptEffect({ type: "thread.metadata.update", ...input }));
+          }),
+        ),
       ),
     searchThreadStream: (input) =>
       projectionStore

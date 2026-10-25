@@ -18,9 +18,9 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 import {
-  orchestrationCommandDuration,
-  orchestrationCommandsTotal,
-  withMetrics,
+  orchestrationCommandMetrics,
+  type TimeLockedWork,
+  withMetricsAfterLock,
 } from "../observability/Metrics.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -215,7 +215,10 @@ export const make = Effect.gen(function* () {
         ),
       );
 
-  const commitRaw = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
+  const commitTimed = Effect.fn("ProjectService.commit")(function* (
+    command: ProjectCommand,
+    timed: TimeLockedWork,
+  ) {
     const { projectId } = command;
     const dispatchError = (cause: unknown) =>
       new ProjectOperationError({ operation: "dispatch-project-command", projectId, cause });
@@ -258,7 +261,15 @@ export const make = Effect.gen(function* () {
         error: encodeProjectCommandRejection(planned.failure),
       });
     });
-    const receipt = yield* planAndCommit.pipe(Effect.mapError(dispatchError));
+    const timedPlanAndCommit = timed(planAndCommit);
+    const receipt = yield* projectLocks
+      .withLock(
+        projectId,
+        workspaceRoot === undefined
+          ? timedPlanAndCommit
+          : workspaceLocks.withLock(workspaceRoot, timedPlanAndCommit),
+      )
+      .pipe(Effect.mapError(dispatchError));
     if (receipt.projectId !== projectId || receipt.commandType !== command.type) {
       return yield* dispatchError(
         `Command ${command.commandId} was already used by ${receipt.commandType} for ${receipt.projectId}.`,
@@ -283,20 +294,10 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  const commit = (command: ProjectCommand) => {
-    const execution = commitRaw(command).pipe(
-      withMetrics({
-        counter: orchestrationCommandsTotal,
-        timer: orchestrationCommandDuration,
-        attributes: { commandType: command.type },
-      }),
+  const commit = (command: ProjectCommand) =>
+    withMetricsAfterLock(orchestrationCommandMetrics(command.type), (timed) =>
+      commitTimed(command, timed),
     );
-    const workspaceRoot = command.type === "project.delete" ? undefined : command.workspaceRoot;
-    return projectLocks.withLock(
-      command.projectId,
-      workspaceRoot === undefined ? execution : workspaceLocks.withLock(workspaceRoot, execution),
-    );
-  };
 
   const readCommitted = Effect.fn("ProjectService.readCommitted")(function* (projectId: ProjectId) {
     const row = yield* readRow(projectId, { includeDeleted: true });
