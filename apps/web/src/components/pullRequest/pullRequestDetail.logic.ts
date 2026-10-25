@@ -40,6 +40,7 @@ import {
 } from "@t3tools/client-runtime/thread-pull-requests";
 
 import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
+import type { ComposerThreadTarget, useComposerDraftStore } from "~/composerDraftStore";
 
 export const PULL_REQUEST_MERGE_METHOD_LABELS: Record<PullRequestMergeMethod, string> = {
   merge: "Merge",
@@ -772,10 +773,11 @@ function terminologyForUrl(url: string): ChangeRequestTerminology {
 function reviewThreadContext(
   thread: PullRequestReviewThread,
   pullRequestNumber: number,
+  url: string,
 ): ReviewCommentContext {
   const lineIndex = Math.max(0, (thread.line ?? 1) - 1);
   return {
-    id: `pull-request-finding:${thread.id}`,
+    id: `pull-request-finding:${url}:${thread.id}`,
     sectionId: `pull-request:${pullRequestNumber}`,
     sectionTitle: `PR #${pullRequestNumber} review`,
     filePath: thread.path,
@@ -815,28 +817,55 @@ function handoffPreamble(input: {
 export interface FixFindingsHandoff {
   readonly prompt: string;
   readonly reviewComments: ReadonlyArray<ReviewCommentContext>;
+  /** Selections and findings pile up; any other handoff replaces the last one. */
+  readonly appends?: boolean;
 }
 
-export function handoffPrompt(
-  existing: {
-    readonly prompt: string;
-    /** Store only the handoff contribution so a repeated ask is not appended twice. */
-    readonly lastHandoffPrompt: string | undefined;
+export interface ComposerHandoff {
+  /** What the handoff left at the end of the composer, chip references included. */
+  readonly prompt: string;
+  readonly appends?: boolean | undefined;
+}
+
+const HANDOFF_COMMENT_ID_PREFIX = "pull-request-";
+
+const joinPrompts = (...parts: ReadonlyArray<string>) =>
+  parts.filter((part) => part.trim().length > 0).join("\n\n");
+
+type ComposerHandoffStore = Pick<
+  ReturnType<(typeof useComposerDraftStore)["getState"]>,
+  "getComposerDraft" | "setPrompt" | "setReviewComments"
+>;
+
+export function writeHandoffToComposer(
+  store: ComposerHandoffStore,
+  target: ComposerThreadTarget,
+  last: ComposerHandoff | undefined,
+  task: Pick<FixFindingsHandoff, "prompt" | "appends"> & {
+    readonly reviewComments?: ReadonlyArray<ReviewCommentContext>;
   },
-  incoming: string,
-): string {
-  if (existing.prompt.trim().length === 0) return incoming;
-  if (incoming.length === 0) return existing.prompt;
-  const repeated = incoming === existing.lastHandoffPrompt && existing.prompt.includes(incoming);
-  return repeated ? existing.prompt : `${existing.prompt}\n\n${incoming}`;
-}
-
-export function handoffReviewComments(
-  existing: ReadonlyArray<ReviewCommentContext>,
-  incoming: ReadonlyArray<ReviewCommentContext>,
-): ReviewCommentContext[] {
-  const existingIds = new Set(existing.map((comment) => comment.id));
-  return [...existing, ...incoming.filter((comment) => !existingIds.has(comment.id))];
+): ComposerHandoff {
+  const draft = store.getComposerDraft(target);
+  const existing = draft?.prompt ?? "";
+  const tail = last?.prompt ?? "";
+  // An edited contribution is the reader's text now.
+  const owned = tail.length > 0 && (existing === tail || existing.endsWith(`\n\n${tail}`));
+  const kept = owned ? existing.slice(0, -tail.length).replace(/\n\n$/u, "") : existing;
+  const extend = last?.appends === true && task.appends === true;
+  const contribution = joinPrompts(owned && extend ? tail : "", task.prompt);
+  store.setPrompt(target, joinPrompts(kept, contribution));
+  const keptComments = (draft?.reviewComments ?? []).filter(
+    (comment) => extend || !comment.id.startsWith(HANDOFF_COMMENT_ID_PREFIX),
+  );
+  const keptIds = new Set(keptComments.map((comment) => comment.id));
+  // The store drops references to removed chips and appends references to new ones.
+  store.setReviewComments(target, [
+    ...keptComments,
+    ...(task.reviewComments ?? []).filter((comment) => !keptIds.has(comment.id)),
+  ]);
+  const written = store.getComposerDraft(target)?.prompt ?? "";
+  const start = contribution.length === 0 ? -1 : written.lastIndexOf(contribution);
+  return { prompt: start < 0 ? "" : written.slice(start), appends: task.appends };
 }
 
 /** Review bodies and check output are attacker-controlled on public repositories. */
@@ -892,6 +921,7 @@ export function buildFixFindingsHandoff(input: {
   const terminology = terminologyForUrl(input.url);
 
   return {
+    appends: true,
     prompt: [
       `Fix the actionable findings on ${terminology.shortLabel} #${input.number}, titled \`${boundedField(input.title)}\`, at \`${boundedField(input.url)}\`.`,
       `The ${terminology.shortLabel} branch is \`${boundedField(input.headBranch)}\` targeting \`${boundedField(input.baseBranch)}\`. Work in the prepared checkout, verify each valid finding, and keep the change focused.`,
@@ -924,7 +954,9 @@ export function buildFixFindingsHandoff(input: {
           ]
         : []),
     ].join("\n"),
-    reviewComments: includedThreads.map((thread) => reviewThreadContext(thread, input.number)),
+    reviewComments: includedThreads.map((thread) =>
+      reviewThreadContext(thread, input.number, input.url),
+    ),
   };
 }
 
@@ -955,11 +987,12 @@ export function buildFixFindingHandoff(input: {
   const preamble = handoffPreamble(input);
   if (input.finding.kind === "thread") {
     return {
+      appends: true,
       prompt: [
         "Fix the review finding attached to this message. It is attached on the line it was written against.",
         ...preamble,
       ].join("\n"),
-      reviewComments: [reviewThreadContext(input.finding.thread, input.number)],
+      reviewComments: [reviewThreadContext(input.finding.thread, input.number, input.url)],
     };
   }
   if (input.finding.kind === "comment") {
@@ -967,6 +1000,7 @@ export function buildFixFindingHandoff(input: {
     const body = visibleBody(comment.body) ?? "";
     const where = comment.path === null ? "" : ` on \`${boundedField(comment.path)}\``;
     return {
+      appends: true,
       prompt: [
         "Fix the review remark quoted below. It names no line, so find what it refers to before changing anything.",
         ...preamble,
@@ -977,6 +1011,7 @@ export function buildFixFindingHandoff(input: {
   }
   const check = input.finding.check;
   return {
+    appends: true,
     prompt: [
       "Fix the failing check quoted below. Reproduce it locally first. The name is all the host reported, and the run may fail for a reason the code cannot show.",
       ...preamble,
@@ -1014,7 +1049,7 @@ function pullRequestContextComment(
 ): ReviewCommentContext {
   const term = terminologyForUrl(input.url).singular;
   return {
-    id: `pull-request-context:${input.number}`,
+    id: `pull-request-context:${input.url}`,
     sectionId: `pull-request:${input.number}`,
     sectionTitle: `PR #${input.number}`,
     filePath: `PR #${input.number}`,
@@ -1102,7 +1137,12 @@ export function buildAddSelectionToAgentHandoff(input: {
 }): FixFindingsHandoff {
   return {
     prompt: bounded(input.request),
-    reviewComments: [pullRequestContextComment(input, []), { ...input.comment, text: "" }],
+    appends: true,
+    // Selection ids name a file and range; another repository can have the same one.
+    reviewComments: [
+      pullRequestContextComment(input, []),
+      { ...input.comment, id: `${input.comment.id}:${input.url}`, text: "" },
+    ],
   };
 }
 

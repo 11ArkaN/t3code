@@ -2,6 +2,7 @@ import { SourceControlProviderKind } from "@t3tools/contracts";
 import { resolvePlanFollowUpSubmission } from "../../proposedPlan";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 import {
+  EnvironmentId,
   GitCommandError,
   ProjectId,
   type PullRequestCheck,
@@ -12,14 +13,25 @@ import {
   type PullRequestReviewThread,
   type PullRequestState,
   type RepositoryIdentity,
+  ThreadId,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
-import { formatInlineContextReference } from "~/lib/composerContextReferences";
-import { buildMessageContext, reviewCommentContextReference } from "~/lib/composerContextRecords";
+import {
+  collectInlineContextIds,
+  formatInlineContextReference,
+} from "~/lib/composerContextReferences";
+import { useComposerDraftStore } from "~/composerDraftStore";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  buildMessageContext,
+  reviewCommentContextId,
+  reviewCommentContextReference,
+} from "~/lib/composerContextRecords";
 
 import {
   buildAddSelectionToAgentHandoff,
+  buildAskAboutPullRequestHandoff,
   buildExplainPullRequestHandoff,
   buildResolveConflictsPrompt,
   resolveThreadPanelPullRequestAction,
@@ -32,8 +44,9 @@ import {
   pagePullRequestConversationItems,
   pullRequestConversationItemComments,
   pullRequestConversationItems,
-  handoffPrompt,
-  handoffReviewComments,
+  writeHandoffToComposer,
+  type ComposerHandoff,
+  type FixFindingsHandoff,
   isPullRequestVerdictStale,
   isStackedPullRequestBase,
   loadingPullRequestCheckoutCommand,
@@ -890,136 +903,185 @@ describe("asking about a change rather than working on it", () => {
 });
 
 describe("a second ask into the same composer", () => {
-  const chip = (id: string): ReviewCommentContext => ({
-    id,
-    sectionId: "pull-request:42",
-    sectionTitle: "PR #42",
-    filePath: "PR #42",
-    startIndex: 0,
-    endIndex: 0,
-    rangeLabel: "Add the pull requests page",
-    text: "",
-    diff: "",
+  const pullRequest = (
+    url = "https://github.com/pingdotgg/t3code/pull/42",
+    headBranch = "feat/a",
+  ) => ({
+    number: 42,
+    title: "Add the pull requests page",
+    url,
+    headBranch,
+    baseBranch: "main",
+    state: "open" as const,
+    isDraft: false,
   });
-
-  it("keeps what the last one left and attaches the pull request once", () => {
-    const next = handoffReviewComments(
-      [chip("pull-request-context:42"), chip("pull-request-selection:page.tsx:1:2")],
-      [chip("pull-request-context:42"), chip("pull-request-selection:page.tsx:3:4")],
-    );
-    expect(next.map((comment) => comment.id)).toEqual([
-      "pull-request-context:42",
-      "pull-request-selection:page.tsx:1:2",
-      "pull-request-selection:page.tsx:3:4",
-    ]);
-  });
-
-  it("keeps a reader's own pull request reference when a later handoff lands", () => {
-    const own = buildPullRequestReferenceContext({
-      number: 42,
-      title: "Add the pull requests page",
-      url: "https://github.com/pingdotgg/t3code/pull/42",
-      headBranch: "feature",
-      baseBranch: "main",
-      state: "open" as const,
-      isDraft: false,
+  const selection = (line: number, request: string, pr = pullRequest()) =>
+    buildAddSelectionToAgentHandoff({
+      ...pr,
+      request,
+      comment: {
+        id: `pull-request-selection:none:page.tsx:${line}:${line}`,
+        sectionId: "pull-request:42",
+        sectionTitle: "PR #42 review",
+        filePath: "page.tsx",
+        startIndex: line - 1,
+        endIndex: line - 1,
+        rangeLabel: `L${line}`,
+        text: request,
+        diff: "",
+      },
     });
-    const prompt = `Look at this. ${formatInlineContextReference(reviewCommentContextReference(own))} `;
+  const fixFinding = () =>
+    buildFixFindingHandoff({
+      ...pullRequest(),
+      finding: {
+        kind: "thread",
+        thread: {
+          id: "t1",
+          path: "page.tsx",
+          line: 3,
+          side: "right",
+          isResolved: false,
+          isOutdated: false,
+          comments: [
+            {
+              id: "tc1",
+              author: { login: "reviewer", name: null, avatarUrl: null },
+              body: "rename the helper",
+              createdAt: "2026-07-03T00:00:00Z",
+              url: null,
+            },
+          ],
+        },
+      },
+    });
+  const explain = () => buildExplainPullRequestHandoff(pullRequest());
 
-    expect(handoffPrompt({ prompt, lastHandoffPrompt: undefined }, "")).toBe(prompt);
+  let composers = 0;
+  // Drives the real draft store, which appends and removes chip references in the prompt.
+  function composer() {
+    composers += 1;
+    const target = scopeThreadRef(EnvironmentId.make("env"), ThreadId.make(`handoff-${composers}`));
+    const store = useComposerDraftStore.getState();
+    let last: ComposerHandoff | undefined;
+    const draft = () => store.getComposerDraft(target);
+    return {
+      store,
+      target,
+      hand: (...tasks: ReadonlyArray<FixFindingsHandoff>) => {
+        for (const task of tasks) last = writeHandoffToComposer(store, target, last, task);
+      },
+      prompt: () => draft()?.prompt ?? "",
+      chips: () => draft()?.reviewComments ?? [],
+      referencedChips: () =>
+        (draft()?.reviewComments ?? []).filter((chip) =>
+          collectInlineContextIds(draft()?.prompt ?? "").includes(reviewCommentContextId(chip.id)),
+        ),
+    };
+  }
+
+  it("keeps earlier selections when more selections are added to the agent", () => {
+    const composerState = composer();
+    composerState.hand(selection(25, "First: preserve this."), selection(26, "Second: keep both."));
+
+    expect(composerState.prompt()).toMatch(
+      /^First: preserve this\. \[.*\n\nSecond: keep both\. \[/su,
+    );
+    expect(composerState.chips().map((chip) => chip.filePath)).toEqual([
+      "PR #42",
+      "page.tsx",
+      "page.tsx",
+    ]);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("keeps the same pull request number from another repository", () => {
+    const composerState = composer();
+    composerState.hand(
+      selection(1, "why?", pullRequest("https://github.com/acme/a/pull/42", "feat/a")),
+      selection(1, "why?", pullRequest("https://github.com/acme/b/pull/42", "feat/b")),
+    );
+
     expect(
-      handoffReviewComments([own], [chip("pull-request-context:42")]).map((comment) => comment.id),
-    ).toEqual([own.id, "pull-request-context:42"]);
+      composerState.chips().map((chip) => chip.pullRequest?.headBranch ?? chip.filePath),
+    ).toEqual(["feat/a", "page.tsx", "feat/b", "page.tsx"]);
+  });
+
+  it("piles up selections and findings in the order they were added", () => {
+    const composerState = composer();
+    const finding = fixFinding();
+    composerState.hand(selection(1, "why this?"), finding, selection(2, "and this?"));
+
+    expect(composerState.prompt()).toContain("why this?");
+    expect(composerState.prompt()).toContain(finding.prompt);
+    expect(composerState.prompt()).toContain("and this?");
+    expect(composerState.chips().map((chip) => chip.filePath)).toEqual([
+      "PR #42",
+      "page.tsx",
+      "page.tsx",
+      "page.tsx",
+    ]);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("drops an explanation's do-not-change-code instructions when a finding is fixed next", () => {
+    const composerState = composer();
+    const finding = fixFinding();
+    composerState.hand(explain(), finding);
+
+    expect(composerState.prompt()).not.toContain("Explain this pull request.");
+    expect(composerState.prompt()).toContain(finding.prompt);
+    expect(composerState.chips()).toEqual(finding.reviewComments);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("gives an explanation asked after a selection its own instructions", () => {
+    const composerState = composer();
+    composerState.hand(selection(1, "why this?"), explain());
+
+    expect(composerState.prompt()).toMatch(/^Explain this pull request\. \[/u);
+    expect(composerState.chips()).toEqual(explain().reviewComments);
+    expect(composerState.chips()[0]?.text).toContain("Walk through this pull request");
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("replaces a question's instructions with the next question's", () => {
+    const composerState = composer();
+    const ask = buildAskAboutPullRequestHandoff(pullRequest());
+    composerState.hand(explain(), ask);
+
+    expect(composerState.prompt()).not.toContain("Explain this pull request.");
+    expect(composerState.chips()).toEqual(ask.reviewComments);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
+  });
+
+  it("keeps what the reader typed and attached around the handoffs", () => {
+    const composerState = composer();
+    const own = buildPullRequestReferenceContext(pullRequest());
+    composerState.store.setPrompt(composerState.target, "check the migration first");
+    composerState.store.setReviewComments(composerState.target, [own]);
+    composerState.hand(explain(), fixFinding());
+
+    expect(composerState.prompt()).toMatch(
+      /^check the migration first \[.*\n\nFix the review finding/su,
+    );
+    expect(composerState.chips()[0]).toEqual(own);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
   });
 
   it("keeps an edit the reader made to the sentence they were handed", () => {
-    expect(
-      handoffPrompt(
-        {
-          prompt: "Explain this pull request, the caching especially.",
-          lastHandoffPrompt: "Explain this pull request.",
-        },
-        "",
-      ),
-    ).toBe("Explain this pull request, the caching especially.");
-  });
-
-  it("adds the next ask under text the reader typed and the last ask", () => {
-    expect(
-      handoffPrompt(
-        {
-          prompt: "check the migration first\n\nExplain this pull request.",
-          lastHandoffPrompt: "Explain this pull request.",
-        },
-        "Why the cache key?",
-      ),
-    ).toBe("check the migration first\n\nExplain this pull request.\n\nWhy the cache key?");
-  });
-
-  it("does not repeat an ask that is already in the composer", () => {
-    expect(
-      handoffPrompt(
-        { prompt: "Explain this pull request.", lastHandoffPrompt: "Explain this pull request." },
-        "Explain this pull request.",
-      ),
-    ).toBe("Explain this pull request.");
-  });
-
-  it("keeps an earlier selection when another selection is added to the agent", () => {
-    const pullRequest = {
-      number: 25009,
-      title: "Add the pull requests page",
-      url: "https://github.com/pingdotgg/t3code/pull/25009",
-      headBranch: "feat/page",
-      baseBranch: "main",
-      state: "open" as const,
-      isDraft: false,
-    };
-    const selection = (line: number, request: string) =>
-      buildAddSelectionToAgentHandoff({
-        ...pullRequest,
-        request,
-        comment: {
-          id: `pull-request-selection:ChatTerminalDrawers.tsx:${line}:${line}`,
-          sectionId: "pull-request:25009",
-          sectionTitle: "PR #25009 review",
-          filePath: "apps/web/src/components/chat/ChatTerminalDrawers.tsx",
-          startIndex: line - 1,
-          endIndex: line - 1,
-          rangeLabel: `L${line}`,
-          text: request,
-          diff: "",
-        },
-      });
-    const first = selection(25, "First selection: preserve this context.");
-    const second = selection(26, "Second selection: keep both.");
-
-    const prompt = handoffPrompt(
-      { prompt: first.prompt, lastHandoffPrompt: first.prompt },
-      second.prompt,
+    const composerState = composer();
+    composerState.hand(explain());
+    composerState.store.setPrompt(
+      composerState.target,
+      composerState
+        .prompt()
+        .replace("this pull request.", "this pull request, the caching especially."),
     );
-    const comments = handoffReviewComments(first.reviewComments, second.reviewComments);
+    composerState.hand(fixFinding());
 
-    expect.soft(prompt).toContain(first.prompt);
-    expect.soft(prompt).toContain(second.prompt);
-    expect(comments.map((comment) => comment.id)).toEqual([
-      "pull-request-context:25009",
-      "pull-request-selection:ChatTerminalDrawers.tsx:25:25",
-      "pull-request-selection:ChatTerminalDrawers.tsx:26:26",
-    ]);
-  });
-
-  it("keeps the lines the reader marked up in the thread themselves", () => {
-    const own = chip("file-comment:3");
-    const next = handoffReviewComments(
-      [own, chip("pull-request-finding:t1")],
-      [chip("pull-request-context:42")],
-    );
-    expect(next.map((comment) => comment.id)).toEqual([
-      "file-comment:3",
-      "pull-request-finding:t1",
-      "pull-request-context:42",
-    ]);
+    expect(composerState.prompt()).toMatch(/^Explain this pull request, the caching especially\./u);
+    expect(composerState.referencedChips()).toEqual(composerState.chips());
   });
 });
 
