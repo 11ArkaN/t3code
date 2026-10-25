@@ -33,20 +33,20 @@ const shared = {
 const AttachmentUploadTool = Tool.make("t3_attachment_prepare_upload", {
   ...shared,
   description:
-    "Get a signed upload URL. POST the exact bytes to `relativeUrl` on this MCP server's HTTP origin. Then pass the metadata and returned id to `t3_thread_send_attachments`. Upload does not send.",
+    "Get an upload URL for one file. POST its exact bytes to `relativeUrl` on this MCP server's HTTP origin, then send with `t3_thread_send_attachments` using the returned `attachmentId`.",
   parameters: Schema.Struct({ upload: AttachmentCreateUploadUrlInput }),
   success: AttachmentCreateUploadUrlResult,
 }).annotate(Tool.Destructive, true);
 const AttachmentDiscardTool = Tool.make("t3_attachment_discard", {
   ...shared,
-  description: "Discard a pending upload. Sent attachments are not deleted.",
+  description: "Discard a pending upload (not a sent attachment).",
   parameters: AttachmentDeleteInput,
   success: Schema.Struct({}),
 }).annotate(Tool.Destructive, true);
 const AttachmentSendTool = Tool.make("t3_thread_send_attachments", {
   ...shared,
   description:
-    "Send uploaded attachments as a new message to a thread in this environment. No retry key. The target cannot run with broader modes than yours. Sent does not mean the provider can read the files or has finished the turn.",
+    "Send uploaded attachments as a new message to a thread. No retry key. Target modes cannot exceed yours. Success does not mean the provider read the files or finished.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     message: Schema.optional(Schema.String.check(Schema.isMaxLength(120000))),
