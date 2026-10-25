@@ -102,6 +102,10 @@ describe("evaluatePullRequestWatch", () => {
     assert.deepEqual(missing.changes, []);
     assert.isFalse(missing.next.passed);
     assert.deepEqual(evaluatePullRequestWatch(missing.next, gated, noRemarks).changes, []);
+    const pushed = detail({ headSha: "bbbbbbbbbb", checks: [bot] });
+    assert.deepEqual(evaluatePullRequestWatch(missing.next, pushed, noRemarks).changes, [
+      { kind: "checks-passed", count: 1, required: false },
+    ]);
 
     // Approved, the run's jobs carry their own names under the run's URL.
     const job = { ...check("lint", "success"), url: `${run(1)}/job/7` };
