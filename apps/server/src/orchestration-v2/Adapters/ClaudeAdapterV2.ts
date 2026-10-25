@@ -10260,6 +10260,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               next.add(turnInput.providerTurnId);
               return next;
             });
+            // Stop owns settlement now; the stall deadline must not fail the turn underneath it.
+            yield* cancelStallWatchdog(currentTurn);
             // A wedged CLI can leave the SDK interrupt and close pending forever.
             const closed = yield* existing.query.interrupt.pipe(
               Effect.andThen(existing.query.close.pipe(Effect.ignore)),
@@ -10289,7 +10291,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               // The unresponsive process may have left the native session wedged.
               yield* finalizeActiveTurnAfterQueryExit(existing, undefined, {});
               yield* endSubagentCallsOfClosedQuery(existing.nativeThreadId, "interrupted");
-            } else {
+            } else if ((yield* Ref.get(activeTurn)) === currentTurn) {
               yield* finalizeActiveTurn({
                 context: currentTurn,
                 status: "interrupted",

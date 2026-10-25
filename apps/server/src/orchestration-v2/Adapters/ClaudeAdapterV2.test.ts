@@ -6384,11 +6384,25 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   it.effect.each([
-    { case: "hung", hangs: true, disposition: "broken", resumes: false },
-    { case: "ordinary", hangs: false, disposition: "reusable", resumes: true },
+    { case: "hung", hangs: true, stopAfter: "0 seconds", disposition: "broken", resumes: false },
+    {
+      case: "ordinary",
+      hangs: false,
+      stopAfter: "0 seconds",
+      disposition: "reusable",
+      resumes: true,
+    },
+    // The stall deadline passes while Stop waits on the hung SDK interrupt.
+    {
+      case: "hung near the stall deadline",
+      hangs: true,
+      stopAfter: "595 seconds",
+      disposition: "broken",
+      resumes: false,
+    },
   ] as const)(
     "a $case Stop interrupts the turn and leaves its native session $disposition",
-    ({ hangs, disposition, resumes }) =>
+    ({ hangs, stopAfter, disposition, resumes }) =>
       Effect.gen(function* () {
         const configDir = yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
           prefix: "t3-claude-v2-stop-",
@@ -6425,6 +6439,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             session_id: WAKE_NATIVE_SESSION,
           }),
         );
+        yield* TestClock.adjust(stopAfter);
         const interrupting = yield* harness.runtime
           .interruptTurn({
             providerThread: harness.providerThread,
