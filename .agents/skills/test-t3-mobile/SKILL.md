@@ -50,7 +50,7 @@ each long-running process as its own process group, recorded in a file, and
 read ports and URLs from its log. This works on Linux and macOS:
 
 ```bash
-bash -c 'mkdir -p "$0"; set -m; vp run dev > "$0/backend.log" 2>&1 & echo $! > "$0/backend.pgid"' "$PWD/.t3/mobile-test"
+bash -c 'mkdir -p "$0"; set -m; vp run dev < /dev/null > "$0/backend.log" 2>&1 & echo $! > "$0/backend.pgid"' "$PWD/.t3/mobile-test"
 ```
 
 The server port and base dir are on the `[dev-runner]` line (`serverPort=`,
@@ -91,10 +91,11 @@ vp run mobile:install android --artifact --abi arm64-v8a
 `<artifact>` is the `artifact` path in the JSON line. Use `arm64-v8a` for a
 `physical: true` phone or an emulator on a host that lists iOS `available` (a
 Mac), and `x86_64` for an emulator on a Linux host. If install fails with
-`NO_MATCHING_ABIS`, use the other ABI. Use `reinstall` in place of `install`
-to replace an existing client. iOS works the same way with
+`NO_MATCHING_ABIS`, use the other ABI. `install` replaces an existing client and
+keeps its pairings. iOS works the same way with
 `vp run mobile:install ios --artifact` when the local or shared cache has this
-fingerprint; otherwise it names the next step.
+fingerprint, or builds it as a background task on an Apple silicon Mac;
+otherwise it names the next step.
 
 ## Start Metro
 

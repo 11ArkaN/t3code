@@ -944,6 +944,10 @@ const main = Command.make(
       return yield* new NativeClientError({
         message: "HOME or USERPROFILE must be set to store native client records.",
       });
+    if (Option.isSome(requestedAbi) && !(artifact && platform === "android"))
+      return yield* new NativeClientError({
+        message: "--abi only applies to vp run mobile:install android --artifact.",
+      });
     if (artifact) {
       if (mode === "check" || Option.isSome(requested))
         return yield* new NativeClientError({
