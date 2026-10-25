@@ -37,6 +37,7 @@ import {
   CircleDashedIcon,
   CircleDotDashedIcon,
   ClockIcon,
+  FolderGit2Icon,
   GitBranchIcon,
   MessageCircleQuestionIcon,
   PinIcon,
@@ -90,7 +91,6 @@ import { resolveLocalCheckoutBranchMismatch } from "../BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
   ThreadPullRequestsMiniList,
-  ThreadWorktreeIndicator,
   prStatusIndicator,
   resolveThreadPullRequestBadge,
   terminalStatusFromRunningIds,
@@ -291,7 +291,11 @@ function SidebarThreadTooltip({
         ) : null}
         {thread.branch ? (
           <div className="flex min-w-0 items-center gap-2">
-            <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
+            {thread.worktreePath ? (
+              <FolderGit2Icon className="size-3 shrink-0 stroke-muted-foreground" />
+            ) : (
+              <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
+            )}
             <MiddleTruncate value={thread.branch} className="flex" />
           </div>
         ) : null}
@@ -1469,13 +1473,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </div>
             {metaLineEmpty ? null : (
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-                {thread.branch ? (
-                  <>
-                    <ThreadWorktreeIndicator thread={thread} />
-                    <span className="flex min-w-0 flex-1">
-                      <MiddleTruncate value={thread.branch} showTitle={false} />
-                    </span>
-                  </>
+                {/* The PR takes the branch's slot; the hover card still shows the branch. */}
+                {prBadge ? (
+                  prBadge
+                ) : thread.branch ? (
+                  <span className="flex min-w-0 flex-1">
+                    <MiddleTruncate value={thread.branch} showTitle={false} />
+                  </span>
                 ) : showsScratchMachine ? (
                   <>
                     <EnvironmentMachineIcon
@@ -1489,7 +1493,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   <span className="flex-1" />
                 )}
                 {terminalStatusIcon}
-                {prBadge}
                 {diff ? (
                   <span className="shrink-0 font-mono">
                     <span className="text-diff-addition-foreground">
