@@ -50,6 +50,7 @@ import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import {
   knownProviderFailureMessage,
   makeProviderFailure,
+  NATIVE_SESSION_STALLED_FAILURE_CODE,
 } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
@@ -752,15 +753,48 @@ export const layer: Layer.Layer<
             handoff.delivery?.nativeThreadId === providerThread.nativeThreadRef?.nativeId &&
             handoff.delivery?.status === "pending",
         );
+        // A stall on the current native session makes resume repeat it; earlier sessions were replaced.
+        const lastNativeAttempt = projection.attempts
+          .filter(
+            (candidate) =>
+              candidate.id !== attempt.id &&
+              candidate.providerThreadId === providerThread.id &&
+              candidate.nativeThreadId === providerThread.nativeThreadRef?.nativeId &&
+              candidate.startedAt !== null,
+          )
+          .reduce<(typeof projection.attempts)[number] | undefined>(
+            (latest, candidate) =>
+              latest?.startedAt != null &&
+              candidate.startedAt != null &&
+              DateTime.isGreaterThanOrEqualTo(latest.startedAt, candidate.startedAt)
+                ? latest
+                : candidate,
+            undefined,
+          );
+        const stalledNativeSession =
+          lastNativeAttempt?.status === "failed" &&
+          (yield* projectionStore.getTurnStartHistory(input.threadId, [
+            lastNativeAttempt.runId,
+          ])).some(
+            (item) =>
+              item.type === "error" &&
+              item.failure.code === NATIVE_SESSION_STALLED_FAILURE_CODE &&
+              projection.providerTurns.some(
+                (turn) =>
+                  turn.id === item.providerTurnId && turn.runAttemptId === lastNativeAttempt.id,
+              ),
+          );
         const resumed = yield* Effect.result(
-          uncertainDelivery
+          uncertainDelivery || stalledNativeSession
             ? Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: session.driver,
                   threadId: projection.thread.id,
                   providerThreadId: providerThread.id,
                   runId,
-                  cause: "Uncertain native history injection",
+                  cause: uncertainDelivery
+                    ? "Uncertain native history injection"
+                    : "Stalled native session",
                 }),
               )
             : session.resumeThread({
@@ -778,7 +812,11 @@ export const layer: Layer.Layer<
           driver: session.driver,
           providerThreadId: providerThread.id,
           runId,
-          reason: uncertainDelivery ? "uncertain_history_delivery" : "resume_failed",
+          reason: uncertainDelivery
+            ? "uncertain_history_delivery"
+            : stalledNativeSession
+              ? "native_session_stalled"
+              : "resume_failed",
           errorTag: resumed.failure._tag,
         });
         const replacement = yield* loadFromProvider(

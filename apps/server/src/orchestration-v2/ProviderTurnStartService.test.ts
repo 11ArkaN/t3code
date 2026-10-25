@@ -39,6 +39,11 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import {
+  makeProviderFailure,
+  makeProviderFailureTurnItem,
+  NATIVE_SESSION_STALLED_FAILURE_CODE,
+} from "@t3tools/provider-core/server/failure";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -270,6 +275,7 @@ function makeLocalCommandHarness(input: {
   readonly interruptRunBeforeOpenFailure?: boolean;
   readonly writeFailure?: unknown;
   readonly failReadsAfterRunning?: boolean;
+  readonly readableHistory?: boolean;
   readonly previousTurn?: {
     readonly runStatus: "failed" | "completed";
     readonly turnStatus: "running" | "completed" | "interrupted";
@@ -670,6 +676,7 @@ function makeLocalCommandHarness(input: {
   const getThreadRecords = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getThreadRecords"]>(() =>
     Effect.succeed(projection),
   );
+  const write = vi.fn<EventSink.EventSinkV2Shape["write"]>(() => Effect.succeed([]));
   const getTurnStartContext = vi.fn(() =>
     Effect.succeed({
       ...projection,
@@ -683,10 +690,15 @@ function makeLocalCommandHarness(input: {
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
-          prepareProviderHandoff: () => Effect.die("history read must fail first"),
+        input.readableHistory === true
+          ? ContextHandoffService.layer.pipe(Layer.provide(IdAllocator.layer))
+          : Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
+              prepareProviderHandoff: () => Effect.die("history read must fail first"),
+            }),
+        Layer.mock(EventSink.EventSinkV2)({
+          writeIfRunCurrent,
+          ...(input.readableHistory === true ? { write } : {}),
         }),
-        Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
         layerWorktreeLocation(input.worktreesDir),
         input.fileSystem === undefined
@@ -712,13 +724,20 @@ function makeLocalCommandHarness(input: {
                   (m.text.trim().toLowerCase() !== "/compact" || m.attachments.length > 0),
               ),
             }),
-          getTurnStartHistory: () =>
-            Effect.fail(
-              new ProjectionStore.ProjectionStoreReadError({
-                threadId,
-                cause: input.historyReadFailureAfterFallback,
-              }),
-            ),
+          getTurnStartHistory: (_threadId, runIds) =>
+            input.readableHistory === true
+              ? Effect.succeed(
+                  projection.turnItems.filter(
+                    (item) =>
+                      runIds === undefined || (item.runId !== null && runIds.includes(item.runId)),
+                  ),
+                )
+              : Effect.fail(
+                  new ProjectionStore.ProjectionStoreReadError({
+                    threadId,
+                    cause: input.historyReadFailureAfterFallback,
+                  }),
+                ),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open,
@@ -751,6 +770,7 @@ function makeLocalCommandHarness(input: {
     createWorktree,
     open,
     writeIfRunCurrent,
+    write,
     startRootRun,
     interruptTurn,
     tryHandlePromptCommand,
@@ -771,6 +791,122 @@ function makeLocalCommandHarness(input: {
     }).pipe(Effect.provide(layer)),
   };
 }
+
+effectIt.effect.each([
+  { case: "stalled", code: NATIVE_SESSION_STALLED_FAILURE_CODE, resumes: false },
+  { case: "overloaded", code: "overloaded", resumes: true },
+  {
+    case: "stalled on a replaced native session",
+    code: NATIVE_SESSION_STALLED_FAILURE_CODE,
+    stalledNativeId: "replaced-native-conversation",
+    resumes: true,
+  },
+  {
+    case: "stalled before a later started attempt",
+    code: NATIVE_SESSION_STALLED_FAILURE_CODE,
+    laterStartedAttempt: true,
+    resumes: true,
+  },
+])(
+  "resumes after a failed run unless its native session stalled: $case",
+  ({ code, resumes, stalledNativeId, laterStartedAttempt }) =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "Continue",
+        readableHistory: true,
+        previousTurn: { runStatus: "failed", turnStatus: "completed" },
+      });
+      const projection = harness.projection();
+      const previousRun = projection.runs.find((candidate) => candidate.ordinal === 1)!;
+      const currentAttempt = projection.attempts[0]!;
+      const providerThread = projection.providerThreads[0]!;
+      const previousProviderTurn = projection.providerTurns[0]!;
+      harness.setProjection({
+        ...projection,
+        attempts: [
+          {
+            ...currentAttempt,
+            id: previousProviderTurn.runAttemptId!,
+            runId: previousRun.id,
+            rootNodeId: previousProviderTurn.nodeId,
+            providerThreadId: providerThread.id,
+            providerTurnId: previousProviderTurn.id,
+            status: "failed",
+            nativeThreadId: stalledNativeId ?? "existing-native-conversation",
+            startedAt: DateTime.subtract(projection.updatedAt, { minutes: 1 }),
+            completedAt: projection.updatedAt,
+          },
+          ...(laterStartedAttempt === true
+            ? [
+                {
+                  ...currentAttempt,
+                  id: RunAttemptId.make("attempt-after-stall"),
+                  providerThreadId: providerThread.id,
+                  status: "completed" as const,
+                  nativeThreadId: "existing-native-conversation",
+                  startedAt: projection.updatedAt,
+                  completedAt: projection.updatedAt,
+                },
+              ]
+            : []),
+          ...projection.attempts,
+        ],
+        turnItems: [
+          makeProviderFailureTurnItem({
+            driver: providerThread.driver,
+            threadId: projection.thread.id,
+            runId: previousRun.id,
+            nodeId: previousRun.rootNodeId,
+            providerThreadId: providerThread.id,
+            providerTurnId: previousProviderTurn.id,
+            itemOrdinal: 1,
+            failure: makeProviderFailure({ class: "transport_error", code, retryable: true }),
+            occurredAt: projection.updatedAt,
+          }),
+        ],
+      });
+      const resumeThread = vi.fn(() => Effect.succeed(providerThread));
+      const ensureThread = vi.fn(
+        ({ existingProviderThread }: ProviderAdapter.ProviderAdapterV2EnsureThreadInput) =>
+          Effect.succeed({
+            ...existingProviderThread,
+            nativeThreadRef: {
+              driver: providerThread.driver,
+              nativeId: "fresh-native-conversation",
+              strength: "strong" as const,
+            },
+          }),
+      );
+      const open = harness.open.getMockImplementation()!;
+      harness.open.mockImplementation(() =>
+        open().pipe(
+          Effect.map(
+            (session) => ({ ...(session as object), ensureThread, resumeThread }) as never,
+          ),
+        ),
+      );
+
+      yield* harness.start;
+
+      expect(resumeThread).toHaveBeenCalledTimes(resumes ? 1 : 0);
+      expect(harness.startRootRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          providerThread: expect.objectContaining({
+            nativeThreadRef: expect.objectContaining({
+              nativeId: resumes ? "existing-native-conversation" : "fresh-native-conversation",
+            }),
+          }),
+        }),
+      );
+      expect(
+        harness.write.mock.calls.flatMap(([write]) =>
+          write.events.flatMap((event) =>
+            event.type === "context-handoff.updated" ? [event.payload.strategy] : [],
+          ),
+        ),
+      ).toEqual(resumes ? [] : ["full_thread_summary"]);
+    }),
+);
 
 effectIt.effect("recovers an abandoned failed turn before continuing its native conversation", () =>
   Effect.gen(function* () {
