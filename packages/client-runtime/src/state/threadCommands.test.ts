@@ -647,6 +647,50 @@ describe("settle and snooze while the environment is offline", () => {
     }),
   );
 
+  it.effect("loads every environment before refreshing an already-live shell", () =>
+    Effect.gen(function* () {
+      const other = EnvironmentId.make("other");
+      const secondStarted = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let reads = 0;
+      const storage = {
+        value: JSON.stringify({
+          entries: [
+            {
+              environmentId: other,
+              threadId: THREAD_ID,
+              commandId: "other-settle",
+              action: { type: "settle" },
+              queuedAt: "2026-09-12T10:00:00.000Z",
+              snapshotSequence: 1,
+            },
+          ],
+          operableEnvironmentIds: [other],
+        }),
+      };
+      const h = yield* makeHarness({
+        storage,
+        operateScope: null,
+        wrapStore: (store) => ({
+          ...store,
+          load: Effect.suspend(() =>
+            ++reads === 2
+              ? Deferred.succeed(secondStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(store.load),
+                )
+              : store.load,
+          ),
+        }),
+      });
+      yield* Deferred.await(secondStarted);
+      yield* Deferred.succeed(release, undefined);
+      const pending = h.commands.pendingSyncAtom(other);
+      yield* waitFor(h.registry, pending, (threads) => threads.has(THREAD_ID));
+      expect(h.registry.get(h.commands.offlineTriagePermittedAtom(other))).toBe(true);
+    }),
+  );
+
   it.effect("keeps a pending settle when snooze would discard it offline", () =>
     Effect.gen(function* () {
       const h = yield* makeHarness({ connected: false });

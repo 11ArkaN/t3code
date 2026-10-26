@@ -376,7 +376,9 @@ export function createThreadTriageOutbox<R, E>(input: {
       const registry = get.registry;
       const lifetime = registry.get(registryLifetimeAtom);
       const generation = generations.get(environmentId) ?? 0;
-      void store.run(registry, { _tag: "refresh" }).then((result) => {
+      void ensureLoaded(registry).then(async () => {
+        if (lifetime.ended || (generations.get(environmentId) ?? 0) !== generation) return;
+        const result = await store.run(registry, { _tag: "refresh" });
         if (
           lifetime.ended ||
           (generations.get(environmentId) ?? 0) !== generation ||
