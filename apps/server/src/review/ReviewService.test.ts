@@ -14,7 +14,6 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
-import * as Option from "effect/Option";
 
 import * as ServerConfig from "../config.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
@@ -69,12 +68,10 @@ function layer(input: {
     Layer.provide(
       Layer.mock(ProjectStore.ProjectStoreV2)({
         getShell: () =>
-          Effect.succeed(
-            Option.some({
-              id: ProjectId.make("project-0"),
-              workspaceRoot: input.workspaceRoot,
-            } as OrchestrationProjectShell),
-          ),
+          Effect.succeedSome({
+            id: ProjectId.make("project-0"),
+            workspaceRoot: input.workspaceRoot,
+          } as OrchestrationProjectShell),
         listShells: () =>
           projectRoots === "unavailable"
             ? Effect.fail(
