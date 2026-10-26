@@ -76,6 +76,16 @@ it("runs code-mode calls without exposing host capabilities, including after awa
   ).rejects.toThrow("Script execution timed out");
 });
 
+it("answers a code-mode call the cell does not await", async () => {
+  const answered: Array<unknown> = [];
+  const catalog = [{ name: "mock", description: "mock" }];
+  await executeCodex('tools.mock({n: 1}); text("done");', catalog, async (_, input) => {
+    answered.push(input);
+    return null;
+  });
+  assert.deepEqual(answered, [{ n: 1 }]);
+});
+
 const failed = (expect: Parameters<typeof gradeSample>[0], run: SampleRun) =>
   gradeSample(expect, run)
     .filter((check) => !check.pass)
@@ -251,6 +261,30 @@ it("rebuilds the template from this checkout and sends a child T3's task prompt"
   const prompt = buildMessages(makeSample(childCase, base)).at(-1)?.content.at(-1);
   assert.equal(prompt?.text, taskPrompt({ task: childCase.prompt, role: "implementation" }));
   assert.notEqual(prompt?.text, childCase.prompt);
+});
+
+it("replays earlier capability results with the model under test as the caller", () => {
+  const base = buildBase(template, { model: "claude-opus-5-5", keepUserInstructions: false });
+  const capabilities = {
+    inheritedProviderInstanceId: "claudeAgent",
+    inheritedModel: "claude-sonnet-5-5",
+  };
+  const testCase: McpToolUseCase = {
+    ...childCase,
+    setup: {
+      role: "top",
+      priorTurns: [
+        {
+          role: "assistant",
+          toolCalls: [{ tool: "orchestrator_capabilities", input: {}, result: capabilities }],
+        },
+      ],
+    },
+  };
+  const replayed = buildMessages(makeSample(testCase, base))
+    .flatMap((message) => message.content)
+    .find((block) => block.type === "tool_result" && String(block.content).includes("inherited"));
+  assert.include(String(replayed?.content), '"inheritedModel":"claude-opus-5-5"');
 });
 
 it("answers simple mocked commands itself and gives the simulator the sample's history", () => {

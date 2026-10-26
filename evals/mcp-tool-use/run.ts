@@ -21,6 +21,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
@@ -478,6 +479,10 @@ const buildCodexBase = (
       const env = /<environment_context>[\s\S]*?<\/environment_context>/.exec(content)?.[0];
       return env ? [message(clean(options.keepUserInstructions ? content : env), "user")] : [];
     }
+    // Only harness messages and tools. A captured turn's answers and tool calls would leak into
+    // every case.
+    if (item.type !== "message" && item.type !== "additional_tools") return [];
+    if (item.role === "assistant") return [];
     return [JSON.parse(clean(JSON.stringify(item))) as Block];
   });
   const context = buildCodexAdditionalContext(
@@ -588,9 +593,10 @@ const SHELL_TOOLS = new Set(["Bash", "Read", "Edit", "Write", "WebFetch"]);
 export const makeSample = (testCase: McpToolUseCase, base: Base): Sample => {
   const prior = testCase.setup.priorTurns ?? [];
   const priorCalls = prior.flatMap((turn) => turn.toolCalls ?? []);
+  const repo = testCase.setup.world?.repo ?? "acme/app";
   const urls = priorCalls.flatMap((call) =>
     ["link_pull_request", "watch_pull_request"].includes(call.tool) && isRecord(call.input)
-      ? [valueText(call.input.url)]
+      ? [pullRequest(repo, call.input).url]
       : [],
   );
   const taskNumbers = [...valueText(prior).matchAll(/task-(\d+)/g)].map((match) =>
@@ -662,7 +668,8 @@ const loadTools = (tools: Array<ApiTool>, id: string, found: ReadonlyArray<ApiTo
 };
 
 /** Messages for a case: reminders, context, prior turns with real tool blocks, then the prompt. */
-export const buildMessages = ({ testCase, base, tools }: Sample) => {
+export const buildMessages = (sample: Sample) => {
+  const { testCase, base, tools } = sample;
   const messages: Array<ApiMessage> = [];
   const push = (role: ApiMessage["role"], ...blocks: ReadonlyArray<Block>) => {
     const last = messages.at(-1);
@@ -698,9 +705,13 @@ export const buildMessages = ({ testCase, base, tools }: Sample) => {
       push("user", loadTools(tools, id, unloaded), text(TOOL_LOADED));
     }
     // One call per step, as most real turns run them.
-    for (const { id, name, input, result } of calls) {
+    for (const { id, name, input, result, tool } of calls) {
       push("assistant", { type: "tool_use", id, name, input });
-      push("user", toolResult(id, result));
+      const replayed =
+        normalizeToolName(tool.name) === "orchestrator_capabilities"
+          ? capabilities(sample, result)
+          : result;
+      push("user", toolResult(id, replayed));
     }
     if (turn.text) push(turn.role, text(turn.text));
   }
@@ -1239,7 +1250,9 @@ export const executeCodex = async (
     globalThis.store = (k,v) => __stored[k] = v; globalThis.load = k => __stored[k];
   })(__bridge, JSON.parse(__catalog));
   (async () => { ${code}\n })().then(() => { __done = true; }, e => { text(String(e)); __done = true; });`);
-  for (let count = 0; !context.__done && count < 128; count++) {
+  // Unawaited calls still run, as they do in Codex, so they are answered and graded too.
+  for (let count = 0; !context.__done || pending.length > 0; count++) {
+    if (count === 128) throw new Error("Code cell exceeded 128 tool calls.");
     const job = pending.shift();
     if (!job) throw new Error("Code cell stalled without a tool call.");
     const result = await answer(job.name, JSON.parse(job.input));
@@ -1247,7 +1260,6 @@ export const executeCodex = async (
     context.__result = JSON.stringify(result ?? null);
     run("__resolve(__result); delete globalThis.__resolve; delete globalThis.__result;");
   }
-  if (!context.__done) throw new Error("Code cell exceeded 128 tool calls.");
   Object.assign(saved, JSON.parse(run("JSON.stringify(__stored)")));
   return valueText(context.__output.join("\n"));
 };
@@ -1625,7 +1637,8 @@ const main = Effect.gen(function* () {
       case: { ...string, multiple: true },
       // Unset: 2 samples per case, and a 3rd when those 2 disagree.
       samples: string,
-      concurrency: { ...string, default: "4" },
+      // Samples in flight at once, across all cases.
+      concurrency: { ...string, default: "8" },
       // Unset: 6 for Claude, 10 for Codex, whose code-mode cells take more steps.
       "max-steps": string,
       effort: string,
@@ -1739,6 +1752,13 @@ const main = Effect.gen(function* () {
   const baseline = new Map(groups(previous, (row) => row.id).map(([id, r]) => [id, passRate(r)]));
   // Only a case that passed every baseline sample can stop a run; flaky ones are just reported.
   const passedBefore = (id: string) => baseline.get(id) === 1;
+  // Before the paid runs, so a missing git cannot lose their results.
+  const commit = yield* Effect.try(() =>
+    NodeChildProcess.execFileSync("git", ["describe", "--always", "--dirty"], {
+      encoding: "utf8",
+    }).trim(),
+  ).pipe(Effect.orElseSucceed(() => "unknown"));
+  const inFlight = yield* Semaphore.make(flags.concurrency);
   const runOne = (testCase: McpToolUseCase) => {
     const { id, kind, pattern } = testCase;
     const identity = { id, kind, pattern, role: testCase.setup.role };
@@ -1747,6 +1767,7 @@ const main = Effect.gen(function* () {
       .flatMap((value) => [value, value.replace(/^Bearer /i, "")])
       .filter(Boolean);
     return runSample(testCase, config, baseFor(testCase)).pipe(
+      inFlight.withPermits(1),
       Effect.matchCause({
         onFailure: (cause) => ({
           ...identity,
@@ -1797,9 +1818,6 @@ const main = Effect.gen(function* () {
       ),
     { concurrency: flags.concurrency, discard: true },
   ).pipe(Effect.ignore);
-  const commit = NodeChildProcess.execFileSync("git", ["describe", "--always", "--dirty"], {
-    encoding: "utf8",
-  }).trim();
   const samples = flags.samples === undefined ? "2-3 (adaptive)" : flags.samples;
   const header = `Commit \`${commit}\`, ${flags.model} at ${effort} effort, user instructions ${flags["user-instructions"]}, ${samples} samples per case, template \`${path.basename(templatePath)}\``;
   const finished = new Set(rows.map((row) => row.id)).size;

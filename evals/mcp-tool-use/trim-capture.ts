@@ -119,6 +119,9 @@ const textOf = ({ content }: Item) =>
 
 const trimCodex = (native: Native) => {
   const input = native.input.flatMap(({ id: _id, ...item }): Array<Item> => {
+    // A captured turn's own answers and tool calls are not part of the harness.
+    if (item.type !== "message" && item.type !== "additional_tools") return [];
+    if (item.role === "assistant") return [];
     const text = textOf(item);
     // T3's own text comes from source, and the prompt from each case.
     if (text.includes("<t3_code_")) return [];
