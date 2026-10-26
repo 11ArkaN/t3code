@@ -9,15 +9,6 @@ export const isPdfAssetUrl = (url: string) => {
   return pathname.startsWith("/api/assets/") && /\.pdf$/i.test(pathname);
 };
 
-const fileName = (url: string) => {
-  const segment = new URL(url).pathname.split("/").at(-1) ?? "";
-  try {
-    return decodeURIComponent(segment) || "PDF";
-  } catch {
-    return segment || "PDF";
-  }
-};
-
 export async function installPdfDocumentNavigation(cdp: CDPSession) {
   const nativeViewer = await cdp.send("Runtime.evaluate", {
     expression: "navigator.pdfViewerEnabled",
@@ -26,43 +17,37 @@ export async function installPdfDocumentNavigation(cdp: CDPSession) {
   if (nativeViewer.result?.value === true) return;
   const { frameTree } = await cdp.send("Page.getFrameTree");
   // The shell cannot open PDFs. Commit a document at the original URL so the
-  // client can embed signed asset bytes, or say why any other PDF cannot show,
-  // while Back and Forward keep working.
+  // client can embed its signed bytes while Back and Forward keep working.
   cdp.on("Fetch.requestPaused", (event) => {
     const { requestId, request, frameId } = event;
     const proceed = () => cdp.send("Fetch.continueRequest", { requestId });
     void (async () => {
-      const status = event.responseStatusCode;
       if (
         request.method !== "GET" ||
         frameId !== frameTree.frame.id ||
-        status === undefined ||
-        (status >= 300 && status < 400)
+        !isPdfAssetUrl(request.url)
       ) {
         await proceed();
         return;
       }
-      const header = (name: string) =>
-        event.responseHeaders
-          ?.find((entry) => entry.name.toLowerCase() === name)
-          ?.value.split(";", 1)[0]
-          ?.trim()
-          .toLowerCase();
-      const isPdf = status >= 200 && status < 300 && header("content-type") === "application/pdf";
-      const asset = isPdfAssetUrl(request.url);
-      if (!asset && (!isPdf || header("content-disposition") === "attachment")) {
+      const status = event.responseStatusCode;
+      if (status === undefined || (status >= 300 && status < 400)) {
         await proceed();
         return;
       }
-      if (!isPdf) {
+      const contentType = event.responseHeaders
+        ?.find((header) => header.name.toLowerCase() === "content-type")
+        ?.value.split(";", 1)[0]
+        ?.trim()
+        .toLowerCase();
+      if (status < 200 || status >= 300 || contentType !== "application/pdf") {
         // Reach the browser's requestfailed path instead of committing a successful PDF tab.
         await cdp.send("Fetch.failRequest", { requestId, errorReason: "Failed" });
         return;
       }
-      const name = escapeHtml(fileName(request.url));
-      const message = asset
-        ? "This PDF is displayed in the connected client."
-        : `This PDF cannot be displayed because this browser has no PDF viewer. Fetch ${escapeHtml(request.url)} directly to read it.`;
+      const name = escapeHtml(
+        decodeURIComponent(new URL(request.url).pathname.split("/").at(-1) ?? "PDF"),
+      );
       await cdp.send("Fetch.fulfillRequest", {
         requestId,
         responseCode: 200,
@@ -73,14 +58,15 @@ export async function installPdfDocumentNavigation(cdp: CDPSession) {
           { name: "X-Content-Type-Options", value: "nosniff" },
         ],
         body: Buffer.from(
-          `<!doctype html><html><head><title>${name}</title></head><body><h1>${name}</h1><p>${message}</p></body></html>`,
+          `<!doctype html><html><head><title>${name}</title></head><body><h1>${name}</h1><p>This PDF is displayed in the connected client.</p></body></html>`,
         ).toString("base64"),
       });
     })().catch(() => proceed().catch(constVoid));
   });
-  // Any site can serve a PDF, with or without a .pdf path, so every document
-  // response pauses; subresources such as the client's PDF fetch never do.
+  // Only document navigations pause; the client's PDF fetch gets the original bytes.
   await cdp.send("Fetch.enable", {
-    patterns: [{ urlPattern: "*", resourceType: "Document", requestStage: "Response" }],
+    patterns: [
+      { urlPattern: "*/api/assets/*", resourceType: "Document", requestStage: "Response" },
+    ],
   });
 }
