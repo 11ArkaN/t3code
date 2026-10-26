@@ -6959,7 +6959,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             responseCapability: {
               type: "live",
               providerSessionId,
-              ...(input.questions === undefined ? { supportsFeedback: true } : {}),
+              ...(input.questions === undefined && input.requestKind !== "mcp-elicitation"
+                ? { supportsFeedback: true }
+                : {}),
             },
             createdAt,
             resolvedAt: null,
@@ -9581,6 +9583,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           request: ElicitationRequest,
           callbackOptions: Parameters<NonNullable<ClaudeQueryOptions["onElicitation"]>>[1],
         ) {
+          if (callbackOptions.signal.aborted)
+            return { action: "cancel" } satisfies ElicitationResult;
           const acceptance = claudeMcpElicitationAcceptance(request);
           const context = yield* Ref.get(activeTurn);
           if (acceptance === undefined || context === null) {
@@ -9658,6 +9662,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               }),
             ),
           );
+          if (resolved === "cancel" && callbackOptions.signal.aborted) {
+            const now = yield* DateTime.now;
+            yield* emitProviderEvent({
+              type: "node.updated",
+              driver: CLAUDE_PROVIDER,
+              node: { ...artifacts.node, status: "cancelled", completedAt: now },
+            });
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver: CLAUDE_PROVIDER,
+              turnItem: {
+                ...artifacts.turnItem,
+                status: "cancelled",
+                completedAt: now,
+                updatedAt: now,
+              },
+            });
+            yield* emitProviderEvent({
+              type: "runtime_request.updated",
+              driver: CLAUDE_PROVIDER,
+              runtimeRequest: { ...artifacts.request, status: "cancelled", resolvedAt: now },
+            });
+          }
           // Never null: the SDK reads null as answered out of band and leaves
           // the server waiting. Every accept is one-time; no grant is offered.
           return resolved === "accept"

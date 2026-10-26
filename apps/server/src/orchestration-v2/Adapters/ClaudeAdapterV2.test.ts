@@ -4320,9 +4320,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         harness.events.flatMap((event) =>
           event.type === "runtime_request.updated" ? [event.runtimeRequest] : [],
         );
+      let requestNumber = 0;
       const elicit = (request: ElicitationRequest, signal = new AbortController().signal) =>
         Effect.promise(() =>
-          onElicitation(request, { signal, requestId: `sdk-${runtimeRequests().length}` }),
+          onElicitation(request, { signal, requestId: `sdk-${requestNumber++}` }),
         ).pipe(Effect.forkScoped);
       const awaitCard = Effect.fnUntraced(function* (count: number) {
         const event = yield* Queue.take(harness.runtimeRequestReceipts);
@@ -4338,6 +4339,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const answer = yield* elicit(approvalOnly);
         const request = yield* awaitCard(1);
         assert.equal(request.kind, "mcp-elicitation");
+        assert.isTrue(request.responseCapability.type === "live");
+        if (request.responseCapability.type === "live") {
+          assert.isUndefined(request.responseCapability.supportsFeedback);
+        }
         const card = harness.events.findLast(
           (event) =>
             event.type === "turn_item.updated" && event.turnItem.type === "approval_request",
@@ -4409,17 +4414,44 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer)),
     );
 
-    it.effect("cancels when the SDK aborted before the card was answered", () =>
+    it.effect("cancels an already-aborted request without a card", () =>
       Effect.gen(function* () {
-        const { harness, elicit, awaitCard } = yield* startElicitationTurn();
+        const { harness, elicit, awaitCard, runtimeRequests } = yield* startElicitationTurn();
         const aborted = yield* Effect.sync(() => {
           const controller = new AbortController();
           controller.abort();
           return controller.signal;
         });
         const answer = yield* elicit(approvalOnly, aborted);
-        const request = yield* awaitCard(1);
         assert.deepEqual(yield* Fiber.join(answer), { action: "cancel" });
+        assert.isEmpty(runtimeRequests());
+        const next = yield* elicit(approvalOnly);
+        const card = yield* awaitCard(1);
+        assert.equal(card.nativeRequestRef?.nativeId, "mcp-elicitation:sdk-1");
+        yield* harness.runtime.respondToRuntimeRequest({ requestId: card.id, decision: "accept" });
+        assert.deepEqual(yield* Fiber.join(next), { action: "accept", content: {} });
+      }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    );
+
+    it.effect("withdraws an open card when the SDK cancels while the session continues", () =>
+      Effect.gen(function* () {
+        const { harness, elicit, awaitCard } = yield* startElicitationTurn();
+        const controller = yield* Effect.sync(() => new AbortController());
+        const answer = yield* elicit(approvalOnly, controller.signal);
+        const request = yield* awaitCard(1);
+        yield* Effect.sync(() => controller.abort());
+        assert.deepEqual(yield* Fiber.join(answer), { action: "cancel" });
+        const cancelled = yield* Queue.take(harness.runtimeRequestReceipts);
+        assert.equal(cancelled.runtimeRequest.id, request.id);
+        assert.equal(cancelled.runtimeRequest.status, "cancelled");
+        assert.equal(
+          harness.events.findLast((e) => e.type === "node.updated")?.node.status,
+          "cancelled",
+        );
+        assert.equal(
+          harness.events.findLast((e) => e.type === "turn_item.updated")?.turnItem.status,
+          "cancelled",
+        );
         yield* Effect.flip(
           harness.runtime.respondToRuntimeRequest({ requestId: request.id, decision: "accept" }),
         );
