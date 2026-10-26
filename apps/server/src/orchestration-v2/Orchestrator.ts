@@ -146,7 +146,11 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
-import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
+import {
+  isAutomaticCompletionRun,
+  nextAutomaticCompletionQueuePosition,
+  queuedRunsInDeliveryOrder,
+} from "./QueuedRunOrder.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import {
   endOrphanedNativeSubagent,
@@ -5614,12 +5618,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         queuePosition:
           goalStopRunId !== undefined
             ? 1
-            : Math.max(
-                0,
-                ...projection.runs
-                  .filter((candidate) => candidate.status === "queued")
-                  .map((candidate) => candidate.queuePosition ?? candidate.ordinal),
-              ) + 1,
+            : delegatedCompletion !== undefined
+              ? nextAutomaticCompletionQueuePosition(projection)
+              : Math.max(
+                  0,
+                  ...projection.runs
+                    .filter((candidate) => candidate.status === "queued")
+                    .map((candidate) => candidate.queuePosition ?? candidate.ordinal),
+                ) + 1,
         requestedAt: now,
         startedAt: null,
         completedAt: null,
@@ -8484,19 +8490,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: "Automatic completion deliveries cannot be reordered.",
       });
     }
-    const automaticRuns = queuedRuns.filter((run) => isAutomaticCompletionRun(projection, run));
-    if (
-      command.beforeRunId !== null &&
-      automaticRuns.some((run) => run.id === command.beforeRunId)
-    ) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "Queued messages cannot be reordered ahead of automatic completion delivery.",
-      });
-    }
-    const reorderableRuns = queuedRuns.filter((run) => !isAutomaticCompletionRun(projection, run));
-    const withoutMoving = reorderableRuns.filter((run) => run.id !== command.runId);
+    const withoutMoving = queuedRuns.filter((run) => run.id !== command.runId);
     const beforeIndex =
       command.beforeRunId === null
         ? withoutMoving.length
@@ -8509,7 +8503,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     const reordered = [
-      ...automaticRuns,
       ...withoutMoving.slice(0, beforeIndex),
       moving,
       ...withoutMoving.slice(beforeIndex),
@@ -10509,10 +10502,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   }) {
     const { command, events, effects, projection, now, targetRunId } = input;
     const others = queuedRunsInDeliveryOrder(projection).filter(
-      (run) => run.id !== input.queuedRunId && !isAutomaticCompletionRun(projection, run),
+      (run) => run.id !== input.queuedRunId,
     );
-    for (const [index, run] of others.entries()) {
-      const queuePosition = index + 2;
+    let visiblePosition = 1;
+    for (const run of others) {
+      // Completions share the goal command's position, which keeps them first.
+      const queuePosition = isAutomaticCompletionRun(projection, run) ? 1 : ++visiblePosition;
       if (run.queuePosition === queuePosition) continue;
       yield* emit(
         events,
