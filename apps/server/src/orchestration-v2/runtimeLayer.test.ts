@@ -30,7 +30,6 @@ import {
   RunId,
   ScheduledTaskId,
   ThreadId,
-  VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
@@ -673,50 +672,59 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
     }).pipe(Effect.provide(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
   );
 
-  it.effect("checkpoint cleanup skips missing directories but fails when detection fails", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const existing = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-checkpoint-detect-",
-      });
-      const cleanup = (cwds: ReadonlyArray<string>) =>
-        ResourceCleanupService.ResourceCleanupService.pipe(
-          Effect.flatMap((service) =>
-            service.cleanupCheckpoints({
-              threadId: ThreadId.make("checkpoint-detect-thread"),
-              cwds,
-              scopeIds: [],
-            }),
-          ),
-          Effect.provide(
-            Layer.fresh(ResourceCleanupService.layer).pipe(
-              Layer.provide(
-                Layer.mergeAll(
-                  Layer.mock(CheckpointStore.CheckpointStore)({
-                    isGitRepository: (cwd) =>
-                      Effect.fail(
-                        new VcsProcessTimeoutError({
-                          operation: "GitVcsDriver.isInsideWorkTree",
-                          command: "git",
-                          cwd,
-                          timeoutMs: 5_000,
-                        }),
-                      ),
-                  }),
-                  Layer.mock(PreviewManager.PreviewManager)({}),
-                  Layer.mock(TerminalManager.TerminalManager)({}),
-                  Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
-                  layerServerConfig,
-                ),
-              ),
-            ),
-          ),
+  it.effect(
+    "checkpoint cleanup skips non-repositories but retries a repository Git cannot read",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const vcsProcess = yield* VcsProcess.VcsProcess;
+        const cleanup = yield* ResourceCleanupService.ResourceCleanupService;
+        const parent = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-checkpoint-detect-",
+        });
+        const repo = `${parent}/repo`;
+        const plain = `${parent}/plain`;
+        yield* fileSystem.makeDirectory(repo);
+        yield* fileSystem.makeDirectory(plain);
+        const git = (args: ReadonlyArray<string>) =>
+          vcsProcess
+            .run({ operation: "runtimeLayer.test.git", command: "git", cwd: repo, args })
+            .pipe(Effect.map((result) => result.stdout.trim()));
+        yield* git(["init"]);
+        yield* git([
+          "-c",
+          "user.name=T3",
+          "-c",
+          "user.email=t3@example.com",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "initial",
+        ]);
+        const threadId = ThreadId.make("checkpoint-detect-thread");
+        const owned = checkpointRefForThreadTurn(threadId, 1);
+        const kept = checkpointRefForThreadTurn(ThreadId.make("checkpoint-detect-other"), 1);
+        yield* git(["update-ref", owned, "HEAD"]);
+        yield* git(["update-ref", kept, "HEAD"]);
+        const run = (cwds: ReadonlyArray<string>) =>
+          cleanup.cleanupCheckpoints({ threadId, cwds, scopeIds: [] });
+
+        yield* run([`${parent}/removed-worktree`, plain]);
+
+        const configPath = `${repo}/.git/config`;
+        const config = yield* fileSystem.readFileString(configPath);
+        yield* fileSystem.writeFileString(configPath, `${config}[broken\n`);
+        const exit = yield* Effect.exit(run([repo]));
+        assert.isTrue(Exit.isFailure(exit), "an unreadable repository must stay retryable");
+        yield* fileSystem.writeFileString(configPath, config);
+        assert.deepEqual(
+          (yield* git(["for-each-ref", "--format=%(refname)", "refs/t3/"])).split("\n").toSorted(),
+          [owned, kept].toSorted(),
         );
 
-      yield* cleanup([`${existing}/removed-worktree`]);
-      const exit = yield* Effect.exit(cleanup([existing]));
-      assert.isTrue(Exit.isFailure(exit), "a detection failure must stay retryable");
-    }).pipe(Effect.provide(NodeServices.layer)),
+        yield* run([repo]);
+        assert.equal(yield* git(["for-each-ref", "--format=%(refname)", "refs/t3/"]), kept);
+      }).pipe(Effect.provide(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
   );
 
   it.effect("waits for an in-flight thread update before planning deletion", () =>

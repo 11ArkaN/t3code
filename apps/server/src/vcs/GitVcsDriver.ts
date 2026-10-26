@@ -1379,12 +1379,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             detail: `Refusing to delete refs below ${invalid}.`,
           });
         }
+        // Only Git's own verdict skips a cwd; any other probe failure surfaces from the deletes below.
+        const probe = yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["rev-parse", "--git-dir"],
+          env: { LC_ALL: "C" },
+          allowNonZeroExit: true,
+        }).pipe(Effect.catchIf(isMissingExecutable, () => Effect.succeed(null)));
+        if (
+          probe === null ||
+          (probe.exitCode !== 0 && /not a git repository/i.test(probe.stderr))
+        ) {
+          return;
+        }
         // One transaction per batch: a locked ref fails the deletion instead of being skipped.
         const deleteRefs = (refs: ReadonlyArray<string>) =>
           execute({
             operation,
             cwd: input.cwd,
-            args: ["update-ref", "--stdin"],
+            args: ["update-ref", "--no-deref", "--stdin"],
             stdin: refs.map((ref) => `delete ${ref}\n`).join(""),
           });
         if (input.checkpointRefs.length > 0) yield* deleteRefs(input.checkpointRefs);

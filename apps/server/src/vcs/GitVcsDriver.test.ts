@@ -196,6 +196,29 @@ it.effect("checkpoint ref cleanup deletes namespaces whose listing exceeds the o
   }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
 );
 
+it.effect("checkpoint ref cleanup deletes a symbolic ref without its target", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-checkpoint-symref-" });
+    const { git } = yield* makeCheckpointFixture(driver, cwd);
+    const kept = "refs/t3/checkpoints/kept/turn/1";
+    yield* git(["update-ref", kept, "HEAD"]);
+    yield* git(["symbolic-ref", "refs/t3/checkpoints/deleted/turn/1", kept]);
+
+    yield* driver.checkpoints.deleteCheckpointRefs({
+      cwd,
+      checkpointRefs: [],
+      refNamespaces: ["refs/t3/checkpoints/deleted/"],
+    });
+
+    assert.equal(
+      (yield* git(["for-each-ref", "--format=%(refname)", "refs/t3/"])).stdout,
+      `${kept}\n`,
+    );
+  }).pipe(Effect.scoped, Effect.provide(layerGitContract)),
+);
+
 it.effect("checkpoint capture skips untracked nested repositories without a commit", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;

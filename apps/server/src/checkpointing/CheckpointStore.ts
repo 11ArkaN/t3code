@@ -40,7 +40,11 @@ export interface ListAuthoredPathsInput {
 export interface DeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
-  readonly refNamespaces?: ReadonlyArray<string>;
+}
+
+export interface DeleteCheckpointRefNamespacesInput {
+  readonly cwd: string;
+  readonly refNamespaces: ReadonlyArray<string>;
 }
 
 export class CheckpointStore extends Context.Service<
@@ -71,6 +75,11 @@ export class CheckpointStore extends Context.Service<
 
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
+    ) => Effect.Effect<void, CheckpointStoreError>;
+
+    /** Skips cwds Git reports as non-repositories; detection would also hide unreadable ones. */
+    readonly deleteCheckpointRefNamespaces: (
+      input: DeleteCheckpointRefNamespacesInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
   }
 >()("t3/checkpointing/CheckpointStore") {}
@@ -144,6 +153,13 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const deleteCheckpointRefNamespaces: CheckpointStore["Service"]["deleteCheckpointRefNamespaces"] =
+    Effect.fn("deleteCheckpointRefNamespaces")(function* (input) {
+      const checkpoints = (yield* vcsRegistry.get("git")).checkpoints;
+      if (!checkpoints) return;
+      return yield* checkpoints.deleteCheckpointRefs({ ...input, checkpointRefs: [] });
+    });
+
   return CheckpointStore.of({
     isGitRepository,
     captureCheckpoint,
@@ -152,6 +168,7 @@ export const make = Effect.gen(function* () {
     diffCheckpoints,
     listAuthoredPaths,
     deleteCheckpointRefs,
+    deleteCheckpointRefNamespaces,
   });
 });
 
