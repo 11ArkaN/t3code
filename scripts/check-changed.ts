@@ -139,25 +139,6 @@ for (const file of code) {
   }
 }
 
-// knip:check cannot be scoped to a package. Any code change can leave a file,
-// export, or dependency unused (removing the last import of a helper does), so
-// it runs whenever code or a manifest changes.
-const runKnip = files.some(
-  (file) => CODE.test(file) || NodePath.basename(file) === "package.json" || file === "knip.jsonc",
-);
-// CI runs knip:check as one script of `knip ... && knip ...` passes. The passes
-// do not depend on each other, so they run side by side here.
-const knipCheck: string = JSON.parse(
-  NodeFS.readFileSync(NodePath.join(root, "package.json"), "utf8"),
-).scripts["knip:check"];
-const knipPasses = knipCheck.split(" && ").map((command, index, all) => {
-  const [bin, ...args] = command.trim().split(/\s+/);
-  if (bin !== "knip" || /["'$\\|;&<>]/.test(command)) {
-    throw new Error(`check:changed cannot split knip:check: ${command}`);
-  }
-  return { name: `knip ${index + 1}/${all.length}`, args: ["exec", "knip", ...args] };
-});
-
 // A version bump can leave a patch unused, causing pnpm to reject the install
 // with ERR_PNPM_UNUSED_PATCH. Check it here as Release Smoke does in CI.
 const runPatchCheck = files.some(
@@ -231,7 +212,7 @@ const steps = [
     args: ["fmt", "--check", "--no-error-on-unmatched-pattern", ...present],
   },
   code.length > 0 && { name: "lint", args: ["lint", ...code] },
-  ...(runKnip ? knipPasses : []),
+  { name: "knip", args: ["run", "knip:check"] },
   ...graphql.map((dir) => ({
     name: `graphql (${dir})`,
     args: ["run", "--filter", `./${dir}`, "generate", "--check"],
@@ -297,7 +278,6 @@ const ciOnly = Object.entries({
 }).flatMap(([job, runs]) => (runs ? [job] : []));
 if (ciOnly.length > 0) summary.push(`  CI also runs: ${ciOnly.join(", ")}`);
 if (!runPatchCheck) summary.push("  unused patch check skipped: no dependency files changed");
-if (!runKnip) summary.push("  knip skipped: no code or manifest changed");
 console.log(`\n${summary.join("\n")}`);
 // exitCode, not exit(): piped stdout is asynchronous on macOS, and exit()
 // would cut off a failing step's output.
