@@ -125,6 +125,18 @@ describe("evaluatePullRequestWatch", () => {
     assert.isFalse(unread.next.passed);
     const read = evaluatePullRequestWatch(unread.next, detail({ checks: [bot] }), noRemarks);
     assert.deepEqual(read.changes, [{ kind: "checks-passed", count: 1, required: false }]);
+    for (const status of ["failure", "pending"] as const) {
+      const blocked = evaluatePullRequestWatch(
+        read.next,
+        detail({ checks: [{ ...bot, status }, unknown] }),
+        noRemarks,
+      );
+      assert.isFalse(blocked.next.passed);
+      assert.deepEqual(
+        evaluatePullRequestWatch(blocked.next, detail({ checks: [bot] }), noRemarks).changes,
+        [{ kind: "checks-passed", count: 1, required: false }],
+      );
+    }
   });
 
   it("still reports failures beside workflows awaiting approval", () => {
