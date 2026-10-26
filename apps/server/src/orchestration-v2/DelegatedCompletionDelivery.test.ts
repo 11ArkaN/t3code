@@ -1140,6 +1140,102 @@ const seedRestartCancelledChild = (input: {
 it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
   "subagent follow-ups",
   (it) => {
+    it.effect(
+      "keeps a checkpoint completion committed between an acknowledge's read and write",
+      () =>
+        Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const sink = yield* EventSink.EventSinkV2;
+          const now = yield* DateTime.now;
+          const threadId = ThreadId.make("thread:ack-capture-race");
+          const runId = RunId.make("run:ack-capture-race");
+          const taskId = NodeId.make("node:ack-capture-race-task");
+          const checkpointId = CheckpointId.make("checkpoint:ack-capture-race");
+          yield* seedParentWithTerminalTask({
+            threadId,
+            projectId: ProjectId.make("project:ack-capture-race"),
+            runId,
+            rootNodeId: NodeId.make("node:ack-capture-race-root"),
+            taskId,
+            deliveryState: "delivered",
+            completionWake: "always",
+            deliveryTaskIds: [taskId],
+            now,
+          });
+          const parent = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
+          const waiting = { ...parent, status: "waiting" as const };
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("event:ack-capture-waiting"),
+                type: "run.updated",
+                threadId,
+                runId,
+                occurredAt: now,
+                payload: waiting,
+              },
+            ],
+          });
+          const commit = sink.commitCommand;
+          let captured = false;
+          yield* Effect.acquireUseRelease(
+            Effect.sync(() =>
+              vi.spyOn(sink, "commitCommand").mockImplementation((input) =>
+                Effect.gen(function* () {
+                  if (
+                    !captured &&
+                    input.commandType === "delegated_task.completion-delivery.acknowledge"
+                  ) {
+                    captured = true;
+                    // Commit capture after the acknowledge planned its stale waiting snapshot.
+                    const { delegatedCompletion: _cohort, ...captureRun } = waiting;
+                    yield* commit({
+                      commandId: CommandId.make("command:ack-capture-race"),
+                      threadId,
+                      commandType: "checkpoint.capture",
+                      acceptedAt: now,
+                      effects: [],
+                      events: [
+                        {
+                          id: EventId.make("event:ack-capture-completed"),
+                          type: "run.updated",
+                          threadId,
+                          runId,
+                          occurredAt: now,
+                          payload: {
+                            ...captureRun,
+                            status: "completed",
+                            completedAt: now,
+                            checkpointId,
+                          },
+                        },
+                      ],
+                    });
+                  }
+                  return yield* commit(input);
+                }),
+              ),
+            ),
+            () =>
+              orchestrator.dispatch({
+                type: "delegated_task.completion-delivery.acknowledge",
+                commandId: CommandId.make("command:ack-capture-race:ack"),
+                parentThreadId: threadId,
+                taskId,
+                observedByRunId: runId,
+              }),
+            (spy) => Effect.sync(() => spy.mockRestore()),
+          );
+          assert.isTrue(captured);
+          const finished = yield* orchestrator.getThreadProjection(threadId);
+          const completed = finished.runs.find((run) => run.id === runId)!;
+          assert.equal(completed.status, "completed");
+          assert.deepEqual(completed.completedAt, now);
+          assert.equal(completed.checkpointId, checkpointId);
+          assert.isNull(completed.delegatedCompletion?.delivery);
+        }),
+    );
+
     it.effect("keeps a checkpoint completion committed between finalize's read and write", () =>
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
