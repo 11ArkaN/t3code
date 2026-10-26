@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import {
+  CheckpointId,
   EnvironmentId,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -330,6 +331,8 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     }) => Effect.Effect<void>;
     readonly hasStaleCredentials?: Effect.Effect<boolean>;
     readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
+    readonly rollbackThread?: ProviderAdapter.ProviderAdapterV2SessionRuntime["rollbackThread"];
+    readonly injectHistory?: ProviderAdapter.ProviderAdapterV2SessionRuntime["injectHistory"];
     readonly beforeResume?: Effect.Effect<void>;
     readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
     readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
@@ -461,7 +464,9 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
             ),
           respondToRuntimeRequest: () => Effect.void,
           readThreadSnapshot: () => unimplemented("readThreadSnapshot unused in test"),
-          rollbackThread: () => unimplemented("rollbackThread unused in test"),
+          rollbackThread:
+            options.rollbackThread ?? (() => unimplemented("rollbackThread unused in test")),
+          ...(options.injectHistory === undefined ? {} : { injectHistory: options.injectHistory }),
           forkThread: () => unimplemented("forkThread unused in test"),
         } satisfies ProviderAdapter.ProviderAdapterV2SessionRuntime;
       }),
@@ -491,6 +496,8 @@ function layerTest(input: {
   };
   readonly hasStaleCredentials?: Effect.Effect<boolean>;
   readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
+  readonly rollbackThread?: ProviderAdapter.ProviderAdapterV2SessionRuntime["rollbackThread"];
+  readonly injectHistory?: ProviderAdapter.ProviderAdapterV2SessionRuntime["injectHistory"];
   readonly beforeResume?: Effect.Effect<void>;
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
@@ -522,6 +529,8 @@ function layerTest(input: {
         : { hasStaleCredentials: input.hasStaleCredentials }),
       ...(input.beforeResume === undefined ? {} : { beforeResume: input.beforeResume }),
       ...(input.mcpApps === undefined ? {} : { mcpApps: input.mcpApps }),
+      ...(input.rollbackThread === undefined ? {} : { rollbackThread: input.rollbackThread }),
+      ...(input.injectHistory === undefined ? {} : { injectHistory: input.injectHistory }),
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
       ...(input.beforeOpen === undefined ? {} : { beforeOpen: input.beforeOpen }),
@@ -3574,8 +3583,17 @@ it.effect.each(["startTurn", "compactThread"] as const)(
       const state = yield* Ref.make(emptyState);
       const stale = yield* Ref.make(false);
       const background = yield* Ref.make(false);
-      const toolEntered = yield* Deferred.make<void>();
-      const toolContinue = yield* Deferred.make<void>();
+      const mutationGates = yield* Queue.unbounded<{
+        readonly entered: Deferred.Deferred<void>;
+        readonly resume: Deferred.Deferred<void>;
+      }>();
+      const awaitMutation = Queue.take(mutationGates).pipe(
+        Effect.flatMap((gate) =>
+          Deferred.succeed(gate.entered, undefined).pipe(
+            Effect.andThen(Deferred.await(gate.resume)),
+          ),
+        ),
+      );
       const resumeEntered = yield* Deferred.make<void>();
       const resumeContinue = yield* Deferred.make<void>();
       const pauseResume = yield* Ref.make(false);
@@ -3672,15 +3690,43 @@ it.effect.each(["startTurn", "compactThread"] as const)(
         assert.strictEqual(yield* open(b), first);
         yield* Ref.set(background, false);
         const toolInput = { providerThread, server: "app", tool: "save", arguments: {} };
-        const appCall = yield* first.mcpApps!.callTool(toolInput).pipe(Effect.forkChild);
-        yield* Deferred.await(toolEntered);
-        assert.strictEqual(yield* open(b), first);
-        yield* Deferred.succeed(toolContinue, undefined);
-        assert.deepEqual(yield* Fiber.join(appCall), { content: [] });
+        const rollbackInput = {
+          providerThread,
+          providerThreadTurns: [],
+          target: {
+            type: "thread_start" as const,
+            checkpointId: CheckpointId.make("auth-recovery-checkpoint"),
+            appRunOrdinal: 0 as const,
+          },
+        };
+        for (const mutation of [
+          first.mcpApps!.callTool(toolInput).pipe(Effect.asVoid),
+          first.rollbackThread(rollbackInput).pipe(Effect.asVoid),
+          first.injectHistory!({ providerThread, messages: [], context: "" }).pipe(Effect.asVoid),
+        ]) {
+          const entered = yield* Deferred.make<void>();
+          const resume = yield* Deferred.make<void>();
+          yield* Queue.offer(mutationGates, { entered, resume });
+          const pending = yield* mutation.pipe(Effect.forkChild);
+          yield* Deferred.await(entered);
+          assert.strictEqual(yield* open(b), first);
+          yield* Deferred.succeed(resume, undefined);
+          yield* Fiber.join(pending);
+        }
         const recovered = yield* open(b);
         assert.notStrictEqual(recovered, first);
         assert.equal(
           (yield* first.mcpApps!.callTool(toolInput).pipe(Effect.result))._tag,
+          "Failure",
+        );
+        assert.equal(
+          (yield* first.rollbackThread(rollbackInput).pipe(Effect.result))._tag,
+          "Failure",
+        );
+        assert.equal(
+          (yield* first.injectHistory!({ providerThread, messages: [], context: "" }).pipe(
+            Effect.result,
+          ))._tag,
           "Failure",
         );
         first = recovered;
@@ -3741,12 +3787,18 @@ it.effect.each(["startTurn", "compactThread"] as const)(
             mcpApps: {
               listTools: () => Effect.succeed([]),
               readResource: () => Effect.succeed({ contents: [] }),
-              callTool: () =>
-                Deferred.succeed(toolEntered, undefined).pipe(
-                  Effect.andThen(Deferred.await(toolContinue)),
-                  Effect.as({ content: [] }),
-                ),
+              callTool: () => awaitMutation.pipe(Effect.as({ content: [] })),
             },
+            rollbackThread: (input) =>
+              awaitMutation.pipe(
+                Effect.as({
+                  providerThread: input.providerThread,
+                  providerTurns: [],
+                  messages: [],
+                  runtimeRequests: [],
+                }),
+              ),
+            injectHistory: () => awaitMutation.pipe(Effect.as(true)),
             hasPendingBackgroundWork: Ref.getAndSet(pauseProbe, false).pipe(
               Effect.flatMap((pause) =>
                 pause

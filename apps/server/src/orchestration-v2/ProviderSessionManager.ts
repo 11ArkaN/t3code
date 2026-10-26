@@ -1944,6 +1944,10 @@ export const layerWithOptions = (
           ensureThread: (input) => withRuntimeUse(exposed.ensureThread(input)),
           resumeThread: (input) => withRuntimeUse(exposed.resumeThread(input)),
           forkThread: (input) => withRuntimeUse(exposed.forkThread(input)),
+          rollbackThread: (input) => withRuntimeUse(exposed.rollbackThread(input)),
+          ...(exposed.injectHistory === undefined
+            ? {}
+            : { injectHistory: (input) => withRuntimeUse(exposed.injectHistory!(input)) }),
           startTurn: (input) => withRuntimeUse(exposed.startTurn(input)),
           ...(exposed.compactThread === undefined
             ? {}
