@@ -203,7 +203,7 @@ export function toMcpElicitationResponse(
     const chosenOption = options.find((option) =>
       persist
         ? mcpElicitationPersistenceDecision(option.value) === decision
-        : /once|accept|approve|allow/i.test(option.value) &&
+        : /^(?:once|accept|approve|allow)(?:[_\s-]*once)?$/i.test(option.value.trim()) &&
           mcpElicitationPersistenceDecision(option.value) === null,
     );
     if (chosenOption) {

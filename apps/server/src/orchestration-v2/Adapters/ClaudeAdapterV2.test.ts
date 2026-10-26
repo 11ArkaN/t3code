@@ -1041,7 +1041,9 @@ describe("ClaudeAdapterV2 MCP elicitation acceptance", () => {
     for (const choice of ["allow_once", "Allow", "accept_once", "Approve once"]) {
       assert.deepEqual(
         ClaudeAdapterV2.claudeMcpElicitationAcceptance(
-          form({ decision: { type: "string", enum: ["deny", choice, "always"] } }, ["decision"]),
+          form({ decision: { type: "string", enum: ["disallow", choice, "always"] } }, [
+            "decision",
+          ]),
         ),
         { action: "accept", content: { decision: choice } },
       );
@@ -4323,8 +4325,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           onElicitation(request, { signal, requestId: `sdk-${runtimeRequests().length}` }),
         ).pipe(Effect.forkScoped);
       const awaitCard = Effect.fnUntraced(function* (count: number) {
-        yield* awaitUntil(() => runtimeRequests().length === count, `elicitation card ${count}`);
-        return runtimeRequests()[count - 1]!;
+        const event = yield* Queue.take(harness.runtimeRequestReceipts);
+        assert.equal(runtimeRequests().length, count);
+        return event.runtimeRequest;
       });
       return { harness, elicit, awaitCard, runtimeRequests };
     });
@@ -4374,6 +4377,18 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayer)),
     );
 
+    it.effect.each(["acceptForSession", "acceptAlways"] as const)(
+      "declines an unsupported %s decision",
+      (decision) =>
+        Effect.gen(function* () {
+          const { harness, elicit, awaitCard } = yield* startElicitationTurn();
+          const answer = yield* elicit(approvalOnly);
+          const request = yield* awaitCard(1);
+          yield* harness.runtime.respondToRuntimeRequest({ requestId: request.id, decision });
+          assert.deepEqual(yield* Fiber.join(answer), { action: "decline" });
+        }).pipe(Effect.scoped, Effect.provide(testLayer)),
+    );
+
     it.effect("declines URL and value forms without a card", () =>
       Effect.gen(function* () {
         const { elicit, runtimeRequests } = yield* startElicitationTurn();
@@ -4397,9 +4412,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     it.effect("cancels when the SDK aborted before the card was answered", () =>
       Effect.gen(function* () {
         const { harness, elicit, awaitCard } = yield* startElicitationTurn();
-        const aborted = new AbortController();
-        aborted.abort();
-        const answer = yield* elicit(approvalOnly, aborted.signal);
+        const aborted = yield* Effect.sync(() => {
+          const controller = new AbortController();
+          controller.abort();
+          return controller.signal;
+        });
+        const answer = yield* elicit(approvalOnly, aborted);
         const request = yield* awaitCard(1);
         assert.deepEqual(yield* Fiber.join(answer), { action: "cancel" });
         yield* Effect.flip(
@@ -4411,7 +4429,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     it.effect("cancels an open card when the session stops", () =>
       Effect.gen(function* () {
         // Like the SDK, the fake query aborts in-flight callbacks when closed.
-        const inFlight = new AbortController();
+        const inFlight = yield* Effect.sync(() => new AbortController());
         const session = yield* Scope.make();
         const { elicit, awaitCard } = yield* startElicitationTurn({
           close: () => Effect.sync(() => inFlight.abort()),

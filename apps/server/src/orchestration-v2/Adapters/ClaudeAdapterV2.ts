@@ -3353,14 +3353,7 @@ const withoutSchemaDefaults = (schema: Record<string, unknown>): Record<string, 
   };
 };
 
-/**
- * The answer an Approve click sends, or undefined when the card cannot answer
- * the form. The card only collects consent, so the form is filled with the
- * one-time approval choices Codex picks and anything left unfilled, URL mode
- * included, is declined before a card is shown. Schema defaults are dropped
- * because the card never shows them, and one can be a lasting grant or a
- * refusal.
- */
+// The card collects consent only; schema defaults must never grant unseen permissions.
 export function claudeMcpElicitationAcceptance(
   request: ElicitationRequest,
 ): ElicitationResult | undefined {
@@ -9619,7 +9612,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             appName: request.displayName ?? request.title ?? request.serverName,
             options: CLAUDE_MCP_ELICITATION_OPTIONS,
           });
-          const decision = yield* Deferred.make<ProviderApprovalDecision, never>();
+          const decision = yield* Deferred.make<ClaudeApprovalResponse>();
           yield* Ref.update(pendingRuntimeRequests, (current) => {
             const updated = new Map(current);
             updated.set(String(artifacts.request.id), {
@@ -9653,7 +9646,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
 
           // Closing the query aborts the signal, so a stopped session settles
           // this as cancel and a late response finds no pending request.
-          const resolved = yield* awaitClaudeApprovalDecision(
+          const { decision: resolved } = yield* awaitClaudeApprovalDecision(
             decision,
             callbackOptions.signal,
           ).pipe(
@@ -9667,9 +9660,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           );
           // Never null: the SDK reads null as answered out of band and leaves
           // the server waiting. Every accept is one-time; no grant is offered.
-          return resolved === "decline" || resolved === "cancel"
-            ? ({ action: resolved } satisfies ElicitationResult)
-            : acceptance;
+          return resolved === "accept"
+            ? acceptance
+            : ({
+                action: resolved === "cancel" ? "cancel" : "decline",
+              } satisfies ElicitationResult);
         });
 
         const onElicitation: NonNullable<ClaudeQueryOptions["onElicitation"]> = (
