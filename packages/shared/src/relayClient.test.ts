@@ -656,10 +656,7 @@ describe("RelayClient", () => {
           });
           const env = { PATH: `${baseDir}/bin` };
           const resolveWith = manager.resolve.pipe(
-            Effect.provideService(
-              ConfigProvider.ConfigProvider,
-              ConfigProvider.fromEnv({ env }),
-            ),
+            Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env })),
             Effect.provideService(HostProcess.Environment, env),
           );
           expect(yield* resolveWith).toEqual({
