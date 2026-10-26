@@ -670,16 +670,7 @@ export default function DiffPanel({
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={
-              settings.redesignEnabled ? (
-                <button
-                  type="button"
-                  className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-xs font-medium text-foreground/75 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30"
-                />
-              ) : (
-                <Button size="xs" variant="secondary" />
-              )
-            }
+            render={<Button size="xs" variant={settings.redesignEnabled ? "ghost" : "secondary"} />}
             className="max-w-full"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
           >

@@ -136,7 +136,7 @@ export function DiffCommentAnnotation({
         <span>Comment on {rangeDescription}</span>
       </div>
       {redesignEnabled ? (
-        <div className="rounded-lg border border-border bg-muted/20 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-foreground/35">
+        <div className="rounded-lg border border-border bg-muted/20 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-foreground/60">
           {editor}
         </div>
       ) : (

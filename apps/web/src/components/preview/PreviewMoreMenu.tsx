@@ -134,7 +134,12 @@ export function PreviewMoreMenu({
         </PageGroup>
         <MenuSeparator />
         {redesign ? (
-          <div className="flex items-center justify-between gap-3 px-3 py-1">
+          <MenuItem
+            closeOnClick={false}
+            onClick={(event: React.MouseEvent) => event.preventDefault()}
+            className="justify-between"
+            disabled={disabled}
+          >
             <div className="flex items-center gap-2">
               <span className="text-xs text-secondary-label">Zoom</span>
               <span className="text-xs font-medium tabular-nums">{zoomLabel}</span>
@@ -168,7 +173,7 @@ export function PreviewMoreMenu({
                 <RotateCcw />
               </Button>
             </div>
-          </div>
+          </MenuItem>
         ) : (
           <MenuItem
             closeOnClick={false}
