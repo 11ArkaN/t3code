@@ -479,7 +479,10 @@ describe("large text preview recovery", () => {
       await using screen = await render(preview("first"));
       await vi.waitFor(() => expect(workers).toHaveLength(1));
       await vi.waitFor(() => expect(screen.container.textContent).toContain("original"));
-      await vi.waitFor(() => expect(screen.container.textContent).toContain("1,000 lines"));
+      // Indexing runs in the worker, so on a loaded runner it can outlast the default wait.
+      await vi.waitFor(() => expect(screen.container.textContent).toContain("1,000 lines"), {
+        timeout: 10_000,
+      });
       const viewport = screen.container.querySelector<HTMLElement>('[tabindex="0"]')!;
       await act(() =>
         viewport.dispatchEvent(
@@ -1388,7 +1391,7 @@ it.each(["footnotes", "footer"] as const)(
   },
 );
 
-it.each([
+const ORDINARY_WORD_SCENARIOS = [
   "ordinary parts",
   "unused parts",
   "independent styles",
@@ -1396,8 +1399,9 @@ it.each([
   "python-docx package",
   "default template styles",
   "binary package properties",
-])("retains Word %s without a limit warning", async (scenario) => {
-  const { default: JSZip } = await import("jszip");
+] as const;
+
+async function ordinaryWordFixture(scenario: (typeof ORDINARY_WORD_SCENARIOS)[number]) {
   const archive = new JSZip();
   const ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
   const r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -1506,32 +1510,60 @@ it.each([
       ),
     );
   }
-  const file = await archive.generateAsync({ type: "blob", compression: "DEFLATE" });
-  const src = URL.createObjectURL(file);
-  try {
-    const container = document.createElement("div");
-    container.style.cssText = "display:flex;flex-direction:column;width:640px;height:700px";
-    await using screen = await render(
-      <OfficeFilePreview src={src} name="ordinary.docx" kind="docx" />,
-      { container },
-    );
-    await vi.waitFor(() => expect(screen.container.textContent).toContain("ordinary body"), {
-      timeout: 30_000,
-    });
-    expect(screen.container.textContent).not.toContain("Preview limited");
-    await vi.waitFor(() =>
-      expect(screen.container.querySelector("canvas")!.width).toBeGreaterThan(0),
-    );
-    if (scenario === "default template styles")
-      expect(screen.container.textContent).toContain("styled cell");
-    if (ordinary) {
-      expect(screen.container.textContent).toContain("header retained");
-      expect(screen.container.textContent).toContain("footer retained");
-    }
-  } finally {
-    URL.revokeObjectURL(src);
+  return archive.generateAsync({ type: "blob", compression: "DEFLATE" });
+}
+
+// The limit decision lives in prepareOffice. Rendering compiles the layout engine for each case,
+// so only the cases whose retained parts the engine must accept render in full.
+it.each(ORDINARY_WORD_SCENARIOS)("prepares Word %s without a limit warning", async (scenario) => {
+  const { prepareOffice } = await import("./officeArchive");
+  const file = await ordinaryWordFixture(scenario);
+  const prepared = await prepareOffice(await file.arrayBuffer(), "docx");
+  expect(prepared.truncated).toBe(false);
+  const bounded = await JSZip.loadAsync(prepared.bytes);
+  const markup = await bounded.file("word/document.xml")!.async("string");
+  expect(markup).toContain("ordinary body");
+  expect(markup).toContain("styled body");
+  expect(bounded.file("word/styles.xml")).not.toBeNull();
+  if (scenario === "default template styles") expect(markup).toContain("styled cell");
+  if (scenario === "ordinary parts") {
+    expect(markup).toMatch(/<w:headerReference/);
+    expect(markup).toMatch(/<w:footerReference/);
+    for (const role of ["header", "footer", "footnotes", "endnotes", "comments"])
+      expect(await bounded.file(`word/${role}.xml`)!.async("string")).toContain(`${role} retained`);
   }
 });
+
+it.each(["ordinary parts", "default template styles"] as const)(
+  "retains Word %s without a limit warning",
+  async (scenario) => {
+    const file = await ordinaryWordFixture(scenario);
+    const src = URL.createObjectURL(file);
+    try {
+      const container = document.createElement("div");
+      container.style.cssText = "display:flex;flex-direction:column;width:640px;height:700px";
+      await using screen = await render(
+        <OfficeFilePreview src={src} name="ordinary.docx" kind="docx" />,
+        { container },
+      );
+      await vi.waitFor(() => expect(screen.container.textContent).toContain("ordinary body"), {
+        timeout: 30_000,
+      });
+      expect(screen.container.textContent).not.toContain("Preview limited");
+      await vi.waitFor(() =>
+        expect(screen.container.querySelector("canvas")!.width).toBeGreaterThan(0),
+      );
+      if (scenario === "default template styles")
+        expect(screen.container.textContent).toContain("styled cell");
+      if (scenario === "ordinary parts") {
+        expect(screen.container.textContent).toContain("header retained");
+        expect(screen.container.textContent).toContain("footer retained");
+      }
+    } finally {
+      URL.revokeObjectURL(src);
+    }
+  },
+);
 
 it.each([false, true])(
   "bounds shared-string text including CDATA %s per cell and across sheets in the worker and viewer",
