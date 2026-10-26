@@ -16,6 +16,7 @@ import {
   MCP_APP_MAX_HEIGHT,
   mcpAppAllowAttribute,
   mcpAppFileName,
+  mcpAppReferencesEqual,
   mcpAppToolCall,
   type McpAppReference,
 } from "@t3tools/shared/mcpApp";
@@ -73,7 +74,8 @@ export function McpAppFrame(props: {
   readonly awaitingUser?: boolean;
   readonly onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
-  const { app } = props;
+  const [app, setApp] = useState(props.app);
+  if (!mcpAppReferencesEqual(app, props.app)) setApp(props.app);
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
