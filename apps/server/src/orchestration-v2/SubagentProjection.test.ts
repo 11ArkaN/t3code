@@ -263,30 +263,43 @@ it("waits for nested work and retains the report across monitor acknowledgements
   assert.equal(progress.resultRun?.id, report.id);
 });
 
-it("retains the task result after answering a delegated question notification", () => {
-  const { projection, run } = taskFixture();
-  const wake = { ...run, id: RunId.make("question-wake"), ordinal: 2 };
-  const progress = delegatedTaskProgress({
-    ...projection,
-    runs: [run, wake],
-    messages: [
-      {
-        runId: wake.id,
-        notification: {
-          source: {
-            kind: "delegated_task",
-            taskIds: [NodeId.make("grandchild")],
-            childThreadId: ThreadId.make("grandchild-thread"),
+it.each([0, 2])(
+  "retains the task result after a question wake with %s restart continuations",
+  (restarts) => {
+    const { projection, run } = taskFixture();
+    const wake = { ...run, id: RunId.make("question-wake"), ordinal: 2 };
+    const progress = delegatedTaskProgress({
+      ...projection,
+      runs: [
+        run,
+        wake,
+        ...Array.from({ length: restarts }, (_, index) => ({
+          ...wake,
+          id: RunId.make(`question-restart:${index}`),
+          ordinal: 3 + index,
+          restartContinuationOfRunId:
+            index === 0 ? wake.id : RunId.make(`question-restart:${index - 1}`),
+        })),
+      ],
+      messages: [
+        {
+          runId: wake.id,
+          notification: {
+            source: {
+              kind: "delegated_task",
+              taskIds: [NodeId.make("grandchild")],
+              childThreadId: ThreadId.make("grandchild-thread"),
+            },
+            outcome: "updated",
+            summary: "Delegated task has a question",
           },
-          outcome: "updated",
-          summary: "Delegated task has a question",
         },
-      },
-    ],
-  });
-  assert.equal(progress.state, "result_available");
-  assert.equal(progress.resultRun?.id, run.id);
-});
+      ],
+    });
+    assert.equal(progress.state, "result_available");
+    assert.equal(progress.resultRun?.id, run.id);
+  },
+);
 
 it("exposes the provider failure rather than a progress message from the failed run", () => {
   const { projection, run } = taskFixture();

@@ -15,6 +15,7 @@ import type {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
+  RunId,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -219,6 +220,40 @@ export function subagentResultForRun(
   };
 }
 
+export function delegatedQuestionRunIds(projection: {
+  readonly runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "restartContinuationOfRunId">>;
+  readonly messages: ReadonlyArray<
+    Pick<OrchestrationV2ConversationMessage, "runId" | "notification">
+  >;
+}) {
+  const questionRuns = new Set(
+    projection.messages.flatMap(({ runId, notification }) =>
+      runId !== null &&
+      notification?.source.kind === "delegated_task" &&
+      notification.outcome === "updated"
+        ? [runId]
+        : [],
+    ),
+  );
+  const continuations = new Map<RunId, Array<RunId>>();
+  for (const run of projection.runs) {
+    if (run.restartContinuationOfRunId === undefined) continue;
+    const siblings = continuations.get(run.restartContinuationOfRunId) ?? [];
+    siblings.push(run.id);
+    continuations.set(run.restartContinuationOfRunId, siblings);
+  }
+  // Restart continuations carry system notifications instead of the original question.
+  const pending = [...questionRuns];
+  for (const runId of pending) {
+    for (const continuationId of continuations.get(runId) ?? []) {
+      if (questionRuns.has(continuationId)) continue;
+      questionRuns.add(continuationId);
+      pending.push(continuationId);
+    }
+  }
+  return questionRuns;
+}
+
 export function delegatedTaskProgress(projection: {
   readonly runs: OrchestrationV2ThreadProjection["runs"];
   readonly messages: ReadonlyArray<
@@ -255,14 +290,7 @@ export function delegatedTaskProgress(projection: {
             task.completionDelivery?.state === "claimed")),
     ) ||
     projection.providerThreads.some((thread) => (thread.pendingBackgroundTasks?.length ?? 0) > 0);
-  const questionRuns = new Set(
-    projection.messages
-      .filter(
-        ({ notification }) =>
-          notification?.source.kind === "delegated_task" && notification.outcome === "updated",
-      )
-      .map((message) => message.runId),
-  );
+  const questionRuns = delegatedQuestionRunIds(projection);
   const resultRun = workRuns
     .filter(
       (run) =>
