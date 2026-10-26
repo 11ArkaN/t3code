@@ -65,7 +65,11 @@ export function parseInlineMarkdown(text: string): RichTextSpan[] {
     const before = text[index - 1] ?? "";
     const after = text[end] ?? "";
     const canClose = before !== "" && !/\s/.test(before) && (char !== "_" || !/\w/.test(after));
-    const canOpen = after !== "" && !/\s/.test(after) && (char !== "_" || !/\w/.test(before));
+    // `_` opens only after a space or opening punctuation, so `/_x_/` in URLs and paths stays literal.
+    const canOpen =
+      after !== "" &&
+      !/\s/.test(after) &&
+      (char !== "_" || before === "" || /[\s([{"'*~]/.test(before));
     while (index < end) {
       const top = stack.at(-1);
       const opensNestedBold =

@@ -1119,6 +1119,8 @@ function ComposerPromptEditorTiptapInner(
         literalText,
       }),
       editable: !disabled,
+      // Pastes are parsed as Markdown above; Tiptap's rules would restyle the literal text of code spans.
+      enablePasteRules: false,
       editorProps: {
         attributes: editorAttributes,
         handleKeyDown: (view, event) => {
@@ -1365,8 +1367,12 @@ function ComposerPromptEditorTiptapInner(
           const pastedText = clipboardData.getData("text/plain");
           if (!pastedText) return false;
           event.preventDefault();
-          // Paste verbatim inside fences; markdown parsing would split blocks and create unsupported chips.
-          if (isInCodeBlock(view)) {
+          // Paste verbatim inside fences and code spans; markdown parsing would split blocks and create unsupported chips.
+          const { storedMarks, selection } = view.state;
+          const inCodeSpan = (storedMarks ?? selection.$from.marks()).some(
+            (mark) => mark.type.name === "code",
+          );
+          if (isInCodeBlock(view) || inCodeSpan) {
             const { from, to } = view.state.selection;
             view.dispatch(
               markAsClipboardEdit(
