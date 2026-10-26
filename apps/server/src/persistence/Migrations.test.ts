@@ -110,6 +110,68 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
+  it.effect("upgrades a 0.1.2-preview.3511 database with peer links recorded at 68-70", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 67 });
+      // Schema and history written by 068_PeerLinks, 069_PeerLinkFence and
+      // 070_WaitingLinkRequestIndex in v0.1.2-preview.20261022.3511.
+      yield* sql`
+        CREATE TABLE peer_environment_links (
+          environment_id TEXT PRIMARY KEY,
+          secret_name TEXT NOT NULL,
+          label TEXT NOT NULL,
+          urls_json TEXT NOT NULL,
+          access TEXT NOT NULL,
+          linked_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          last_reached_at TEXT,
+          last_error TEXT
+        )
+      `;
+      yield* sql`
+        ALTER TABLE peer_environment_links ADD COLUMN fenced INTEGER NOT NULL DEFAULT 0
+      `;
+      yield* sql`
+        CREATE INDEX orchestration_v2_projection_turn_items_waiting_link_idx
+        ON orchestration_v2_projection_turn_items(thread_id, updated_at DESC, turn_item_id DESC)
+        WHERE type = 'link_request' AND status = 'waiting'
+      `;
+      yield* sql`
+        INSERT INTO effect_sql_migrations (migration_id, name)
+        VALUES (68, 'PeerLinks'), (69, 'PeerLinkFence'), (70, 'WaitingLinkRequestIndex')
+      `;
+      yield* sql`
+        INSERT INTO peer_environment_links
+          (environment_id, secret_name, label, urls_json, access, linked_at, expires_at, fenced)
+        VALUES
+          ('env-vps', 'peer-link:env-vps:1', 'vps', '["https://vps.example"]', 'full-access',
+           '2026-10-22T00:00:00.000Z', '2026-11-22T00:00:00.000Z', 1)
+      `;
+      const peerLinks = sql`SELECT environment_id, secret_name, fenced FROM peer_environment_links`;
+      const waitingLinkIndex = sql`
+        SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name = 'orchestration_v2_projection_turn_items_waiting_link_idx'
+      `;
+
+      const applied = yield* runMigrations();
+
+      assert.includeDeepMembers(applied, [
+        [68, "ShellStopRequestIndex"],
+        [69, "ThreadMessageSearch"],
+      ]);
+      assert.includeDeepMembers(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* peerLinks, [
+        { environment_id: "env-vps", secret_name: "peer-link:env-vps:1", fenced: 1 },
+      ]);
+      assert.lengthOf(yield* waitingLinkIndex, 1);
+
+      const historyAfterUpgrade = yield* history;
+      assert.deepStrictEqual(yield* runMigrations(), []);
+      assert.deepStrictEqual(yield* history, historyAfterUpgrade);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("still starts after a newer build recorded a later V2 migration", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
