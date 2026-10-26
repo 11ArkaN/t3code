@@ -674,7 +674,7 @@ export default function DiffPanel({
               settings.redesignEnabled ? (
                 <button
                   type="button"
-                  className="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-xs font-medium text-foreground/75 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30"
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-xs font-medium text-foreground/75 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30"
                 />
               ) : (
                 <Button size="xs" variant="secondary" />
