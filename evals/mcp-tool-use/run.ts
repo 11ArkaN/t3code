@@ -2,8 +2,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /**
  * Replays small fake threads on a Claude or Codex model to check T3's MCP tool use. A trimmed
- * harness capture supplies the prompt and native tools; a cheap model plays the shell. Run
- * `pnpm eval:mcp --out <dir>` from apps/server with `ANTHROPIC_API_KEY` in the repo's `.env`.
+ * harness capture supplies the prompt and native tools; a cheap model plays the shell. See
+ * README.md for how to run it and add cases.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
@@ -25,27 +25,27 @@ import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
-import { taskPrompt } from "../src/mcp/OrchestratorMcpService.ts";
-import * as McpInvocationContext from "../src/mcp/McpInvocationContext.ts";
+import { taskPrompt } from "../../apps/server/src/mcp/OrchestratorMcpService.ts";
+import * as McpInvocationContext from "../../apps/server/src/mcp/McpInvocationContext.ts";
 import { ORCHESTRATOR_MCP_RUNNING_TASK_NEXT } from "@t3tools/contracts";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
-import { buildCodexAdditionalContext } from "../src/provider/CodexDeveloperInstructions.ts";
-import { AttachmentToolkit } from "../src/mcp/toolkits/attachment/tools.ts";
-import { DeviceToolkit } from "../src/mcp/toolkits/device/tools.ts";
-import { EnvironmentToolkit } from "../src/mcp/toolkits/environment/tools.ts";
-import { HtmlToolkit } from "../src/mcp/toolkits/html/tools.ts";
-import { OrchestratorToolkit } from "../src/mcp/toolkits/orchestrator/tools.ts";
-import { PreviewToolkit } from "../src/mcp/toolkits/preview/tools.ts";
-import { PreviewControlsToolkit } from "../src/mcp/toolkits/previewControls/tools.ts";
-import { ProjectToolkit } from "../src/mcp/toolkits/project/tools.ts";
-import { PullRequestsToolkit } from "../src/mcp/toolkits/pullRequests/tools.ts";
-import { ThreadToolkit } from "../src/mcp/toolkits/thread/tools.ts";
-import { WorktreeToolkit } from "../src/mcp/toolkits/worktree/tools.ts";
+import { buildCodexAdditionalContext } from "../../apps/server/src/provider/CodexDeveloperInstructions.ts";
+import { AttachmentToolkit } from "../../apps/server/src/mcp/toolkits/attachment/tools.ts";
+import { DeviceToolkit } from "../../apps/server/src/mcp/toolkits/device/tools.ts";
+import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environment/tools.ts";
+import { HtmlToolkit } from "../../apps/server/src/mcp/toolkits/html/tools.ts";
+import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
+import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
+import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
+import { ProjectToolkit } from "../../apps/server/src/mcp/toolkits/project/tools.ts";
+import { PullRequestsToolkit } from "../../apps/server/src/mcp/toolkits/pullRequests/tools.ts";
+import { ThreadToolkit } from "../../apps/server/src/mcp/toolkits/thread/tools.ts";
+import { WorktreeToolkit } from "../../apps/server/src/mcp/toolkits/worktree/tools.ts";
 import {
   CLAUDE_PROVIDER,
   makeClaudeQueryOptions,
-} from "../src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
-import { changeRequestsCreatedBy } from "../src/orchestration-v2/PullRequestSyncReactor.ts";
+} from "../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import { changeRequestsCreatedBy } from "../../apps/server/src/orchestration-v2/PullRequestSyncReactor.ts";
 /** Agent models by id, with the display name a harness gives them. */
 const MODELS = {
   "claude-sonnet-5-5": "Sonnet 5.5",
@@ -1654,7 +1654,7 @@ const main = Effect.gen(function* () {
       Effect.map((content) => content.split("\n").filter((line) => line.trim() !== "")),
       Effect.flatMap((lines) => Effect.forEach(lines, (line) => decode(line))),
     );
-  const casesDir = path.join(import.meta.dirname, "mcp-tool-use-cases");
+  const casesDir = path.join(import.meta.dirname, "cases");
   const caseFiles =
     flags.cases ??
     (yield* fs.readDirectory(casesDir))
@@ -1675,11 +1675,7 @@ const main = Effect.gen(function* () {
   // CLIProxyAPI capture.
   const templatePath =
     flags.template ||
-    path.join(
-      import.meta.dirname,
-      "mcp-tool-use-templates",
-      codex ? "codex.json.gz" : "claude.json.gz",
-    );
+    path.join(import.meta.dirname, "templates", codex ? "codex.json.gz" : "claude.json.gz");
   const templateBytes = yield* fs.readFile(templatePath);
   const template = new TextDecoder().decode(
     templatePath.endsWith(".gz") ? NodeZlib.gunzipSync(templateBytes) : templateBytes,
@@ -1800,7 +1796,7 @@ const main = Effect.gen(function* () {
         }),
       ),
     { concurrency: flags.concurrency, discard: true },
-  ).pipe(Effect.catch(() => Effect.void));
+  ).pipe(Effect.ignore);
   const commit = NodeChildProcess.execFileSync("git", ["describe", "--always", "--dirty"], {
     encoding: "utf8",
   }).trim();

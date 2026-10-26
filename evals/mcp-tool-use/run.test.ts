@@ -15,8 +15,8 @@ import {
   shellOutput,
   shellRequest,
   t3SystemAppend,
-} from "./evaluate-mcp-tool-use.ts";
-import { taskPrompt } from "../src/mcp/OrchestratorMcpService.ts";
+} from "./run.ts";
+import { taskPrompt } from "../../apps/server/src/mcp/OrchestratorMcpService.ts";
 
 it("grades Codex shell and subagent calls with the shared rules", () => {
   const calls = [
