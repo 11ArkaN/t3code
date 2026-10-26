@@ -1,3 +1,9 @@
+import type { Nodes } from "mdast";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+
+const parser = unified().use(remarkParse);
+
 export type MermaidMarkdownSegment =
   | { readonly kind: "markdown"; readonly markdown: string; readonly sourceOffset: number }
   | {
@@ -7,7 +13,7 @@ export type MermaidMarkdownSegment =
       readonly sourceOffset: number;
     };
 
-const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/s;
 
 /**
  * Splits closed, unindented mermaid fences out of markdown. Unclosed fences stay
@@ -71,5 +77,46 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
   if (cursor < markdown.length) {
     segments.push({ kind: "markdown", markdown: markdown.slice(cursor), sourceOffset: cursor });
   }
-  return segments;
+  const definitions = new Map<string, string>();
+  const references: { offset: number; identifier: string }[] = [];
+  const pending: Nodes[] = [parser.parse(markdown)];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (!node) continue;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (node.type === "definition" && start !== undefined && end !== undefined) {
+      if (!definitions.has(node.identifier)) {
+        definitions.set(node.identifier, markdown.slice(start, end));
+      }
+    } else if (
+      (node.type === "linkReference" || node.type === "imageReference") &&
+      start !== undefined
+    ) {
+      references.push({ offset: start, identifier: node.identifier });
+    } else if ("children" in node) {
+      for (let index = node.children.length - 1; index >= 0; index--) {
+        const child = node.children[index];
+        if (child) pending.push(child);
+      }
+    }
+  }
+  if (references.length === 0) return segments;
+  let referenceIndex = 0;
+  // Native views parse independently, so carry each fragment's reference definitions with it.
+  return segments.map((segment) => {
+    const needed = new Set<string>();
+    const end = segment.sourceOffset + segment.markdown.length;
+    while (referenceIndex < references.length) {
+      const reference = references[referenceIndex];
+      if (!reference || reference.offset >= end) break;
+      if (reference.offset >= segment.sourceOffset) needed.add(reference.identifier);
+      referenceIndex++;
+    }
+    const prefix = [...needed]
+      .map((identifier) => definitions.get(identifier))
+      .filter(Boolean)
+      .join("\n");
+    return prefix ? { ...segment, markdown: `${prefix}\n\n${segment.markdown}` } : segment;
+  });
 }
