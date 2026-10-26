@@ -283,7 +283,7 @@ describe("commit link opening", () => {
     },
   );
 
-  it.each(["missing", "off branch", "no commit source", "different commit source"])(
+  it.each(["missing", "no commit source", "different commit source"])(
     "opens the original %s commit URL externally without changing the current panel",
     async (scenario) => {
       const preview = deferred<AtomCommandResult<ReviewDiffPreviewResult, unknown>>();

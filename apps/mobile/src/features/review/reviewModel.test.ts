@@ -36,28 +36,18 @@ describe("resolveReviewSelectedSectionId", () => {
 });
 
 it("omits commit sources from mobile review sections", () => {
-  const gitSections: ReviewDiffPreviewSource[] = [
-    {
-      id: "branch-range",
-      kind: "branch-range",
-      title: "Changes",
+  const gitSections: ReviewDiffPreviewSource[] = (["branch-range", "commit"] as const).map(
+    (kind) => ({
+      id: kind,
+      kind,
+      title: kind,
       baseRef: "main",
       headRef: "feature",
       diff: "",
-      diffHash: "branch",
+      diffHash: kind,
       truncated: false,
-    },
-    {
-      id: "abc123",
-      kind: "commit",
-      title: "Commit abc123",
-      baseRef: "parent",
-      headRef: "abc123",
-      diff: "",
-      diffHash: "commit",
-      truncated: false,
-    },
-  ];
+    }),
+  );
   const items = buildReviewSectionItems({
     checkpoints: [],
     gitSections,
