@@ -871,6 +871,66 @@ it.live("a tab opened to a file the browser cannot show reports the file to down
 );
 
 it.live(
+  "a snapshot of a PDF the tab downloaded says it cannot render and points to the download",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { broker, tabId } = yield* ready;
+        const events = yield* (yield* Manager.PreviewManager).subscribeEvents;
+        const page = contexts[0]!.page;
+        const pdf = "https://example.com/paper.pdf";
+        page.emit("requestfailed", {
+          url: () => pdf,
+          method: () => "GET",
+          isNavigationRequest: () => true,
+          frame: () => page,
+          failure: () => ({ errorText: "net::ERR_ABORTED" }),
+        });
+        page.emit("download", {
+          failure: async () => null,
+          delete: async () => {},
+          saveAs: (path: string) => NodeFSP.writeFile(path, "%PDF"),
+          suggestedFilename: () => "paper.pdf",
+          url: () => pdf,
+        });
+        let event = yield* PubSub.take(events);
+        while (event.type !== "failed") event = yield* PubSub.take(events);
+        expect(event).toMatchObject({ url: pdf, download: { fileName: "paper.pdf" } });
+
+        const error = yield* broker
+          .invoke<PreviewAutomationSnapshot>({ scope, tabId, operation: "snapshot", input: {} })
+          .pipe(Effect.flip);
+        expect(error.message).toContain(pdf);
+        expect(error.message).toContain("cannot show");
+        expect(error.message).toContain("preview_status");
+        const status = yield* broker.invoke<PreviewAutomationStatus>({
+          scope,
+          tabId,
+          operation: "status",
+          input: {},
+        });
+        expect(status.downloads).toEqual([
+          expect.objectContaining({ fileName: "paper.pdf", sizeBytes: 4, url: pdf }),
+        ]);
+
+        yield* broker.invoke({
+          scope,
+          tabId,
+          operation: "navigate",
+          input: { url: "http://localhost:5173" },
+        });
+        const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
+          scope,
+          tabId,
+          operation: "snapshot",
+          input: {},
+        });
+        expect(snapshot.url).toBe("http://localhost:5173");
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live(
   "a late failure from a request that predates tracking leaves a newer navigation loading",
   () =>
     Effect.scoped(
