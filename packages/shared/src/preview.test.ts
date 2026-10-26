@@ -149,6 +149,12 @@ describe("resolveSearchUrlTemplate", () => {
 });
 
 describe("normalizePreviewUrl", () => {
+  it("rejects an explicit about: URL as an unsupported protocol", () => {
+    expect(() => normalizePreviewUrl("about:blank")).toThrow(
+      expect.objectContaining({ reason: "unsupported-protocol", protocol: "about:" }),
+    );
+  });
+
   it("rejects unparseable input without retaining credentials or tokens", () => {
     const rawUrl = "https://user:password@example.com:bad/path?access_token=secret#fragment";
     try {
