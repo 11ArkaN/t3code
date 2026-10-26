@@ -21,7 +21,9 @@ import type {
 // It shares the Live Activity's name, but expo-widgets stores widget and Live
 // Activity layouts under different keys, so each needs its own registration.
 export function AgentActivityWidget(
-  publishedProps: Partial<AgentActivityProps> | undefined,
+  publishedProps:
+    | (Partial<AgentActivityProps> & { readonly accountId?: string | null })
+    | undefined,
   environment: WidgetEnvironment,
 ) {
   "widget";
@@ -196,4 +198,7 @@ export function AgentActivityWidget(
   );
 }
 
-export default createWidget("AgentActivity", AgentActivityWidget);
+export default createWidget<Partial<AgentActivityProps> & { readonly accountId?: string | null }>(
+  "AgentActivity",
+  AgentActivityWidget,
+);

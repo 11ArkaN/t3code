@@ -853,11 +853,14 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Effect.gen(function* () {
         yield* refreshActiveLiveActivityRemoteRegistration();
 
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "snapshot", aggregate });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith(
+          { kind: "snapshot", aggregate },
+          "user-a",
+        );
       }).pipe(Effect.provide(relay));
     });
 
-    it.effect("a failed read keeps rows painted this session, but never a placeholder", () => {
+    it.effect("delegates failed reads to the account-aware native publisher", () => {
       const relayDown = new ManagedRelay.ManagedRelayRequestFailedError({
         action: "read relay agent activity snapshot",
         transportFailed: true,
@@ -872,14 +875,14 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Effect.gen(function* () {
         // After a cold start the persisted timeline may be a placeholder.
         yield* refreshActiveLiveActivityRemoteRegistration();
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "unavailable" });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "unavailable" }, "user-a");
 
         relayUp = true;
         yield* refreshActiveLiveActivityRemoteRegistration();
         relayUp = false;
         publishWidgetMock.mockClear();
         yield* refreshActiveLiveActivityRemoteRegistration();
-        expect(publishWidgetMock).not.toHaveBeenCalled();
+        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "unavailable" }, "user-a");
       }).pipe(Effect.provide(relay));
     });
 
@@ -906,7 +909,10 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         yield* refreshActiveLiveActivityRemoteRegistration();
 
         expect(order).toEqual(["push-token", "widget-snapshot"]);
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "snapshot", aggregate });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith(
+          { kind: "snapshot", aggregate },
+          "user-a",
+        );
       }).pipe(Effect.provide(relay));
     });
 
@@ -934,19 +940,22 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         yield* Deferred.succeed(olderResponse, { aggregate });
         yield* Fiber.join(older);
 
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "snapshot", aggregate: newer });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith(
+          { kind: "snapshot", aggregate: newer },
+          "user-a",
+        );
       }),
     );
 
     it("shows loading, not the sign-in prompt, while a switched account's first read runs", () => {
       setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-a"), "user-a");
-      expect(publishWidgetMock).not.toHaveBeenCalled();
+      expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" }, "user-a");
 
       // CloudAuthBridge deactivates the old account before activating the new one.
       setAgentAwarenessRelayTokenProvider(null);
       setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-b"), "user-b");
 
-      expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" });
+      expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" }, "user-b");
     });
 
     it.effect("shows loading when another account signs in after a provider release", () => {
@@ -956,14 +965,14 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Effect.gen(function* () {
         yield* refreshActiveLiveActivityRemoteRegistration();
 
-        // A remount for the same account keeps its rows.
+        // The native publisher checks persisted ownership even on a same-account remount.
         releaseAgentAwarenessRelayTokenProvider();
         setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-a"), "user-a");
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "snapshot", aggregate });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" }, "user-a");
 
         releaseAgentAwarenessRelayTokenProvider();
         setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-b"), "user-b");
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "loading" }, "user-b");
       }).pipe(Effect.provide(relay));
     });
 
@@ -1007,7 +1016,10 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         yield* Deferred.succeed(response, { aggregate });
         yield* Fiber.join(refreshB);
 
-        expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "snapshot", aggregate });
+        expect(publishWidgetMock).toHaveBeenLastCalledWith(
+          { kind: "snapshot", aggregate },
+          "user-b",
+        );
       }),
     );
 
@@ -1048,7 +1060,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
 
       setAgentAwarenessRelayTokenProvider(null);
 
-      expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "signed-out" });
+      expect(publishWidgetMock).toHaveBeenLastCalledWith({ kind: "signed-out" }, null);
     });
 
     it.effect("drops a snapshot that arrives after the account changed", () =>
@@ -1068,7 +1080,10 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         yield* Deferred.succeed(response, { aggregate });
         yield* Fiber.join(refresh);
 
-        expect(publishWidgetMock).not.toHaveBeenCalledWith({ kind: "snapshot", aggregate });
+        expect(publishWidgetMock).not.toHaveBeenCalledWith(
+          { kind: "snapshot", aggregate },
+          "user-a",
+        );
       }),
     );
 

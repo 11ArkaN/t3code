@@ -87,13 +87,6 @@ const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000;
 const LIVE_ACTIVITY_STALE_AFTER_MS = 10 * 60_000;
 const liveActivityStaleDate = () => new Date(Date.now() + LIVE_ACTIVITY_STALE_AFTER_MS);
 const registeredActivityPushTokens = new Map<string, number>();
-// What the widget shows, as far as this process knows. A failed read keeps
-// only rows this process painted for the current account; after a cold start
-// the persisted timeline could be any state, so it is "unknown". Rows keep
-// their owner because a provider release forgets the active identity.
-let widgetShows: "unknown" | "placeholder" | { readonly rowsOf: string | null } = "unknown";
-const widgetShowsRowsOf = (identity: string | null) =>
-  typeof widgetShows === "object" && widgetShows.rowsOf === identity;
 // Refreshes can overlap (sign-in, foreground, retry); only the newest read may
 // repaint, so a slow older response never overwrites newer rows.
 let widgetSnapshotReads = 0;
@@ -190,16 +183,8 @@ export function setAgentAwarenessRelayTokenProvider(
     if (relayTokenProviderIdentity && identity !== relayTokenProviderIdentity) {
       clearAndroidAgentNotifications();
     }
-    // Sign-in and account switches show loading until the first read. A cold
-    // start doesn't, so a launch never flashes it over the persisted timeline.
-    if (
-      provider &&
-      identity &&
-      (relayTokenProviderIdentity || widgetShows !== "unknown") &&
-      !widgetShowsRowsOf(identity)
-    ) {
-      widgetShows = "placeholder";
-      publishWidget({ kind: "loading" });
+    if (provider) {
+      publishWidget({ kind: "loading" }, identity ?? null);
     }
     androidDeviceReplayedAt = null;
     deviceRegistrationGeneration++;
@@ -221,7 +206,6 @@ export function setAgentAwarenessRelayTokenProvider(
     }
     // Signed-out activities would be orphaned because the relay can no longer update or end them.
     endLocalLiveActivities("live activity cleanup after cloud sign-out failed");
-    widgetShows = "placeholder";
     publishWidget({ kind: "signed-out" });
     setRegistrationStatus("unknown");
     void clearAgentAwarenessRegistrationRecord().catch((error: unknown) => {
@@ -817,11 +801,14 @@ function ensureAppStateListener(): void {
   });
 }
 
-function publishWidget(source: AgentActivityWidgetSource): void {
+function publishWidget(
+  source: AgentActivityWidgetSource,
+  accountId = relayTokenProviderIdentity,
+): void {
   if (!canRegisterRemoteLiveActivities()) {
     return;
   }
-  publishAgentActivityWidget(source).catch((error: unknown) => {
+  publishAgentActivityWidget(source, accountId).catch((error: unknown) => {
     logRegistrationError("agent activity widget publish failed", error);
   });
 }
@@ -926,7 +913,6 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   registrationStatusListeners.clear();
   registeredActivityPushTokens.clear();
   activityPushTokenLocks.clear();
-  widgetShows = "unknown";
   widgetSnapshotReads = 0;
 }
 
@@ -1082,10 +1068,8 @@ export const refreshActiveLiveActivityRemoteRegistration = Effect.fn(
       return undefined;
     }
     if (snapshot) {
-      widgetShows = { rowsOf: identity };
       publishWidget({ kind: "snapshot", aggregate: snapshot.aggregate });
-    } else if (!widgetShowsRowsOf(identity)) {
-      widgetShows = "placeholder";
+    } else {
       publishWidget({ kind: "unavailable" });
     }
     return { snapshot };
