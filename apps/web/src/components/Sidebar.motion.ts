@@ -183,6 +183,18 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
             },
           ]),
       );
+      if (
+        positions !== null &&
+        (entering.size > 0 || exiting.size > 0 || running.size > 0) &&
+        (next.size !== positions.size ||
+          [...next].some(([node, position]) => {
+            const previous = positions!.get(node);
+            return previous?.top !== position.top || previous.height !== position.height;
+          }))
+      ) {
+        // Settle interrupted layouts before their clips can follow stale neighbour paths.
+        suspend();
+      }
       let fadeCount = 0;
       if (positions !== null) {
         for (const [node, position] of positions) {
