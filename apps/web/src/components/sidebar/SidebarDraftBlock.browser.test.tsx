@@ -3,13 +3,17 @@ import { expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({ terminals: [] as TerminalSummary[] }));
 
-vi.mock(import("~/state/query"), async (original) => ({
+vi.mock(import("~/state/terminalSessions"), async (original) => ({
   ...(await original()),
-  useEnvironmentQuery: (() => ({ data: state.terminals, error: null, isPending: false })) as never,
-}));
-vi.mock(import("~/state/session"), async (original) => ({
-  ...(await original()),
-  useEnvironmentScope: () => true,
+  useTerminalLabelsByThreadKey: (environmentIds) =>
+    new Map(
+      environmentIds.flatMap((environmentId) =>
+        state.terminals.map((terminal) => [
+          `${environmentId}:${terminal.threadId}`,
+          terminal.label,
+        ]),
+      ),
+    ),
 }));
 
 import { render } from "../../../test/render";
@@ -85,6 +89,7 @@ it("lists empty drafts while their script terminal exists, even after it exits",
   await using screen = await render(block(running));
   const rows = () => document.querySelectorAll('[data-testid="sidebar-draft-row"]');
   expect(rows()).toHaveLength(2);
+  expect(rows()[0]?.textContent).toContain("dev");
 
   await screen.rerender(block(null));
   expect(rows()).toHaveLength(2);
