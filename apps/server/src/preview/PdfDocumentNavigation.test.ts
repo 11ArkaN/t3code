@@ -42,14 +42,15 @@ function fixture(nativePdfViewer = false) {
       frameId = "main",
       method = "GET",
       status = 200,
-      contentType = "application/pdf",
+      headers: string | Array<{ name: string; value: string }> = "application/pdf",
     ) => {
       paused({
         requestId: "request-1",
         frameId,
         request: { url, method },
         responseStatusCode: status,
-        responseHeaders: [{ name: "Content-Type", value: contentType }],
+        responseHeaders:
+          typeof headers === "string" ? [{ name: "Content-Type", value: headers }] : headers,
       });
       return completed.promise;
     },
@@ -86,6 +87,23 @@ describe("PDF document navigation", () => {
     expect(patterns).toSatisfy((enabled: typeof patterns) =>
       enabled.some(({ urlPattern }) => glob(urlPattern).test(url)),
     );
+  });
+
+  it("leaves external pages and PDF downloads to the browser", async () => {
+    const outcome = async (headers: Array<{ name: string; value: string }>) => {
+      const test = fixture();
+      await installPdfDocumentNavigation(test.cdp);
+      return (await test.navigate("https://example.com/download?id=7", "main", "GET", 200, headers))
+        .method;
+    };
+    const pdf = { name: "Content-Type", value: "Application/PDF" };
+    expect(await outcome([{ name: "Content-Type", value: "text/html" }])).toBe(
+      "Fetch.continueRequest",
+    );
+    expect(
+      await outcome([pdf, { name: "Content-Disposition", value: 'attachment; filename="a.pdf"' }]),
+    ).toBe("Fetch.continueRequest");
+    expect(await outcome([pdf])).toBe("Fetch.fulfillRequest");
   });
 
   it("resumes navigation when committing the document fails", async () => {
