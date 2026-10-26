@@ -68,6 +68,8 @@ export function useComposerAttachmentUploadWorker() {
   const queueRef = useRef<ReturnType<typeof createComposerAttachmentUploadQueue> | null>(null);
 
   useEffect(() => {
+    // The root stack mounts this worker for the app's lifetime, so it is where saved drafts
+    // hydrate; draft readers rely on it instead of each starting the load.
     ensureComposerDraftsLoaded();
     const queue = createComposerAttachmentUploadQueue({
       onChange: (states) => appAtomRegistry.set(composerAttachmentUploadsAtom, states),

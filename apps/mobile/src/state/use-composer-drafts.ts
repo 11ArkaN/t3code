@@ -21,7 +21,6 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { useEffect } from "react";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -2011,27 +2010,13 @@ const composerDraftSettingsAtom = Atom.family((draftKey: string) =>
 const EMPTY_DRAFT_SETTINGS_ATOM = Atom.make(EMPTY_DRAFT_SETTINGS);
 
 export function useComposerDraftSettings(draftKey: string | null): ComposerDraftSettings {
-  const settings = useAtomValue(
-    draftKey ? composerDraftSettingsAtom(draftKey) : EMPTY_DRAFT_SETTINGS_ATOM,
-  );
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return settings;
+  return useAtomValue(draftKey ? composerDraftSettingsAtom(draftKey) : EMPTY_DRAFT_SETTINGS_ATOM);
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft {
-  const draft = useAtomValue(draftKey ? composerDraftAtom(draftKey) : EMPTY_DRAFT_ATOM);
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return draft;
+  return useAtomValue(draftKey ? composerDraftAtom(draftKey) : EMPTY_DRAFT_ATOM);
 }
 
 export function useStickyComposerModelSelection(): ModelSelection | null {
-  const selection = useAtomValue(stickyComposerModelSelectionAtom);
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return selection;
+  return useAtomValue(stickyComposerModelSelectionAtom);
 }
