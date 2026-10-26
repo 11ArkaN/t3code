@@ -594,16 +594,13 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
   var pasteContextListener: ((Map<String, String>) -> Unit)? = null
   var pasteTextListener: ((String, Int, Int) -> Unit)? = null
 
-  /** Called for a hardware-keyboard send chord. The argument is true for the alternate send. */
   var submitListener: ((Boolean) -> Unit)? = null
   var textPasteThresholdBytes = 0
   var maxInputChars = Int.MAX_VALUE
   var clipboardFragment = ""
 
-  /** Whether a hardware Return sends (`enterBehavior` "send") or inserts a newline. */
   var returnSends = true
 
-  /** The JS wrapper enables submission only when it has an onSubmit handler. */
   var submitEnabled = false
 
   /**
@@ -656,14 +653,6 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
     return spans.isNotEmpty()
   }
 
-  /**
-   * Maps a hardware Return chord to a send, like the iOS composer. The plainer chord does the
-   * configured behavior and the Ctrl chord does the other one: with "send", Return sends,
-   * Ctrl-Return sends the alternate way and Shift-Return inserts a newline; with "newline",
-   * Ctrl-Return sends and Ctrl-Shift-Return sends the alternate way. Returns whether the send is
-   * the alternate one, or null to insert a newline. Anything but a physical keyboard inserts a
-   * newline.
-   */
   private fun submitChord(keyCode: Int, event: KeyEvent): Boolean? {
     val isReturn = keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
     if (!isReturn || !isFromPhysicalKeyboard(event) || !canSubmit()) {
@@ -678,9 +667,7 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
     }
   }
 
-  // An IME may send Return with any device ID and without FLAG_SOFT_KEYBOARD, so only a real
-  // typing keyboard counts. Device ID 0 is no proof either: it aliases the built-in keyboard,
-  // which on phones is a key-only device like the fingerprint sensor.
+  // IMEs can use device ID 0 without the soft-keyboard flag; it is not proof of a typing keyboard.
   private fun isFromPhysicalKeyboard(event: KeyEvent): Boolean {
     val device = event.device
     return (event.flags and KeyEvent.FLAG_SOFT_KEYBOARD) == 0 &&
@@ -689,9 +676,7 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
       device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
   }
 
-  // No composing-text check, unlike iOS's marked-text guard: Latin IMEs keep a composing region
-  // over the current word even for hardware typing, so it would block every send. An IME that
-  // confirms a composition with Return is expected to consume the key before the view sees it.
+  // Latin autocomplete also owns composing spans; the IME handles candidate Return before onKeyDown.
   private fun canSubmit(): Boolean =
     submitEnabled && submitListener != null && !readOnly && isEnabled
 
