@@ -1,3 +1,4 @@
+import * as DocumentText from "../../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
@@ -24,7 +25,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { McpAttachmentInput } from "./attachment/input.ts";
-import { McpSchema, McpServer } from "effect/ai";
+import { McpSchema, McpServer, Tool } from "effect/ai";
 import { FetchHttpClient } from "effect/http";
 
 import {
@@ -59,8 +60,6 @@ const layerOrchestratorToolkit = McpHttpServer.layerOrchestratorToolkit.pipe(
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
 );
 
-// Effect returns a declared tool failure as `isError` with its encoded payload
-// as JSON text, never as `structuredContent`.
 const declaredFailure = (result: McpSchema.CallToolResult) => {
   const text = result.content[0];
   return result.isError === true && text?.type === "text" ? JSON.parse(text.text) : undefined;
@@ -270,7 +269,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
         Layer.provide(McpProviderSessions.layer),
         Layer.provide(PreviewBrowser.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-html-render-" })),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(
           Layer.mock(ThreadManagement.ThreadManagementService)({
@@ -884,8 +883,73 @@ it.effect("only the caller that prepared a pending upload can discard it", () =>
         Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
         Layer.provide(ServerSecretStore.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-attachment-" })),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
       ),
     ),
   ),
 );
+
+import { OrchestratorToolkit } from "./orchestrator/tools.ts";
+import { PullRequestsToolkit } from "./pullRequests/tools.ts";
+import { DeviceToolkit } from "./device/tools.ts";
+import { WorktreeToolkit } from "./worktree/tools.ts";
+
+interface ParameterSchema {
+  readonly description?: string;
+  readonly properties?: Readonly<Record<string, ParameterSchema>>;
+  readonly anyOf?: ReadonlyArray<ParameterSchema>;
+  readonly items?: ParameterSchema;
+}
+
+const parameterFields = (schema: ParameterSchema, field: string): ParameterSchema[] => [
+  ...(schema.properties?.[field] ? [schema.properties[field]] : []),
+  ...(schema.anyOf ?? []).flatMap((member) => parameterFields(member, field)),
+  ...(schema.items ? parameterFields(schema.items, field) : []),
+];
+
+it("advertises existing string parameter guidance to MCP clients", () => {
+  const tools = {
+    ...OrchestratorToolkit.tools,
+    ...PullRequestsToolkit.tools,
+    ...DeviceToolkit.tools,
+    ...WorktreeToolkit.tools,
+  };
+  for (const [name, path] of [
+    ["delegate_task", "clientRequestId"],
+    ["delegate_task", "target.providerInstanceId"],
+    ["delegate_task", "target.driverKind"],
+    ["request_secret", "label"],
+    ["request_secret", "reason"],
+    ["schedule_task", "projectId"],
+    ["list_scheduled_tasks", "projectId"],
+    ["orchestrator_capabilities", "search"],
+    ["link_pull_request", "threadId"],
+    ["link_pull_request", "repository"],
+    ["link_pull_request", "host"],
+    ["list_thread_pull_requests", "threadId"],
+    ["t3_worktree_handoff", "baseRef"],
+    ["t3_worktree_handoff", "continuationPrompt"],
+    ["device_open", "deviceId"],
+    ["device_open", "hostId"],
+    ["device_screenshot", "deviceId"],
+    ["device_close", "deviceId"],
+    ["t3_thread_update", "title"],
+    ["t3_thread_update", "clientRequestId"],
+    ["t3_thread_update", "pullRequest.url"],
+    ["t3_thread_update", "pullRequest.repository"],
+    ["schedule_task", "schedule.timeOfDay"],
+    ["schedule_task", "schedule.signature.header"],
+  ] as const) {
+    const schema = Tool.getJsonSchema(tools[name]) as ParameterSchema;
+    const fields = path
+      .split(".")
+      .reduce<ParameterSchema[]>(
+        (nodes, field) => nodes.flatMap((node) => parameterFields(node, field)),
+        [schema],
+      );
+    expect(fields.length, name + "." + path).toBeGreaterThan(0);
+    for (const field of fields) {
+      expect(field.description, name + "." + path).toEqual(expect.any(String));
+    }
+  }
+});
