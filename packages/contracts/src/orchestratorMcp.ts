@@ -90,11 +90,9 @@ export const OrchestratorMcpTarget = Schema.Struct({
   providerInstanceId: Schema.optional(ProviderInstanceId).annotate({
     description: "Provider instance id from `orchestrator_capabilities`.",
   }),
-  driverKind: Schema.optional(
-    ProviderDriverKind.annotate({
-      description: "Prefer `providerInstanceId`.",
-    }),
-  ),
+  driverKind: Schema.optional(ProviderDriverKind).annotate({
+    description: "Prefer `providerInstanceId`.",
+  }),
   model: Schema.optional(TrimmedNonEmptyString),
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
