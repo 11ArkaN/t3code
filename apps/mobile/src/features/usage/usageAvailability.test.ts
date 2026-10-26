@@ -6,6 +6,7 @@ import {
   type UsageSummary,
 } from "@t3tools/contracts";
 import { mergeUsage } from "@t3tools/shared/usageMerge";
+import { resolveUsageAccess } from "@t3tools/client-runtime/state/usage-access";
 import { describe, expect, it } from "vite-plus/test";
 
 import { usageAvailability } from "./usageAvailability";
@@ -67,6 +68,7 @@ function usage(
     summary: UsageSummary | null;
     error?: string | null;
     isConnected?: boolean;
+    isPending?: boolean;
     canReadDiagnostics?: boolean;
   })[],
 ) {
@@ -80,6 +82,27 @@ function usage(
 }
 
 describe("usage availability after merging selected environments", () => {
+  it.each(["connecting", "reconnecting"] as const)(
+    "keeps usage loading while access is checked during %s",
+    (connectionPhase) => {
+      const { availability } = usage([
+        {
+          ...mac,
+          summary: null,
+          isConnected: false,
+          ...resolveUsageAccess({ connectionPhase, session: null, hasSessionError: false }),
+        },
+      ]);
+      expect(availability.isLoading).toBe(true);
+      expect(availability.hasCompatibleSummary).toBe(false);
+      expect(availability.canRetry).toBe(false);
+      expect(availability.coverageMessage).toBeNull();
+      expect(availability.notices).toEqual([
+        { environmentId: mac.environmentId, message: "Waiting for usage from MacBook Pro." },
+      ]);
+    },
+  );
+
   it("withholds incompatible totals and identifies which side needs updating", () => {
     const older = {
       ...mac,

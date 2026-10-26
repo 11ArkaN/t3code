@@ -8,6 +8,7 @@ export function usageAvailability(
     readonly summary: UsageSummary | null;
     readonly error?: string | null;
     readonly isConnected?: boolean;
+    readonly isPending?: boolean;
     readonly canReadDiagnostics?: boolean;
   }[],
   mismatches: readonly UsageContractMismatch[],
@@ -16,9 +17,14 @@ export function usageAvailability(
   const hasCompatibleSummary = environments.some(
     ({ environmentId, summary }) => summary != null && !incompatibleIds.has(environmentId),
   );
-  const isLoading = environments.some(
-    ({ summary, error, isConnected }) => summary == null && !error && isConnected !== false,
-  );
+  const waitingForUsage = ({
+    summary,
+    error,
+    isConnected,
+    isPending,
+  }: (typeof environments)[number]) =>
+    summary == null && !error && (isPending || isConnected !== false);
+  const isLoading = environments.some(waitingForUsage);
   const notices = environments.flatMap((environment) => {
     const { environmentId, label, summary, error, isConnected } = environment;
     const mismatch = mismatches.find((entry) => entry.environmentId === environmentId);
@@ -30,6 +36,8 @@ export function usageAvailability(
         mismatch.direction === "clientBehind"
           ? `Update this app to see usage from ${label}. Its server uses a newer usage format.`
           : `Update the T3 Code server on ${label} to see its usage. Its usage format is too old for this app.`;
+    } else if (waitingForUsage(environment)) {
+      message = `Waiting for usage from ${label}.`;
     } else if (isConnected === false) {
       message =
         summary != null
@@ -40,8 +48,6 @@ export function usageAvailability(
         summary != null
           ? `Could not refresh usage from ${label}. Showing saved usage, which may be out of date.`
           : `Could not load usage from ${label}. Try again.`;
-    } else if (summary == null) {
-      message = `Waiting for usage from ${label}.`;
     } else {
       return [];
     }
