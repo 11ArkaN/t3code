@@ -80,6 +80,15 @@ describe("splitMermaidMarkdown", () => {
     ]);
   });
 
+  it("does not close a fence on non-ASCII whitespace", () => {
+    const markdown = "```mermaid\ngraph LR\n```\u00a0\nA-->B\n```\nafter";
+    expect(
+      splitMermaidMarkdown(markdown).find((segment) => segment.kind === "mermaid"),
+    ).toMatchObject({
+      source: "graph LR\n```\u00a0\nA-->B\n",
+    });
+  });
+
   it("splits tilde fences and closes on a longer fence", () => {
     const segments = splitMermaidMarkdown("~~~ Mermaid\ngraph LR\n~~~~\n");
     expect(segments).toEqual([

@@ -53,7 +53,7 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
       } else if (
         fence[0] === open.fence[0] &&
         fence.length >= open.fence.length &&
-        info.trim() === ""
+        /^[ \t]*$/.test(info)
       ) {
         if (open.mermaid && codeOffsets.has(open.start)) {
           const source = markdown.slice(open.bodyStart, lineStart);
