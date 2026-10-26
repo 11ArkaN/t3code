@@ -111,11 +111,11 @@ const threadRef = {
 
 let settledAt = 0;
 
-function settle(url: string, title: string): void {
+function settle(url: string, title: string, tabId = "tab_a"): void {
   settledAt += 1;
   const snapshot: PreviewSessionSnapshot = {
     threadId: threadRef.threadId,
-    tabId: "tab_a",
+    tabId,
     navStatus: { _tag: "Success", url, title },
     canGoBack: false,
     canGoForward: false,
@@ -151,6 +151,15 @@ describe("useBrowserHistoryStore", () => {
       url: "http://a.test/",
       title: "My App",
     });
+  });
+
+  it("keeps the newest title when another tab shows the same url", () => {
+    useBrowserHistoryStore.getState().registerThreadProject(threadRef, "proj-a");
+    recordVisitForThread(threadRef, "http://a.test/", 1);
+    settle("http://a.test/", "Old", "tab_a");
+    settle("http://a.test/", "Old", "tab_b");
+    settle("http://a.test/", "New", "tab_a");
+    expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.title).toBe("New");
   });
 
   it("sets a title against a settled url that differs from the stored one only by a trailing slash", () => {

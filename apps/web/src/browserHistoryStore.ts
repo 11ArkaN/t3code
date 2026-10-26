@@ -342,7 +342,11 @@ function recordPreviewTitles(ref: ScopedThreadRef, preview: ThreadPreviewState):
   if (!projectKey || !state.byProjectKey[projectKey]?.length) return;
   const connection = readPreparedConnection(ref.environmentId);
   const environmentHostname = connection ? new URL(connection.httpBaseUrl).hostname : null;
-  for (const session of Object.values(preview.sessions)) {
+  // Tabs can share a URL; applying oldest first lets the newest settle win.
+  const sessions = Object.values(preview.sessions).toSorted((a, b) =>
+    a.updatedAt.localeCompare(b.updatedAt),
+  );
+  for (const session of sessions) {
     const status = session.navStatus;
     if (status._tag !== "Success" || !status.title) continue;
     state.setTitleForUrl(projectKey, status.url, status.title, environmentHostname);
