@@ -46,9 +46,13 @@ it.live("managed service falls back to loopback when its wildcard port is taken"
   Effect.scoped(
     Effect.gen(function* () {
       const { port } = yield* occupyNonLoopbackPort;
-      const { address } = yield* HttpServer.HttpServer.pipe(
+      const { address, config } = yield* Effect.all({
+        address: Effect.map(HttpServer.HttpServer, (server) => server.address),
+        config: ServerConfig.ServerConfig,
+      }).pipe(
         Effect.provide(httpServerWithConfig({ host: "0.0.0.0", port, privateNetworkOnly: true })),
       );
+      assert.strictEqual(config.host, "127.0.0.1");
       const listening =
         address._tag === "InetAddressV4"
           ? `${String(address.address)}:${address.port}`
