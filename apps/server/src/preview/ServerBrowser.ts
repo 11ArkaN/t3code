@@ -447,6 +447,9 @@ const CLIPBOARD_SCRIPT = `(() => {
   };
 })();`;
 
+const cannotShowMessage = (url: string) =>
+  `${url} is a file this browser cannot show, so it was downloaded instead. preview_status lists it under downloads.`;
+
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const host = { platform: yield* HostProcess.Platform, arch: yield* HostProcess.Architecture };
@@ -888,12 +891,19 @@ const make = Effect.gen(function* () {
       snapshot.navStatus._tag === "Loading" &&
       ((!adopted && !desktop) || isPdfAssetUrl(snapshot.navStatus.url))
     ) {
+      const url = snapshot.navStatus.url;
       const options = { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS } as const;
       tab.initialNavigation = (
         (desktop || adopted) && page.url() === snapshot.navStatus.url
           ? page.reload(options)
           : page.goto(snapshot.navStatus.url, options)
       ).then(constVoid, (cause: unknown) => {
+        if (cause instanceof Error && cause.message.includes("Download is starting")) {
+          throw new ServerBrowserPage.ServerBrowserOperationError(
+            "PreviewAutomationExecutionError",
+            cannotShowMessage(url),
+          );
+        }
         throw ServerBrowserPage.toOperationError(cause, NAVIGATION_TIMEOUT_MS);
       });
 
@@ -1412,9 +1422,6 @@ const make = Effect.gen(function* () {
     const path = target.path ?? "";
     return `${target.protocol ?? "http"}://localhost:${target.port}${path.startsWith("/") || path === "" ? path : `/${path}`}`;
   };
-
-  const cannotShowMessage = (url: string) =>
-    `${url} is a file this browser cannot show, so it was downloaded instead. preview_status lists it under downloads.`;
 
   const navigate = async (
     tab: ServerTab,

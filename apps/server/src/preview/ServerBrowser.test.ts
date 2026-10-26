@@ -437,6 +437,28 @@ it.live("preview_open reports its navigation timeout instead of the request budg
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("preview_open explains a PDF download on a new tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker } = yield* ready;
+      initialNavigation = async () => {
+        throw new Error("page.goto: Download is starting");
+      };
+      const pdf = "https://example.com/paper.pdf";
+      const error = yield* broker
+        .invoke<PreviewAutomationStatus>({
+          scope,
+          operation: "open",
+          input: { url: pdf, reuseExistingTab: false, show: false },
+        })
+        .pipe(Effect.flip);
+      expect(error.message).toContain(pdf);
+      expect(error.message).toContain("cannot show");
+      expect(error.message).toContain("preview_status");
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live.each(["desktop" as const, undefined])(
   "explicit desktop targets ($0 runtime) fail without creating a server tab",
   (runtime) =>
