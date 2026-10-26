@@ -201,14 +201,15 @@ export function resolveAutoSettlementAt(input: {
   // can settle the thread, never a merged or closed lookup.
   const hasOpenLink = links.some((link) => link.snapshot?.state === "open");
   // A watched merge has not woken the agent yet; its watch clears in the same command as that wake.
-  let awaitsMergeWake = false;
+  const awaitsMergeWake = links.some(
+    (link) => link.snapshot?.state === "merged" && link.watch !== undefined,
+  );
   if (hasOpenLink) {
     pullRequest = null;
   } else if (links.length > 0) {
     const latest = links.reduce((current, candidate) =>
       linkTerminalAtMs(candidate) > linkTerminalAtMs(current) ? candidate : current,
     );
-    awaitsMergeWake = latest.snapshot?.state === "merged" && latest.watch !== undefined;
     pullRequest =
       latest.snapshot === null
         ? null
