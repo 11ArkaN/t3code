@@ -14,6 +14,7 @@ import {
   type GhosttyCellRange,
   type GhosttyCellMetrics,
 } from "./renderer";
+import { Osc52Scanner } from "./osc52";
 import symbolsFontUrl from "./fonts/SymbolsNerdFontMono-Regular.woff2?url";
 import { isMonospaceFamily } from "../../appearanceFonts";
 import { observeResize } from "../../lib/observeResize";
@@ -512,6 +513,7 @@ export interface GhosttyTerminalSurfaceOptions {
   readonly canActivateLink?: (text: string) => boolean;
   /** The host must prevent the default menu; native Paste cannot reach a canvas terminal. */
   readonly onContextMenu?: (event: MouseEvent) => void;
+  readonly onClipboardWrite?: (text: string) => void;
 }
 
 export class GhosttyTerminalSurface {
@@ -578,6 +580,11 @@ export class GhosttyTerminalSurface {
   private selectionMoved = false;
   private composing = false;
   private focused = false;
+  private readonly osc52 = new Osc52Scanner((text) => {
+    if (this.focused && this.visible && document.hasFocus()) {
+      this.options.onClipboardWrite?.(text);
+    }
+  });
   private resizeNotified = false;
   private canvasConfigured = false;
   private canvasDevicePixelRatio = 0;
@@ -737,6 +744,7 @@ export class GhosttyTerminalSurface {
         ? undefined
         : () => this.cancelSynchronizedRenderTimer(),
     );
+    if (this.options.onClipboardWrite) this.osc52.write(data);
     this.synchronizeMouseTrackingState();
     this.cursorOn = true;
     this.scrollbarDirty = true;
@@ -747,6 +755,7 @@ export class GhosttyTerminalSurface {
     if (this.disposed) return;
     this.cancelSynchronizedRenderTimer();
     this.lastMouseMotionData = "";
+    this.osc52.reset();
     this.core.resetAndWrite(data);
     this.synchronizeMouseTrackingState();
     this.cursorOn = true;
