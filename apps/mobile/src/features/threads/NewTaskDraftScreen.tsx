@@ -53,6 +53,8 @@ import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 
 import {
   clearComposerDraftContent,
+  composerDraftsAtom,
+  findNewTaskDraftKeys,
   getComposerDraftSnapshot,
   mergeComposerDraftContent,
   restoreComposerDraftSnapshot,
@@ -92,6 +94,8 @@ import {
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
 import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-share-model";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { composerDraftHasUserContent } from "../../state/pending-new-tasks-model";
+import { scopedProjectKey } from "../../lib/scopedEntities";
 import { serverEnvironment } from "../../state/server";
 
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -414,6 +418,62 @@ export function NewTaskDraftScreen(props: {
       cancelled = true;
     };
   }, [navigation, openDraft, projects, props.draftId, props.pendingTaskId]);
+
+  // A plain new thread resumes the project's newest unsent draft instead of hiding it behind a fresh one.
+  const resumedUnsentDraftRef = useRef(false);
+  const resumeUnsentDraftFor = (() => {
+    const initial = props.initialProjectRef;
+    if (
+      props.draftId ||
+      props.pendingTaskId ||
+      props.incomingShareId ||
+      initial?.branch ||
+      initial?.cloning ||
+      !selectedProject ||
+      !flow.draftKey
+    ) {
+      return null;
+    }
+    const intended =
+      initial?.environmentId && initial.projectId
+        ? initial.environmentId === selectedProject.environmentId &&
+          initial.projectId === selectedProject.id
+        : selectedProjectKey ===
+          scopedProjectKey(selectedProject.environmentId, selectedProject.id);
+    return intended ? { draftKey: flow.draftKey, project: selectedProject } : null;
+  })();
+  const resumeDraftKey = resumeUnsentDraftFor?.draftKey ?? null;
+  const resumeProject = resumeUnsentDraftFor?.project ?? null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- waits for persisted drafts to hydrate from storage.
+  useEffect(() => {
+    if (resumedUnsentDraftRef.current || resumeDraftKey === null || resumeProject === null) {
+      return;
+    }
+    let cancelled = false;
+    void waitForComposerDraftsLoaded().then(() => {
+      if (cancelled || resumedUnsentDraftRef.current) {
+        return;
+      }
+      resumedUnsentDraftRef.current = true;
+      const drafts = appAtomRegistry.get(composerDraftsAtom);
+      if (composerDraftHasUserContent(getComposerDraftSnapshot(resumeDraftKey))) {
+        return;
+      }
+      const unsent = findNewTaskDraftKeys(drafts, {
+        environmentId: resumeProject.environmentId,
+        projectId: resumeProject.id,
+      }).find(
+        (key) =>
+          key !== resumeDraftKey && composerDraftHasUserContent(getComposerDraftSnapshot(key)),
+      );
+      if (unsent) {
+        openDraft(unsent);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openDraft, resumeDraftKey, resumeProject]);
 
   const attemptedPendingTaskIdRef = useRef<string | null>(null);
   useEffect(() => {
