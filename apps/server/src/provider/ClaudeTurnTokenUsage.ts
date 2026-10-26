@@ -107,7 +107,11 @@ export function normalizeClaudeTurnTokenUsage(
     finiteNonNegativeInteger(finalUsage?.input_tokens) !== undefined &&
     finiteNonNegativeInteger(finalUsage?.output_tokens) !== undefined &&
     inputTokens !== undefined &&
-    rawOutputTokens !== undefined
+    rawOutputTokens !== undefined &&
+    BILLED_USAGE_FIELDS.every(
+      (field) =>
+        finalUsage?.[field] == null || finiteNonNegativeInteger(finalUsage[field]) !== undefined,
+    )
   ) {
     return {
       ...commonUsage,

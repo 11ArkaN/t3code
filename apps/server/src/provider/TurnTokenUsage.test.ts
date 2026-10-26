@@ -195,6 +195,20 @@ describe("billable native turn usage", () => {
     },
   );
 
+  it.each(["cache_read_input_tokens", "cache_creation_input_tokens"])(
+    "keeps Claude usage partial when the final %s is invalid",
+    (field) => {
+      expect(
+        normalizeClaudeTurnTokenUsage(
+          { subtype: "success", usage: { input_tokens: 5, output_tokens: 3, [field]: -1 } },
+          false,
+          "completed",
+          [{ input_tokens: 100, output_tokens: 20, [field]: 40 }],
+        ),
+      ).toMatchObject({ usageStatus: "partial", inputTokens: 145, outputTokens: 23 });
+    },
+  );
+
   it("adds Claude steering segments to the final measured result once", () => {
     expect(
       normalizeClaudeTurnTokenUsage(
