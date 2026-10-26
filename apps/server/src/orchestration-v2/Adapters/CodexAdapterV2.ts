@@ -1681,7 +1681,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const context = (yield* Ref.get(additionalContextByThread)).get(threadId);
             // Nothing to restore before this session's first turn, so the next turn must resend.
             if (!context) {
-              deliveredContextDigests.set(threadId, undefined);
+              yield* invalidateAdditionalContext(threadId);
               return;
             }
             yield* client.request("thread/inject_items", {
@@ -1709,13 +1709,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           (effect, threadId) =>
             effect.pipe(
               Effect.timeout("10 seconds"),
-              Effect.catch((cause) => {
-                deliveredContextDigests.set(threadId, undefined);
-                return Effect.logWarning(
-                  "Failed to restore Codex additional context after compaction.",
-                  { cause },
-                );
-              }),
+              Effect.catch((cause) =>
+                invalidateAdditionalContext(threadId).pipe(
+                  Effect.andThen(
+                    Effect.logWarning(
+                      "Failed to restore Codex additional context after compaction.",
+                      { cause },
+                    ),
+                  ),
+                ),
+              ),
             ),
         );
         const initialized = yield* Ref.make(false);
@@ -1862,6 +1865,22 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
 
+        const invalidateAdditionalContext = Effect.fn("CodexAdapterV2.invalidateAdditionalContext")(
+          function* (threadId: string) {
+            deliveredContextDigests.set(threadId, undefined);
+            const providerThread = rootProviderThreads.get(threadId);
+            if (!providerThread?.nativeMetadata?.codexAdditionalContextDigest) return;
+            const { codexAdditionalContextDigest: _digest, ...nativeMetadata } =
+              providerThread.nativeMetadata;
+            const updated = { ...providerThread, nativeMetadata };
+            rootProviderThreads.set(threadId, updated);
+            yield* emitProviderEvent({
+              type: "provider_thread.updated",
+              driver: CODEX_PROVIDER,
+              providerThread: updated,
+            });
+          },
+        );
         const emitGoalUpdate = Effect.fnUntraced(function* (nativeThreadId: string) {
           const providerThread = rootProviderThreads.get(nativeThreadId);
           if (providerThread === undefined || !goalsByNativeThread.has(nativeThreadId)) return;
@@ -6687,6 +6706,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               yield* Ref.update(pendingRootTurns, (current) =>
                 new Map(current).set(threadId, turnInput),
               );
+              rootProviderThreads.set(threadId, turnInput.providerThread);
+              yield* invalidateAdditionalContext(threadId);
               // Clear on interruption; a late turn/started must not be adopted after an interrupted start.
               yield* client.request("thread/compact/start", { threadId }).pipe(
                 Effect.onError(() =>

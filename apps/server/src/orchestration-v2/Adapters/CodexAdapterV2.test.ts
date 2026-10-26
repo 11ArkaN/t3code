@@ -2115,6 +2115,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           }),
         );
         yield* compactRestart.awaitTerminal(1);
+        const invalidatedThread = compactRestart.events.findLast(
+          (event) => event.type === "provider_thread.updated",
+        )?.providerThread;
+        assert.isDefined(invalidatedThread);
+        assert.isUndefined(invalidatedThread?.nativeMetadata?.codexAdditionalContextDigest);
         yield* compactRestart.runtime.startTurn(
           makeCodexTestTurnInput({
             threadId: compactRestart.threadId,
