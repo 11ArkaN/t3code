@@ -103,3 +103,52 @@ describe("makeInjectedSecrets", () => {
     expect(secrets.redactChunk(second.pending, "x")).toEqual({ emit: "s3x", pending: "" });
   });
 });
+
+describe("makeInjectedSecrets matching", () => {
+  it("prefers the longest value whether or not it is split across chunks", () => {
+    const secrets = makeInjectedSecrets();
+    secrets.put("instance", [
+      { name: "SHORT", value: "abc" },
+      { name: "LONG", value: "abcdef" },
+      { name: "TAIL", value: "cdZZ" },
+    ]);
+
+    const first = secrets.redactChunk("", "x abc");
+    expect(first).toEqual({ emit: "x ", pending: "abc" });
+    expect(secrets.redactChunk(first.pending, "def")).toEqual({
+      emit: "[redacted LONG]",
+      pending: "",
+    });
+    expect(secrets.redactChunk(first.pending, "dx")).toEqual({
+      emit: "[redacted SHORT]dx",
+      pending: "",
+    });
+    // A tail held at the end of the stream can itself be a whole shorter value.
+    expect(secrets.redactText(first.pending)).toBe("[redacted SHORT]");
+    // The leftmost match wins even when a later value begins inside it.
+    const split = secrets.redactChunk("", "abcd");
+    expect(secrets.redactChunk(split.pending, "ZZ").emit).toBe(split.emit + "[redacted SHORT]dZZ");
+    expect(secrets.redactText("abcdZZ")).toBe("[redacted SHORT]dZZ");
+  });
+
+  it("handles very long values and deeply nested JSON", () => {
+    const secrets = makeInjectedSecrets();
+    const long = "a".repeat(48_000) + "b";
+    secrets.put("instance", [
+      { name: "LONG", value: long },
+      { name: "KEY", value: "secret" },
+    ]);
+    expect(secrets.redactText("hello")).toBe("hello");
+    expect(secrets.redactText(`x${long}y`)).toBe("x[redacted LONG]y");
+
+    let nested: unknown = "secret";
+    for (let depth = 0; depth < 3_000; depth++) nested = depth % 2 === 0 ? [nested] : { k: nested };
+    let redacted = secrets.redact(nested);
+    for (let depth = 2_999; depth >= 0; depth--) {
+      redacted = depth % 2 === 0 ? (redacted as Array<unknown>)[0] : (redacted as { k: unknown }).k;
+    }
+    expect(redacted).toBe("[redacted KEY]");
+    const untouched = { a: [{ b: "plain" }] };
+    expect(secrets.redact(untouched)).toBe(untouched);
+  });
+});

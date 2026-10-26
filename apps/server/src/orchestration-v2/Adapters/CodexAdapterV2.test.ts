@@ -3287,7 +3287,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  it.effect("persists command output without sensitive values from the instance environment", () =>
+  it.effect("persists tool results without sensitive values from the instance environment", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -3322,6 +3322,30 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               scenario: "codex-injected-env-output",
               entries: [
                 ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+                {
+                  type: "emit_inbound",
+                  label: "item/completed/fileChange",
+                  frame: {
+                    method: "item/completed",
+                    params: {
+                      threadId: nativeThreadId,
+                      turnId: nativeTurnId,
+                      completedAtMs: 3,
+                      item: {
+                        type: "fileChange",
+                        id: "call-codex-injected-env-file",
+                        status: "completed",
+                        changes: [
+                          {
+                            path: "/workspace/.env",
+                            kind: { type: "add" },
+                            diff: `+T3_TEST_PROXY_API_KEY=${secret}`,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
                 ...(["inProgress", "completed"] as const).map((status) => ({
                   type: "emit_inbound" as const,
                   label: `item/${status}/command`,
@@ -3411,6 +3435,10 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           assert.include(outputs[0], `T3_TEST_PROXY_BASE_URL=${baseUrl}`);
           assert.include(outputs[0], "USER_NOTE=keep this line");
           assert.notInclude(outputs[0], secret);
+          const diffs = (yield* orchestrator.getThreadProjection(threadId)).turnItems.flatMap(
+            (item) => (item.type === "file_change" ? [item.diffStr ?? ""] : []),
+          );
+          assert.deepEqual(diffs, ["+T3_TEST_PROXY_API_KEY=[redacted T3_TEST_PROXY_API_KEY]"]);
 
           const sql = yield* SqlClient.SqlClient;
           const tables = yield* sql<{ readonly name: string }>`
