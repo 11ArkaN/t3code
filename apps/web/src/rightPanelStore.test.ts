@@ -175,6 +175,20 @@ describe("rightPanelStore", () => {
     unregister();
   });
 
+  it("opens files in the side chat's own workspace when it differs from its parent", () => {
+    const opened = vi.fn();
+    const unregister = registerEmbeddedPanelHost(refB, refA, opened, false);
+    useRightPanelStore.getState().openFile(refB, "src/app.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).activeSurfaceId,
+    ).toBe("file:src/app.ts");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([]);
+    expect(opened).toHaveBeenCalledOnce();
+    unregister();
+  });
+
   it("restores a mounted side chat's file into its own panel when asked", () => {
     const store = useRightPanelStore.getState();
     const unregister = registerEmbeddedPanelHost(refB, refA, () => undefined);

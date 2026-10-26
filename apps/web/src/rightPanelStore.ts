@@ -270,6 +270,7 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
 // there. Opened as a full thread, it owns its panel again.
 interface EmbeddedPanelHost {
   readonly hostRef: ScopedThreadRef;
+  readonly sharesWorkspace: boolean;
   /** The user opened something only the side chat's own panel can show. */
   readonly onOwnPanelOpen: () => void;
 }
@@ -306,9 +307,10 @@ export function registerEmbeddedPanelHost(
   childRef: ScopedThreadRef,
   hostRef: ScopedThreadRef,
   onOwnPanelOpen: () => void,
+  sharesWorkspace = true,
 ): () => void {
   const key = scopedThreadKey(childRef);
-  const host: EmbeddedPanelHost = { hostRef, onOwnPanelOpen };
+  const host: EmbeddedPanelHost = { hostRef, onOwnPanelOpen, sharesWorkspace };
   embeddedPanelHosts.set(key, host);
   return () => {
     if (embeddedPanelHosts.get(key) === host) embeddedPanelHosts.delete(key);
@@ -318,7 +320,12 @@ export function registerEmbeddedPanelHost(
 /** The thread whose right panel shows what `ref` opens: its embedding host, or itself. */
 function panelOwnerOf(ref: ScopedThreadRef, options?: OpenInPanelOptions): ScopedThreadRef {
   if (options?.inOwnPanel === true) return ref;
-  return embeddedPanelHosts.get(scopedThreadKey(ref))?.hostRef ?? ref;
+  const host = embeddedPanelHosts.get(scopedThreadKey(ref));
+  if (host?.sharesWorkspace === false) {
+    host.onOwnPanelOpen();
+    return ref;
+  }
+  return host?.hostRef ?? ref;
 }
 
 /**

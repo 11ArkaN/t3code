@@ -3196,6 +3196,7 @@ export default function ChatView(props: ChatViewProps) {
           composerRef={sideComposerRef}
           focused={focusedSideChatId === surface.threadId}
           composerSlot={sideChatComposerSlot}
+          coveringParent={shouldUsePlanSidebarSheet}
         />
       )}
     />
@@ -4078,10 +4079,13 @@ function SideChatPanel(props: {
   composerRef: RefObject<ChatComposerHandle | null>;
   focused: boolean;
   composerSlot: HTMLElement | null;
+  coveringParent: boolean;
 }) {
   const { parentRef, threadId, focused, composerSlot } = props;
   const childRef = scopeThreadRef(parentRef.environmentId, threadId);
   const shell = useThreadShell(childRef);
+  const parentShell = useQuietThreadShell(parentRef);
+  const sharesWorkspace = shell?.worktreePath === parentShell?.worktreePath;
   // A restored tab can name a side chat the cached shell does not have yet;
   // only this environment's live snapshot can say it is gone.
   const live = isThreadRouteSnapshotAuthoritative(
@@ -4097,13 +4101,18 @@ function SideChatPanel(props: {
   const navigate = useNavigate();
   useEffect(
     () =>
-      registerEmbeddedPanelHost(childRef, parentRef, () => {
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(childRef),
-        });
-      }),
-    [childRef, navigate, parentRef],
+      registerEmbeddedPanelHost(
+        childRef,
+        parentRef,
+        () => {
+          void navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(childRef),
+          });
+        },
+        sharesWorkspace,
+      ),
+    [childRef, navigate, parentRef, sharesWorkspace],
   );
   if (shell === null || gone) return null;
   return (
@@ -4111,7 +4120,7 @@ function SideChatPanel(props: {
     // never reach the side chat's composer (or the reverse).
     <ComposerHandleContext value={props.composerRef}>
       <ChatView
-        sideChat={{ parentRef, focused, composerSlot }}
+        sideChat={{ parentRef, focused, composerSlot, coveringParent: props.coveringParent }}
         routeKind="server"
         environmentId={parentRef.environmentId}
         threadId={threadId}

@@ -4,7 +4,7 @@ import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thr
 import { memo, use, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon } from "lucide-react";
+import { GitForkIcon, MessageCircleQuestionIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
@@ -15,7 +15,6 @@ import { useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
@@ -114,50 +113,47 @@ function AssistantForkButton({
     );
   };
 
-  if (onAskAboutResponse) {
-    return (
-      <Menu>
-        <MenuTrigger
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger
           render={
             <Button
               type="button"
               size="xs"
               variant="ghost"
               disabled={busy}
-              aria-label="Fork or ask about this response"
+              onClick={fork}
+              aria-label="Fork from this response"
             />
           }
         >
           <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
-        </MenuTrigger>
-        <MenuPopup align="start" className="min-w-52">
-          <MenuItem onClick={fork}>Fork to new thread</MenuItem>
-          <MenuItem disabled={ctx.askAboutResponseDisabledReason !== null} onClick={ask}>
+        </TooltipTrigger>
+        <TooltipPopup side="top">Fork from this response</TooltipPopup>
+      </Tooltip>
+      {onAskAboutResponse ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={busy || ctx.askAboutResponseDisabledReason !== null}
+                onClick={ask}
+                aria-label="Ask about this response"
+              />
+            }
+          >
+            <MessageCircleQuestionIcon className="size-3" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
             {ctx.askAboutResponseDisabledReason ?? "Ask about this response"}
-          </MenuItem>
-        </MenuPopup>
-      </Menu>
-    );
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={busy}
-            onClick={fork}
-            aria-label="Fork from this response"
-          />
-        }
-      >
-        <GitForkIcon className={cn("size-3", busy && "animate-pulse")} />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Fork from this response</TooltipPopup>
-    </Tooltip>
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
+    </>
   );
 }
 

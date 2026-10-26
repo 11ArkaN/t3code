@@ -4100,6 +4100,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // The source is unlocked; validate the modes copied here, not an earlier read.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);
 
+    yield* refuseAboveDispatchModeLimit(command, command.targetThreadId, {
+      runtimeMode: command.runtimeMode ?? sourceProjection.thread.runtimeMode,
+      interactionMode: sourceProjection.thread.interactionMode,
+    });
+
     const sourceRun = runForSourcePoint(sourceProjection, command.sourcePoint);
 
     if (sourceRun === null) {
@@ -4193,7 +4198,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // The source is unlocked; validate the modes copied here, not an earlier read.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);
     const targetProjection = yield* projectionStore
-      .getThreadRecords(command.targetThreadId, ["contextTransfers"])
+      .getThreadRecords(command.targetThreadId, ["contextTransfers", "runs"])
       .pipe(
         Effect.mapError(
           (cause) =>
@@ -4203,6 +4208,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
+
+    if (targetProjection.runs.some(isBlockingRun)) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "Wait for the main thread to finish before bringing back a side chat.",
+      });
+    }
+    if (
+      pendingMergeBackTransfersForThread(targetProjection).some(
+        (transfer) => transfer.sourceThreadId !== command.sourceThreadId,
+      )
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause:
+          "Send a message in the main thread to use its pending merge before bringing back another side chat.",
+      });
+    }
 
     if (
       sourceProjection.thread.lineage.relationshipToParent !== "fork" ||

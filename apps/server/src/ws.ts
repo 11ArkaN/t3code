@@ -1005,6 +1005,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const projectService = yield* ProjectService.ProjectService;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
     let subagentThreadIds = new Set<string>();
+    const publishedThreadIds = new Set<string>();
     const filterSubagentTranscript = (stored: ApplicationStoredEvent) =>
       shouldPublishShellApplicationEvent(stored, subagentThreadIds);
 
@@ -1084,7 +1085,19 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
               return yield* projectItem(stored);
             }
             const shell = yield* threadManagement.getThreadShell(stored.event.threadId);
-            return shellStreamItemFromThreadShell({ stored, shell });
+            const item = shellStreamItemFromThreadShell({ stored, shell });
+            if (
+              shell?.sideChat === true &&
+              shell.lineage.parentThreadId !== null &&
+              !publishedThreadIds.has(shell.lineage.parentThreadId) &&
+              item.kind === "thread.updated"
+            ) {
+              const parent = yield* threadManagement.getThreadShell(shell.lineage.parentThreadId);
+              if (parent !== null && parent.deletedAt === null && parent.archivedAt === null) {
+                return { ...item, parentThread: parent };
+              }
+            }
+            return item;
           }),
         { concurrency: 8 },
       );
@@ -1221,6 +1234,18 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
 
     return stream.pipe(
       dedupeShellEnrichment,
+      Stream.tap((item) =>
+        Effect.sync(() => {
+          if (item.kind === "snapshot") {
+            for (const thread of item.snapshot.threads) publishedThreadIds.add(thread.id);
+          } else if (item.kind === "thread.updated") {
+            publishedThreadIds.add(item.thread.id);
+            if (item.parentThread !== undefined) publishedThreadIds.add(item.parentThread.id);
+          } else if (item.kind === "thread.removed") {
+            publishedThreadIds.delete(item.threadId);
+          }
+        }),
+      ),
       Stream.mapError(
         (cause) =>
           new OrchestrationV2GetShellSnapshotError({

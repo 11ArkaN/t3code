@@ -2114,6 +2114,7 @@ export const OrchestrationV2ShellStreamItem = Schema.Union([
     sequence: NonNegativeInt,
     location: Schema.Literals(["active", "archive"]),
     thread: OrchestrationV2ThreadShell,
+    parentThread: Schema.optionalKey(OrchestrationV2ThreadShell),
   }),
   Schema.Struct({
     kind: Schema.Literal("thread.removed"),

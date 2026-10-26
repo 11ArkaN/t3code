@@ -1632,3 +1632,104 @@ it.effect("dispatch records the command outcome and its duration", () =>
     assert.strictEqual((yield* durations).count - durationsBefore, 1);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect("refuses a second merge source and a merge into a busy parent before persisting it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const parentId = ThreadId.make("thread:merge-guard-parent");
+    const now = yield* DateTime.now;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-merge-guard-parent"),
+      threadId: parentId,
+      projectId: ProjectId.make("project:merge-guard"),
+      title: "Parent",
+      modelSelection,
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const parentRun = {
+      id: RunId.make("run:merge-guard-parent"),
+      threadId: parentId,
+      ordinal: 1,
+      providerInstanceId: instanceId,
+      modelSelection,
+      providerThreadId: null,
+      userMessageId: MessageId.make("message:merge-guard-parent"),
+      rootNodeId: null,
+      activeAttemptId: null,
+      status: "completed" as const,
+      requestedAt: now,
+      startedAt: now,
+      completedAt: now,
+      checkpointId: CheckpointId.make("checkpoint:merge-guard-parent"),
+      contextHandoffId: null,
+    };
+    yield* projections.apply({
+      id: EventId.make("event:merge-guard-parent"),
+      type: "run.updated",
+      threadId: parentId,
+      runId: parentRun.id,
+      providerInstanceId: instanceId,
+      occurredAt: now,
+      payload: parentRun,
+    });
+    const merge = (child: string, command: string) =>
+      orchestrator.dispatch({
+        type: "thread.merge_back",
+        commandId: CommandId.make(command),
+        sourceThreadId: ThreadId.make(child),
+        targetThreadId: parentId,
+        sourcePoint: { type: "latest_stable" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+    for (const child of ["first", "second"]) {
+      const childId = ThreadId.make(`thread:merge-guard-${child}`);
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make(`fork-merge-guard-${child}`),
+        sourceThreadId: parentId,
+        targetThreadId: childId,
+        sourcePoint: { type: "latest_stable" },
+        sideChat: true,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* projections.apply({
+        id: EventId.make(`event:merge-guard-${child}`),
+        type: "run.updated",
+        threadId: childId,
+        runId: RunId.make(`run:merge-guard-${child}`),
+        providerInstanceId: instanceId,
+        occurredAt: now,
+        payload: { ...parentRun, id: RunId.make(`run:merge-guard-${child}`), threadId: childId },
+      });
+    }
+    yield* merge("thread:merge-guard-first", "merge-guard-first");
+    const duplicate = yield* merge("thread:merge-guard-second", "merge-guard-second").pipe(
+      Effect.result,
+    );
+    assert.equal(duplicate._tag, "Failure");
+    const pending = (yield* projections.getThreadProjection(parentId)).contextTransfers.filter(
+      (transfer) => transfer.type === "merge_back" && transfer.status === "pending",
+    );
+    assert.equal(pending.length, 1);
+    yield* projections.apply({
+      id: EventId.make("event:merge-guard-busy"),
+      type: "run.updated",
+      threadId: parentId,
+      runId: parentRun.id,
+      providerInstanceId: instanceId,
+      occurredAt: now,
+      payload: { ...parentRun, status: "running", completedAt: null },
+    });
+    const busy = yield* merge("thread:merge-guard-first", "merge-guard-busy").pipe(Effect.result);
+    assert.equal(busy._tag, "Failure");
+  }).pipe(Effect.provide(layerTest)),
+);

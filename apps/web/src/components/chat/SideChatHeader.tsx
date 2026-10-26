@@ -3,6 +3,7 @@ import {
   describeSideChatVisibility,
   resolveLatestMergeBackRun,
 } from "@t3tools/client-runtime/state/thread-workflows";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -58,12 +59,16 @@ export function SideChatHeader(props: { environmentId: EnvironmentId; threadId: 
     },
   );
 
-  if (shell === null) return null;
-  const allowEdits = (composerRuntimeMode ?? shell.runtimeMode) !== "approval-required";
+  const allowEdits = (composerRuntimeMode ?? shell?.runtimeMode) !== "approval-required";
   const mergeRun = childProjection === null ? null : resolveLatestMergeBackRun(childProjection);
-  const canBringBack = shell.lineage.relationshipToParent === "fork" && mergeRun !== null;
-  const bringBackReason =
-    shell.lineage.relationshipToParent !== "fork"
+  const parentShell = useQuietThreadShell(parentRef);
+  const parentBusy = threadRuntimeIsActive(parentShell?.runtime ?? null);
+  if (shell === null) return null;
+  const canBringBack =
+    shell.lineage.relationshipToParent === "fork" && mergeRun !== null && !parentBusy;
+  const bringBackReason = parentBusy
+    ? "Wait for the main thread to finish."
+    : shell.lineage.relationshipToParent !== "fork"
       ? "This side chat started without history, so there is nothing to merge from."
       : mergeRun === null
         ? "Wait for a reply in this side chat first."

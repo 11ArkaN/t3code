@@ -266,10 +266,11 @@ export function useSideChatActions(parentRef: ScopedThreadRef | null) {
     closeSurface(childThreadId);
     const result = await deleteThread({
       environmentId: parentRef.environmentId,
-      input: { threadId: childThreadId },
+      input: { threadId: childThreadId, expectedSideChat: true },
     });
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      reportFailure("Could not discard the side chat", squashAtomCommandFailure(result));
+      const error = squashAtomCommandFailure(result);
+      if (!wasDiscardRefused(error)) reportFailure("Could not discard the side chat", error);
     }
   });
 

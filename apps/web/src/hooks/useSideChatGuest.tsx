@@ -11,7 +11,9 @@ import {
   TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR,
 } from "../components/chat/composerFocusRedirect";
 import { Button } from "../components/ui/button";
+import { useRightPanelStore } from "../rightPanelStore";
 import { useSideChatFocusStore } from "../sideChatStore";
+import { useStableCallback } from "./useStableCallback";
 import { useQuietThreadShell } from "../state/entities";
 
 /** How a parent thread shows one of its side chats in its right panel. */
@@ -21,6 +23,7 @@ export interface SideChatEmbedding {
   readonly focused: boolean;
   /** Where its composer renders while focused; null keeps it in the panel. */
   readonly composerSlot: HTMLElement | null;
+  readonly coveringParent: boolean;
 }
 
 /**
@@ -41,13 +44,17 @@ export function useSideChatGuest(input: {
   const focus = () => {
     if (parentKey !== null) useSideChatFocusStore.getState().focus(parentKey, threadId);
   };
-  const release = () => {
-    if (parentKey !== null) useSideChatFocusStore.getState().release(parentKey, threadId);
-  };
+  const release = useStableCallback(() => {
+    if (parentRef === null || parentKey === null) return;
+    useSideChatFocusStore.getState().release(parentKey, threadId);
+    useRightPanelStore.getState().setMaximized(parentRef, false);
+    if (sideChat?.coveringParent) useRightPanelStore.getState().close(parentRef);
+  });
 
   // The composer remounts when it moves between the parent's slot and the panel
   // (maximizing), so it takes the keyboard on every move, not just on focus.
   const composerPlace = !focused ? null : sideChat?.composerSlot ? "slot" : "panel";
+  // oxlint-disable-next-line t3code/react-effect-budget -- Focus follows the composer when its DOM moves between panels.
   useEffect(() => {
     if (composerPlace === null) return;
     const frame = requestAnimationFrame(() => composerRef.current?.focusAtEnd());
@@ -57,6 +64,7 @@ export function useSideChatGuest(input: {
   // Escape goes back to main even after focus leaves the composer. This listens
   // in the bubble phase, after the editor, menus and dialogs claim their own
   // Escape, and leaves fields that use Escape themselves alone.
+  // oxlint-disable-next-line t3code/react-effect-budget -- Listen for Escape outside the editor while the side chat owns the composer.
   useEffect(() => {
     if (!focused || parentKey === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -66,11 +74,11 @@ export function useSideChatGuest(input: {
       // A fullscreen app takes Escape to leave fullscreen.
       if (document.querySelector("[data-mcp-app-fullscreen]")) return;
       event.preventDefault();
-      useSideChatFocusStore.getState().release(parentKey, threadId);
+      release();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [focused, parentKey, threadId]);
+  }, [focused, parentKey, release]);
 
   // The parent's own questions stay one Escape away.
   const parentShell = useQuietThreadShell(parentRef);
