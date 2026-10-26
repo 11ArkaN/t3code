@@ -2150,8 +2150,10 @@ code {
   font-size: 0.85em;
 }
 
+/* 600 collapses into regular text on fonts other than Inter, and the rule
+   is not behind the New design toggle. Match the composer's bold (700). */
 .chat-markdown strong {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .chat-markdown pre {
