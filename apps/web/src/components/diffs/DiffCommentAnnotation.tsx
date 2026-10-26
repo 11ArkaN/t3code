@@ -33,7 +33,7 @@ interface DiffCommentAnnotationProps {
 export function DiffCommentAnnotation({
   kind,
   rangeLabel,
-  rangeDescription = `Lines ${rangeLabel}`,
+  rangeDescription: rangeDescriptionProp,
   text,
   onTextChange,
   onCancel,
@@ -46,6 +46,7 @@ export function DiffCommentAnnotation({
   focusOnMount = true,
 }: DiffCommentAnnotationProps) {
   const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
+  const rangeDescription = rangeDescriptionProp ?? `Lines ${rangeLabel}`;
   const [localDraftText, setLocalDraftText] = useState("");
   const displayedText = kind === "draft" && !onTextChange ? localDraftText : text;
   const trimmedText = displayedText.trim();
