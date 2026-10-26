@@ -221,7 +221,6 @@ import {
   isCompactionCommandFeedEntry,
   type ThreadFeedRow,
 } from "./pending-thread-feed";
-import { useThreadQueueWorkflow } from "./ThreadQueueControl";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
 import { htmlRenderFrameHeight } from "@t3tools/shared/htmlRender";
@@ -247,7 +246,11 @@ import { serverEnvironment } from "../../state/server";
 import { composerDocumentAttachmentRecord } from "../../lib/composerContext";
 import * as Option from "effect/Option";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { environmentThreadShells, threadEnvironment } from "../../state/threads";
+import {
+  environmentThreadShells,
+  threadEnvironment,
+  useThreadQueueWorkflow,
+} from "../../state/threads";
 import { ThreadWorkflowOpening, useWorkflowOpening } from "./thread-workflow-opening";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useV2ItemSupport } from "../../state/v2-item-support";

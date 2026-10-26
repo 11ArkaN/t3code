@@ -26,7 +26,11 @@ import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../n
 import { useAssetUrl } from "../../state/assets";
 import { assetImageSource } from "../../lib/assetImageSource";
 import { beginQueuedRunEdit, useQueuedRunEdit } from "../../state/queued-run-edit";
-import { environmentThreadDetails, threadEnvironment } from "../../state/threads";
+import {
+  environmentThreadDetails,
+  threadEnvironment,
+  useThreadQueueWorkflow,
+} from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import {
@@ -48,10 +52,6 @@ const EMPTY_QUEUED_COUNT_ATOM = Atom.make(0).pipe(
 type QueueTarget = { readonly environmentId: EnvironmentId; readonly threadId: ThreadId };
 type QueueAction = "steer" | "edit" | "up" | "down" | "remove";
 type QueueRowLayout = { readonly id: RunId; readonly y?: number; readonly height?: number };
-
-export function useThreadQueueWorkflow(target: QueueTarget) {
-  return useAtomValue(environmentThreadDetails.queueWorkflowAtom(target));
-}
 
 export function useThreadQueuedCount(target: QueueTarget | null) {
   return useAtomValue(

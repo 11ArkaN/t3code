@@ -40,6 +40,13 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
 });
 
+export function useThreadQueueWorkflow(target: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  return useAtomValue(environmentThreadDetails.queueWorkflowAtom(target));
+}
+
 /** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */
 export function useThreadFamily(
   environmentId: EnvironmentId | null,
