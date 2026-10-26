@@ -111,17 +111,17 @@ const threadRef = {
 
 let settledAt = 0;
 
-function settle(url: string, title: string, tabId = "tab_a"): void {
+function settle(url: string, title: string, tabId = "tab_a", ref = threadRef): void {
   settledAt += 1;
   const snapshot: PreviewSessionSnapshot = {
-    threadId: threadRef.threadId,
+    threadId: ref.threadId,
     tabId,
     navStatus: { _tag: "Success", url, title },
     canGoBack: false,
     canGoForward: false,
     updatedAt: new Date(settledAt).toISOString(),
   };
-  applyPreviewServerSnapshot(threadRef, snapshot);
+  applyPreviewServerSnapshot(ref, snapshot);
 }
 
 function resetStores(): () => void {
@@ -160,6 +160,22 @@ describe("useBrowserHistoryStore", () => {
     settle("http://a.test/", "Old", "tab_b");
     settle("http://a.test/", "New", "tab_a");
     expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.title).toBe("New");
+  });
+
+  it("keeps another thread's newer title when an unrelated tab settles", () => {
+    const otherThreadRef = { ...threadRef, threadId: ThreadId.make("thread-2") };
+    const store = useBrowserHistoryStore.getState();
+    store.registerThreadProject(threadRef, "proj-a");
+    store.registerThreadProject(otherThreadRef, "proj-a");
+    recordVisitForThread(threadRef, "http://a.test/", 1);
+    settle("http://a.test/", "Old", "tab_a", threadRef);
+    settle("http://a.test/", "New", "tab_a", otherThreadRef);
+    settle("http://b.test/", "Unrelated", "tab_b", threadRef);
+    expect(
+      useBrowserHistoryStore
+        .getState()
+        .byProjectKey["proj-a"]?.find((e) => e.url === "http://a.test/")?.title,
+    ).toBe("New");
   });
 
   it("sets a title against a settled url that differs from the stored one only by a trailing slash", () => {

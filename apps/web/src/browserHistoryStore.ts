@@ -336,16 +336,22 @@ export function recordVisitForThread(ref: ScopedThreadRef, url: string, at?: num
  * Titles only update entries already in the thread's project history, so they
  * are applied both when a page settles and when its visit is recorded.
  */
-function recordPreviewTitles(ref: ScopedThreadRef, preview: ThreadPreviewState): void {
+function recordPreviewTitles(
+  ref: ScopedThreadRef,
+  preview: ThreadPreviewState,
+  previousSessions?: ThreadPreviewState["sessions"],
+): void {
   const state = useBrowserHistoryStore.getState();
   const projectKey = state.projectKeyByThreadKey[scopedThreadKey(ref)];
   if (!projectKey || !state.byProjectKey[projectKey]?.length) return;
   const connection = readPreparedConnection(ref.environmentId);
   const environmentHostname = connection ? new URL(connection.httpBaseUrl).hostname : null;
   // Tabs can share a URL; applying oldest first lets the newest settle win.
-  const sessions = Object.values(preview.sessions).toSorted((a, b) =>
-    a.updatedAt.localeCompare(b.updatedAt),
-  );
+  // Unchanged sessions are skipped so a stale title cannot overwrite a newer
+  // one another thread in the same project recorded since.
+  const sessions = Object.values(preview.sessions)
+    .filter((session) => previousSessions?.[session.tabId] !== session)
+    .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt));
   for (const session of sessions) {
     const status = session.navStatus;
     if (status._tag !== "Success" || !status.title) continue;
@@ -365,8 +371,9 @@ export function startPreviewTitleRecording(): () => void {
         threadKey,
         appAtomRegistry.subscribe(atom, (next) => {
           if (next.sessions === previousSessions) return;
+          const changedSince = previousSessions;
           previousSessions = next.sessions;
-          recordPreviewTitles(threadRef, next);
+          recordPreviewTitles(threadRef, next, changedSince);
         }),
       );
     }
