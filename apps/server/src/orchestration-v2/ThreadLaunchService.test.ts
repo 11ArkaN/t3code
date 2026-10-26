@@ -241,6 +241,7 @@ function makeHarness(options: HarnessOptions = {}) {
               workspaceRoot: project.workspaceRoot,
               defaultModelSelection: project.defaultModelSelection,
               defaultThreadEnvMode: null,
+              hasCustomTitle: false,
               autoPull: false,
               faviconPath: null,
               projectIcon: null,
