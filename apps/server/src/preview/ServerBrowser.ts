@@ -96,7 +96,7 @@ const SCREENCAST_MOTION_QUALITY = 50;
 const HOST_RECONNECT_DELAY = "1 second";
 const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
 // A viewer still is best-effort; a capture Chromium never answers must not hold the capture lock.
-const VIEWER_STILL_TIMEOUT = "2 seconds";
+const VIEWER_STILL_TIMEOUT_MS = 2_000;
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
 const decodeViewportSetting = Schema.decodeUnknownSync(PreviewViewportSettingSchema);
@@ -456,9 +456,7 @@ const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
-  const services = yield* Effect.context<never>();
-  const runFork = Effect.runForkWith(services);
-  const runPromise = Effect.runPromiseWith(services);
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const launchServices = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
 
@@ -2336,17 +2334,23 @@ const make = Effect.gen(function* () {
     pushFileChooser(tab);
     // Full scale: a scaled capture would flash in every other viewer.
     const pushStill = async () => {
-      const data = await withCaptureLock(tab, () =>
-        runPromise(
-          Effect.tryPromise(() =>
+      const data = await withCaptureLock(tab, async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
             ServerBrowserPage.captureViewport(tab.page, session, {
               format: "jpeg",
               quality,
               scale: 1,
             }),
-          ).pipe(Effect.timeoutOption(VIEWER_STILL_TIMEOUT), Effect.map(Option.getOrNull)),
-        ),
-      ).catch(() => null);
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), VIEWER_STILL_TIMEOUT_MS);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }).catch(() => null);
       if (data) viewer.push({ _tag: "frame", data: Buffer.from(data, "base64"), ack: Effect.void });
     };
     let settleTimer: ReturnType<typeof setTimeout> | null = null;

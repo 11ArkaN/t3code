@@ -24,7 +24,6 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 import type { BrowserContext, Page } from "playwright-core";
 import { beforeEach, expect, vi } from "vite-plus/test";
 
@@ -630,6 +629,8 @@ it.effect("a first still that never returns does not stall the tab's later captu
   Effect.scoped(
     Effect.gen(function* () {
       const { browser, broker, tabId } = yield* ready;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()));
       const capturing = Promise.withResolvers<void>();
       const stuck = Promise.withResolvers<void>();
       heldStill = () => {
@@ -643,7 +644,7 @@ it.effect("a first still that never returns does not stall the tab's later captu
       const snapshotting = yield* broker
         .invoke<PreviewAutomationSnapshot>({ scope, tabId, operation: "snapshot", input: {} })
         .pipe(Effect.forkScoped);
-      yield* TestClock.adjust("2 seconds");
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(2_000));
       const snapshot = yield* Fiber.join(snapshotting);
       expect(snapshot.accessibilityTree).toContain("delete");
       const second = yield* browser.attachViewer(viewerInput(tabId, false));

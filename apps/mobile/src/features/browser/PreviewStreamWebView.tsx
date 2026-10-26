@@ -247,7 +247,6 @@ function PreviewStreamDocumentView({
   const [error, setError] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
   const [hostSetup, setHostSetup] = useState<PreviewStreamHostSetup | null>(null);
-  const [started, setStarted] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const dialogRef = useRef<PreviewStreamControl["dialog"]>(null);
   const [promptText, setPromptText] = useState("");
@@ -292,10 +291,10 @@ function PreviewStreamDocumentView({
     fail("Browser viewer could not start. Reconnect to try again."),
   );
   useEffect(() => {
-    if (started) return;
+    if (status !== "connecting") return;
     const timer = setTimeout(bootstrapTimedOut, 15_000);
     return () => clearTimeout(timer);
-  }, [started]);
+  }, [status]);
   const source = useMemo(
     () => ({
       html: previewStreamDocument(configuration, previewStreamScript),
@@ -407,7 +406,6 @@ function PreviewStreamDocumentView({
                 onPictureInPicture?.(message, message.detail);
                 return;
               case "status":
-                setStarted(true);
                 if (message.status === "error") {
                   fail(message.detail ?? "Browser stream failed.");
                   return;
