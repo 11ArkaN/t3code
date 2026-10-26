@@ -1,0 +1,89 @@
+import { EnvironmentId, ProjectId, ThreadId, type TerminalSummary } from "@t3tools/contracts";
+import { expect, it, vi } from "vite-plus/test";
+
+const state = vi.hoisted(() => ({ terminals: [] as TerminalSummary[] }));
+
+vi.mock(import("~/state/query"), async (original) => ({
+  ...(await original()),
+  useEnvironmentQuery: (() => ({ data: state.terminals, error: null, isPending: false })) as never,
+}));
+vi.mock(import("~/state/session"), async (original) => ({
+  ...(await original()),
+  useEnvironmentScope: () => true,
+}));
+
+import { render } from "../../../test/render";
+import { DraftId, useComposerDraftStore, type DraftSessionState } from "../../composerDraftStore";
+import { SidebarDraftBlock } from "./SidebarDraftBlock";
+
+const environmentId = EnvironmentId.make("environment");
+const projectId = ProjectId.make("project");
+
+function draftSession(threadId: string, createdAt: string): DraftSessionState {
+  return {
+    threadId: ThreadId.make(threadId),
+    environmentId,
+    projectId,
+    logicalProjectKey: `${environmentId}:${projectId}`,
+    createdAt,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    envMode: "local",
+    startFromOrigin: false,
+  };
+}
+
+function terminal(threadId: string, running: boolean): TerminalSummary {
+  return {
+    threadId,
+    terminalId: "default",
+    cwd: "/repo",
+    worktreePath: null,
+    status: running ? "running" : "exited",
+    pid: running ? 123 : null,
+    exitCode: running ? null : 0,
+    exitSignal: null,
+    hasRunningSubprocess: running,
+    label: "dev",
+    updatedAt: "2026-10-25T00:00:00.000Z",
+  };
+}
+
+function block(routeDraftId: string | null) {
+  return (
+    <SidebarDraftBlock
+      projectByKey={new Map()}
+      projectDisplayNameByKey={new Map()}
+      scopedProjectKeys={null}
+      routeDraftId={routeDraftId}
+      onNavigateToDraft={() => {}}
+      onDraftContextMenu={() => {}}
+    />
+  );
+}
+
+it("lists an empty draft while its project script terminal is still running", async () => {
+  const running = DraftId.make("draft-running");
+  const finished = DraftId.make("draft-finished");
+  state.terminals = [terminal("thread-running", true), terminal("thread-finished", false)];
+  useComposerDraftStore.setState({
+    draftsByThreadKey: {},
+    draftThreadsByThreadKey: {
+      [running]: draftSession("thread-running", "2026-10-25T00:00:02.000Z"),
+      [finished]: draftSession("thread-finished", "2026-10-25T00:00:01.000Z"),
+    },
+  });
+  using _drafts = {
+    [Symbol.dispose]: () =>
+      useComposerDraftStore.setState({ draftsByThreadKey: {}, draftThreadsByThreadKey: {} }),
+  };
+
+  await using screen = await render(block(running));
+  const rows = () => [...document.querySelectorAll('[data-testid="sidebar-draft-row"]')];
+  expect(rows()).toHaveLength(1);
+
+  await screen.rerender(block(null));
+  expect(rows()).toHaveLength(1);
+});
