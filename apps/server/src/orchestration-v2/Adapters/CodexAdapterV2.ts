@@ -79,6 +79,7 @@ import * as CodexSchema from "effect-codex-app-server/schema";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as Hex from "effect/encoding/Hex";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -665,12 +666,17 @@ const decodeTurnReasoningEffort = Schema.decodeUnknownEffect(
   Schema.Union([CodexSchema.V2TurnStartParams__ReasoningEffort, Schema.Null]),
 );
 
+const CodexAdditionalContext = Schema.Record(
+  Schema.String,
+  CodexSchema.V2TurnStartParams__AdditionalContextEntry,
+);
+const encodeCodexAdditionalContextJson = Schema.encodeEffect(
+  Schema.fromJsonString(CodexAdditionalContext),
+);
 const CodexTurnStartParamsWithCollaborationMode = CodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
     collaborationMode: Schema.optionalKey(CodexSchema.ClientRequest__CollaborationMode),
-    additionalContext: Schema.optionalKey(
-      Schema.Record(Schema.String, CodexSchema.V2TurnStartParams__AdditionalContextEntry),
-    ),
+    additionalContext: Schema.optionalKey(CodexAdditionalContext),
   }),
 );
 type CodexTurnStartParamsWithCollaborationMode =
@@ -1834,6 +1840,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const turnTerminalizationPermit = yield* Semaphore.make(1);
         const goalsByNativeThread = new Map<string, OrchestrationV2ProviderGoal | null>();
         const rootProviderThreads = new Map<string, OrchestrationV2ProviderThread>();
+        // Absent: fall back to persisted metadata. Undefined: Codex holds no known context.
+        const deliveredContextDigests = new Map<string, string | undefined>();
         const goalHolds = new Map<string, CodexGoalHold>();
         const goalRuns = new Map<ProviderTurnId, Array<ActiveCodexTurnContext>>();
         const goalActivations = new Map<string, { stopped: boolean }>();
@@ -6274,7 +6282,44 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               else next.delete(threadId);
               return next;
             });
-            const started = yield* client.request("turn/start", turnStartParams);
+            const { additionalContext, ...paramsWithoutContext } = turnStartParams;
+            const contextDigest =
+              additionalContext === undefined
+                ? undefined
+                : Hex.encode(
+                    yield* crypto.digest(
+                      "SHA-256",
+                      new TextEncoder().encode(
+                        yield* encodeCodexAdditionalContextJson(additionalContext),
+                      ),
+                    ),
+                  );
+            const deliveredDigest = deliveredContextDigests.has(threadId)
+              ? deliveredContextDigests.get(threadId)
+              : turnInput.providerThread.nativeMetadata?.codexAdditionalContextDigest;
+            const started = yield* client.request(
+              "turn/start",
+              contextDigest !== undefined && contextDigest === deliveredDigest
+                ? paramsWithoutContext
+                : turnStartParams,
+            );
+            if (contextDigest !== undefined && contextDigest !== deliveredDigest) {
+              deliveredContextDigests.set(threadId, contextDigest);
+              const providerThread = rootProviderThreads.get(threadId) ?? turnInput.providerThread;
+              const updated = {
+                ...providerThread,
+                nativeMetadata: {
+                  ...providerThread.nativeMetadata,
+                  codexAdditionalContextDigest: contextDigest,
+                },
+              };
+              rootProviderThreads.set(threadId, updated);
+              yield* emitProviderEvent({
+                type: "provider_thread.updated",
+                driver: CODEX_PROVIDER,
+                providerThread: updated,
+              });
+            }
             yield* registerRootTurn({
               turnInput,
               nativeTurnId: started.turn.id,
@@ -7312,9 +7357,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 Effect.andThen(revertCodexThread(client, threadId, numTurns)),
               );
               turnTokenUsageByThread.delete(threadId);
+              deliveredContextDigests.set(response.thread.id, undefined);
+              const { codexAdditionalContextDigest: _reverted, ...nativeMetadata } =
+                threadInput.providerThread.nativeMetadata ?? {};
               return {
                 providerThread: {
                   ...threadInput.providerThread,
+                  ...(_reverted === undefined ? {} : { nativeMetadata }),
                   nativeThreadRef: {
                     driver: CODEX_PROVIDER,
                     nativeId: response.thread.id,
