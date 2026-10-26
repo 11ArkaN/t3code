@@ -232,8 +232,9 @@ it("offers remote browser editors without changing the default or forgetting a s
   await fixture.click(fixture.primaryButton());
   expect(state.openUrl).toHaveBeenLastCalledWith("zed://ssh/test.local/work/project");
   await fixture.renderPicker();
+  state.openUrl.mockClear();
   await fixture.pressOpenFavorite();
-  expect(state.openUrl).toHaveBeenLastCalledWith("zed://ssh/test.local/work/project");
+  expect(state.openUrl).toHaveBeenCalledExactlyOnceWith("zed://ssh/test.local/work/project");
   expect(state.run).not.toHaveBeenCalled();
 });
 
