@@ -89,9 +89,7 @@ export const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => false),
   );
 
-  // The launcher is itself a regular file, so a PATH that lists its folder reaches it with
-  // no link in between. Only a link we made may be removed, which is why this stays apart
-  // from `isOurLink`.
+  // PATH can reach the regular launcher directly; removal still requires isOurLink.
   const runsOurLauncher = Effect.fn("DesktopCliCommand.runsOurLauncher")(
     function* (candidate: string) {
       if (yield* isOurLink(candidate)) return true;

@@ -194,10 +194,10 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         installedPath: path.join(home, ".local", "bin", "t3"),
       });
       expect(installed.shadowedBy).toBeUndefined();
-      expect((yield* command.state).shadowedBy).toBeUndefined();
+      expect(yield* command.state).toEqual(installed);
 
-      // Reaching the launcher through PATH does not make it a link T3 may remove.
       expect((yield* command.uninstall).installedPath).toBeNull();
+      expect(yield* fs.exists(installed.installedPath!)).toBe(false);
       expect(yield* fs.exists(launcher)).toBe(true);
     }).pipe(Effect.scoped),
   );
