@@ -255,8 +255,21 @@ export function delegatedTaskProgress(projection: {
             task.completionDelivery?.state === "claimed")),
     ) ||
     projection.providerThreads.some((thread) => (thread.pendingBackgroundTasks?.length ?? 0) > 0);
+  const questionRuns = new Set(
+    projection.messages
+      .filter(
+        ({ notification }) =>
+          notification?.source.kind === "delegated_task" && notification.outcome === "updated",
+      )
+      .map((message) => message.runId),
+  );
   const resultRun = workRuns
-    .filter((run) => terminal(run.status) && (run.startedAt !== null || run.ordinal === 1))
+    .filter(
+      (run) =>
+        !questionRuns.has(run.id) &&
+        terminal(run.status) &&
+        (run.startedAt !== null || run.ordinal === 1),
+    )
     .toSorted((a, b) => (runRanAfter(a, b) ? -1 : runRanAfter(b, a) ? 1 : 0))[0];
   return {
     state:
