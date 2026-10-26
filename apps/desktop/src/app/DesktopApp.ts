@@ -187,6 +187,7 @@ const bootstrap = Effect.gen(function* () {
   );
 
   yield* snapShot.initialize;
+  yield* Effect.forkScoped((yield* DesktopCliCommand.DesktopCliCommand).installOnFirstLaunch);
 
   if (!settings.localEnvironmentEnabled) {
     yield* logBootstrapInfo("bootstrap skipping local environment (disabled in settings)");
@@ -200,7 +201,6 @@ const bootstrap = Effect.gen(function* () {
   const primaryBackend = yield* pool.primary;
   const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
-  const cliCommand = yield* DesktopCliCommand.DesktopCliCommand;
 
   if (environment.isDevelopment && Option.isNone(environment.configuredBackendPort)) {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
@@ -252,7 +252,6 @@ const bootstrap = Effect.gen(function* () {
       Effect.catch((error) => logStartupError("desktop app control socket unavailable", { error })),
     );
     yield* Effect.forkScoped(wslBackend.reconcile);
-    yield* Effect.forkScoped(cliCommand.installOnFirstLaunch);
   }
 }).pipe(Effect.withSpan("desktop.bootstrap"));
 
