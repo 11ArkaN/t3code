@@ -104,7 +104,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         edges(exit.above, -1),
         edges(exit.below, 1),
       ),
-      motionTiming,
+      { ...motionTiming, fill: "forwards" },
     );
     exiting.set(clone, { ...exit, animation });
     animation.addEventListener(
