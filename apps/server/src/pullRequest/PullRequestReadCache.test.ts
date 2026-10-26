@@ -171,11 +171,9 @@ it.layer(NodeServices.layer)("PR filesystem cache", (it) => {
         yield* Effect.forEach(["pr-1", "pr-2"], read, { discard: true });
       });
       for (let index = 0; index < 5; index++) yield* sweep(index);
-      // WeakRef targets stay alive until the current job ends, so yield between collections.
-      for (let pass = 0; pass < 3; pass++) {
-        yield* Effect.yieldNow;
-        collectGarbage();
-      }
+      // WeakRef targets stay alive until the current job ends, so yield before collecting.
+      yield* Effect.yieldNow;
+      collectGarbage();
       assert.strictEqual(sweeps.filter((sweepData) => sweepData.deref() !== undefined).length, 0);
     }).pipe(Effect.provide(KeyValueStore.layerMemory)),
   );
