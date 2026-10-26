@@ -700,10 +700,14 @@ function makeProviderThread(input: {
   };
 }
 
-function acpMcpToolCallOutput(rawOutput: unknown): unknown {
+export function acpMcpToolCallOutput(rawOutput: unknown): unknown {
   const record = unknownRecord(rawOutput);
   if (record === undefined) return rawOutput;
-  if (!("result" in record) && !("error" in record)) return rawOutput;
+  if (!("result" in record) && !("error" in record)) {
+    // Grok serializes Rust's Result: `{ type: "MCP", output: { OkayOutput: "<json>" } }`.
+    const okay = unknownRecord(record.output)?.OkayOutput;
+    return typeof okay === "string" ? okay : rawOutput;
+  }
   const result = unknownRecord(record.result);
   const resultOutput =
     result === undefined ? undefined : (result.structuredContent ?? result.content ?? undefined);
