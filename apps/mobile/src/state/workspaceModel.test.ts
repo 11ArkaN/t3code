@@ -106,7 +106,7 @@ describe("mobile workspace projection", () => {
     ) => isEnvironmentOffline({ networkStatus, connectionState });
 
     expect(offline("reconnecting")).toBe(true);
-    expect(offline("connecting")).toBe(true);
+    expect(offline("connecting")).toBe(false);
     expect(offline("error")).toBe(true);
     expect(offline("connected")).toBe(false);
     expect(offline("connected", "offline")).toBe(true);

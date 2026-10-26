@@ -64,7 +64,10 @@ export function isEnvironmentOffline(input: {
   readonly networkStatus: NetworkStatus;
   readonly connectionState: EnvironmentConnectionPhase;
 }): boolean {
-  return input.networkStatus === "offline" || input.connectionState !== "connected";
+  return (
+    input.networkStatus === "offline" ||
+    (input.connectionState !== "connected" && input.connectionState !== "connecting")
+  );
 }
 
 export function projectWorkspaceConnectionState(input: {
