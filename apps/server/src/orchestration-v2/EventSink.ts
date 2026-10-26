@@ -330,14 +330,10 @@ const layerBase: Layer.Layer<
         });
       });
 
-    // An MCP App's recorded call (`mcp_app.call.record`) belongs to the server
-    // and the rest of its tool call to the provider, and either writer may have
-    // read the item before the other changed it. Merged here, inside the
-    // write's transaction: a provider's copy keeps the stored call, and a
-    // recorded call lands on the provider's latest copy.
+    // Merge against the latest item inside the write transaction; either writer may hold a stale copy.
     const mergeMcpAppCall =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
-      Effect.fnUntraced(function* (item: OrchestrationV2TurnItem) {
+      Effect.fnUntraced(function* (item: OrchestrationV2TurnItem, recorded: boolean) {
         if (item.type !== "dynamic_tool") return item;
         const output = Predicate.isObject(item.output) ? item.output : undefined;
         if (output === undefined || !(MCP_APP_OUTPUT_KEY in output)) return item;
@@ -346,7 +342,6 @@ const layerBase: Layer.Layer<
           itemId: item.id,
         });
         if (stored?.type !== "dynamic_tool" || !Predicate.isObject(stored.output)) return item;
-        const recorded = MCP_APP_CALL_OUTPUT_KEY in output;
         const call = (recorded ? output : stored.output)[MCP_APP_CALL_OUTPUT_KEY];
         if (call === undefined) return item;
         const base = recorded ? { ...stored, updatedAt: item.updatedAt } : item;
@@ -360,7 +355,10 @@ const layerBase: Layer.Layer<
         return { ...base, output: merged };
       });
 
-    const normalizeEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) => {
+    const normalizeEvents = (
+      events: ReadonlyArray<OrchestrationV2DomainEvent>,
+      recorded = false,
+    ) => {
       const runOrdinals = new Map(
         events.flatMap((event) =>
           event.type === "run.created" || event.type === "run.updated"
@@ -378,7 +376,7 @@ const layerBase: Layer.Layer<
                   event.payload.runId === null ? undefined : runOrdinals.get(event.payload.runId),
                 )
                 .pipe(
-                  Effect.flatMap(mergeMcpAppCall),
+                  Effect.flatMap((item) => mergeMcpAppCall(item, recorded)),
                   Effect.map((payload) => ({ ...event, payload })),
                 )
             : Effect.succeed(event),
@@ -682,7 +680,10 @@ const layerBase: Layer.Layer<
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
           }
 
-          const normalized = yield* normalizeEvents(input.events);
+          const normalized = yield* normalizeEvents(
+            input.events,
+            input.commandType === "mcp_app.call.record",
+          );
           const storedEvents = yield* eventStore.append({
             commandId: input.commandId,
             events: normalized,

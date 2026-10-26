@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CheckpointId,
+  CommandId,
   CheckpointRef,
   CheckpointScopeId,
   EventId,
@@ -1627,6 +1628,24 @@ layer("ProviderEventIngestorV2", (it) => {
       assert(last?.type === "turn-item.updated" && last.payload.type === "dynamic_tool");
       assert.deepEqual(last.payload.output, { ...providerOutput, t3McpAppCall: call });
 
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make("event:mcp-app-status-update"),
+            type: "turn-item.updated",
+            threadId: threadEvent.threadId,
+            occurredAt: now,
+            payload: { ...projected, status: "completed", title: "Provider completed" },
+          },
+        ],
+      });
+      const updated = yield* projectionStore.getTurnItem({
+        threadId: threadEvent.threadId,
+        itemId: turnItem.id,
+      });
+      assert.equal(updated?.status, "completed");
+      assert.equal(updated?.title, "Provider completed");
+
       // An output that clients read whole on its own, but not with the call
       // beside it, wins over the call.
       const largeOutput = {
@@ -1648,7 +1667,12 @@ layer("ProviderEventIngestorV2", (it) => {
         result: { content: [{ type: "text", text: "Provider final" }] },
       };
       yield* ingest({ ...turnItem, status: "completed", output: finalOutput });
-      yield* eventSink.write({
+      yield* eventSink.commitCommand({
+        commandId: CommandId.make("command:mcp-app-call"),
+        commandType: "mcp_app.call.record",
+        threadId: threadEvent.threadId,
+        acceptedAt: now,
+        effects: [],
         events: [
           {
             id: EventId.make("event:mcp-app-call-from-stale-copy"),
