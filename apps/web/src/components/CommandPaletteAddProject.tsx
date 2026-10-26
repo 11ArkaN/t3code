@@ -129,15 +129,15 @@ export function NewProjectSummary(props: {
 }) {
   return (
     <div className="p-2 pb-0">
-      <div className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1.5">
+      <div className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1.5 redesign:gap-3 redesign:rounded-lg redesign:bg-foreground/[0.035] redesign:px-3">
         <CommandPaletteTitleIcon>
           <FolderGit2Icon className={ITEM_ICON_CLASS} />
         </CommandPaletteTitleIcon>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-foreground text-sm">
+          <span className="truncate text-foreground text-sm redesign:font-medium">
             {props.name.length > 0 ? props.name : "New project"}
           </span>
-          <span className="truncate text-muted-foreground/85 text-xs">
+          <span className="truncate text-muted-foreground/85 text-xs redesign:text-secondary-label">
             {props.name.length > 0
               ? `Creates ${props.pathPreview}`
               : `Goes in ${props.projectsRoot}`}
@@ -156,14 +156,20 @@ export function RemoteRepositorySummary(props: {
 }) {
   return (
     <div className="shrink-0 p-2 pb-0">
-      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Repository</div>
-      <div className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1.5">
+      <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs redesign:font-semibold redesign:text-secondary-label">
+        Repository
+      </div>
+      <div className="flex min-h-8 items-center gap-2 rounded-sm px-2 py-1.5 redesign:gap-3 redesign:rounded-lg redesign:bg-foreground/[0.035] redesign:px-3">
         <CommandPaletteTitleIcon>
           {remoteProjectSourceIcon(props.source, ITEM_ICON_CLASS)}
         </CommandPaletteTitleIcon>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-foreground text-sm">{props.title}</span>
-          <span className="truncate text-muted-foreground/85 text-xs">{props.description}</span>
+          <span className="truncate text-foreground text-sm redesign:font-medium">
+            {props.title}
+          </span>
+          <span className="truncate text-muted-foreground/85 text-xs redesign:text-secondary-label">
+            {props.description}
+          </span>
         </span>
       </div>
     </div>

@@ -357,10 +357,13 @@ export function UsagePage() {
       ? `${formatDateTimeShort(shownWindow.sinceTime, shownWindow.timeZone, hour12)} to ${formatDateTimeShort(shownWindow.untilTime, shownWindow.timeZone, hour12)}`
       : `${formatDayShort(shownWindow.sinceDay)} to ${formatDayShort(shownWindow.untilDay)}`;
   const topbarContent = (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-2 @4xl/usage-header:flex">
-      <WorkspaceBreadcrumb ariaLabel="Usage breadcrumb" className="min-w-0">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-2 @4xl/usage-header:flex redesign:flex redesign:flex-wrap redesign:gap-y-1 redesign:@4xl/usage-header:flex-nowrap">
+      <WorkspaceBreadcrumb
+        ariaLabel="Usage breadcrumb"
+        className="min-w-0 redesign:w-full redesign:@4xl/usage-header:w-auto"
+      >
         <WorkspaceBreadcrumbItem>
-          <h1>Usage</h1>
+          <h1 className="redesign:text-base redesign:font-semibold">Usage</h1>
         </WorkspaceBreadcrumbItem>
         <WorkspaceBreadcrumbSeparator />
         <WorkspaceBreadcrumbItem className="min-w-10 shrink">
@@ -386,7 +389,7 @@ export function UsagePage() {
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       {!showingLimits ? (
-        <span className="hidden min-w-0 truncate text-xs text-muted-foreground @7xl/usage-header:block">
+        <span className="hidden min-w-0 truncate text-xs text-muted-foreground @7xl/usage-header:block redesign:text-secondary-label">
           {windowLabel}
         </span>
       ) : null}
@@ -433,7 +436,7 @@ export function UsagePage() {
           <RefreshIcon size="sm" refreshing={isRefreshing} />
         </Button>
       </div>
-      <div className="ms-auto flex shrink-0 items-center justify-end gap-1 @4xl/usage-header:hidden">
+      <div className="ms-auto flex shrink-0 items-center justify-end gap-1 @4xl/usage-header:hidden redesign:ms-0 redesign:w-full redesign:justify-start">
         <Select
           value={metric}
           onValueChange={(value) => {
@@ -502,15 +505,15 @@ export function UsagePage() {
   return (
     <AppRouteModal label="Usage">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="@container/usage-header flex min-h-12 shrink-0 items-center gap-1 border-b ps-5 pe-2">
+        <header className="@container/usage-header flex min-h-12 shrink-0 items-center gap-1 border-b ps-5 pe-2 redesign:border-border/50 redesign:ps-6 redesign:pe-3">
           {topbarContent}
           <AppRouteModalClose />
         </header>
 
         <ScrollArea className="min-h-0 flex-1">
-          <WorkspacePageContainer width="wide">
+          <WorkspacePageContainer width="wide" className="redesign:gap-8 redesign:pt-8">
             {selectedEnvironments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground redesign:rounded-xl redesign:bg-muted/30 redesign:px-6 redesign:py-16 redesign:text-center redesign:text-balance">
                 {environments.length === 0
                   ? `Connect an environment to see ${showingLimits ? "limits" : "usage"}.`
                   : `Select an environment to see ${showingLimits ? "limits" : "usage"}.`}
@@ -535,7 +538,7 @@ export function UsagePage() {
             ) : shown === null ? (
               <UsageSkeleton />
             ) : !canReadDiagnostics ? (
-              <div className="space-y-2 py-12 text-center text-sm text-muted-foreground">
+              <div className="space-y-2 py-12 text-center text-sm text-muted-foreground redesign:space-y-3 redesign:rounded-xl redesign:bg-muted/30 redesign:px-6 redesign:py-16 redesign:text-balance">
                 {selectedEnvironments.map((environment) => (
                   <p key={environment.environmentId}>
                     {selectedEnvironments.length > 1 ? `${environment.label}: ` : null}
@@ -690,18 +693,21 @@ function UsageOverview({
   ];
 
   return (
-    <div aria-busy={loadingPartial} className="flex flex-col gap-6">
+    <div aria-busy={loadingPartial} className="flex flex-col gap-6 redesign:gap-8">
       {sourceMessages.map((message) => (
-        <p key={message} className="mb-4 text-sm text-muted-foreground">
+        <p
+          key={message}
+          className="mb-4 text-sm text-muted-foreground redesign:mb-0 redesign:rounded-xl redesign:bg-muted/40 redesign:p-4 redesign:text-balance redesign:leading-relaxed"
+        >
           {message}
         </p>
       ))}
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-5">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] redesign:gap-8 redesign:rounded-xl redesign:bg-muted/25 redesign:p-5">
+        <div className="flex min-w-0 flex-col gap-5 redesign:gap-2">
           <div className="flex flex-col gap-1">
             <span
               className={cn(
-                "text-4xl font-semibold text-foreground tabular-nums",
+                "text-4xl font-semibold text-foreground tabular-nums redesign:tracking-tight",
                 figureClass(loadingPartial),
               )}
             >
@@ -761,7 +767,10 @@ function UsageOverview({
             const providerLoading = loadingProviders.has(provider);
             const awaitingData = providerLoading && !providersWithData.has(provider);
             return (
-              <div key={provider} className="flex flex-col gap-1">
+              <div
+                key={provider}
+                className="group/usage-provider-row flex flex-col gap-1 redesign:rounded-lg redesign:py-1"
+              >
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
                     <span
@@ -771,12 +780,15 @@ function UsageOverview({
                         backgroundColor: PROVIDER_PRESENTATION[provider].color,
                       }}
                     />
-                    <ProviderMark provider={provider} className="size-4" />
+                    <ProviderMark
+                      provider={provider}
+                      className="size-4 redesign:opacity-60 redesign:grayscale redesign:group-hover/usage-provider-row:opacity-100 redesign:group-hover/usage-provider-row:grayscale-0"
+                    />
                     <span className="flex min-w-0 items-baseline gap-1.5">
                       <span className="truncate">{PROVIDER_PRESENTATION[provider].label}</span>
                       <span
                         className={cn(
-                          "shrink-0 whitespace-nowrap text-2xs text-muted-foreground tabular-nums",
+                          "shrink-0 whitespace-nowrap text-2xs text-muted-foreground tabular-nums redesign:hidden",
                           figureClass(providerLoading),
                           awaitingData && "invisible",
                         )}
@@ -800,11 +812,12 @@ function UsageOverview({
                 </div>
                 <span
                   className={cn(
-                    "text-xs text-muted-foreground",
+                    "text-xs text-muted-foreground redesign:truncate",
                     figureClass(providerLoading),
                     awaitingData && "invisible",
                   )}
                 >
+                  <span className="hidden redesign:inline">{sessionLabel} · </span>
                   {metric === "cost"
                     ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
                     : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
@@ -815,7 +828,7 @@ function UsageOverview({
         </div>
 
         <div className="flex min-w-0 flex-col gap-3">
-          <h2 className="text-sm font-medium text-foreground">
+          <h2 className="text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
             {shownHourly ? "Hourly" : "Daily"} {metric === "tokens" ? "processed tokens" : "cost"}
           </h2>
           <UsageProviderChart
@@ -835,8 +848,10 @@ function UsageOverview({
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-foreground">Totals</h2>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
+        <h2 className="text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
+          Totals
+        </h2>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5 redesign:gap-2 redesign:py-0">
           <Metric
             loading={loadingPartial}
             label="Processed tokens"
@@ -867,7 +882,10 @@ function UsageOverview({
 
       {merged.totalTokens > 0 ? (
         <section
-          className={cn("grid gap-x-12 gap-y-8 lg:grid-cols-2", figureClass(loadingPartial))}
+          className={cn(
+            "grid gap-x-12 gap-y-8 lg:grid-cols-2 redesign:gap-x-8",
+            figureClass(loadingPartial),
+          )}
         >
           {metric === "tokens" ? (
             <UsageShareBar
@@ -897,7 +915,9 @@ function UsageOverview({
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+          <h2 className="text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
+            Breakdown
+          </h2>
           <ToggleGroup
             aria-label="Usage breakdown"
             variant="segmented"
@@ -948,19 +968,24 @@ function UsageOverview({
                   return (
                     <tr
                       key={key}
-                      className="relative border-b border-border/50 text-right whitespace-nowrap text-muted-foreground tabular-nums transition-colors hover:bg-muted/50 has-focus-visible:bg-muted/50"
+                      className="group/usage-model relative border-b border-border/50 text-right whitespace-nowrap text-muted-foreground tabular-nums transition-colors hover:bg-muted/50 has-focus-visible:bg-muted/50 redesign:border-transparent redesign:hover:border-border/50 redesign:has-focus-visible:border-border/50"
                     >
-                      <td className="py-2.5 pr-3 text-left text-xs">{index + 1}</td>
-                      <td className="py-2.5 text-left whitespace-normal">
+                      <td className="py-2.5 pr-3 text-left text-xs redesign:ps-2 redesign:text-secondary-label">
+                        {index + 1}
+                      </td>
+                      <td className="py-2.5 text-left whitespace-normal redesign:py-3">
                         <button
                           type="button"
                           onClick={() => onSelectModel(key)}
                           className={cn(
-                            "flex items-center gap-2 text-left text-foreground outline-none after:absolute after:inset-0",
+                            "flex items-center gap-2 text-left text-foreground outline-none after:absolute after:inset-0 redesign:wrap-anywhere redesign:text-foreground/75 redesign:group-hover/usage-model:text-foreground redesign:group-has-focus-visible/usage-model:text-foreground",
                             !hasBar && "py-1",
                           )}
                         >
-                          <ProviderMark provider={model.provider} className="size-3.5" />
+                          <ProviderMark
+                            provider={model.provider}
+                            className="size-3.5 redesign:shrink-0 redesign:opacity-60 redesign:grayscale redesign:group-hover/usage-model:opacity-100 redesign:group-hover/usage-model:grayscale-0"
+                          />
                           {model.model}
                         </button>
                         {hasBar ? (
@@ -975,17 +1000,27 @@ function UsageOverview({
                           </div>
                         ) : null}
                       </td>
-                      <td className={cn("py-2.5 pl-6 text-foreground", rowFigures)}>
+                      <td
+                        className={cn(
+                          "py-2.5 pl-6 redesign:pl-3 redesign:sm:pl-6 text-foreground",
+                          rowFigures,
+                        )}
+                      >
                         {isModelCostUnknown(model) ? (
                           <span className="text-muted-foreground">Unpriced</span>
                         ) : (
                           formatUsd(model.costUsd)
                         )}
                       </td>
-                      <td className={cn("hidden py-2.5 pl-6 sm:table-cell", rowFigures)}>
+                      <td
+                        className={cn(
+                          "hidden py-2.5 pl-6 redesign:pl-3 redesign:sm:pl-6 sm:table-cell",
+                          rowFigures,
+                        )}
+                      >
                         {share === null ? "" : formatPercent(share)}
                       </td>
-                      <td className={cn("py-2.5 pl-6", rowFigures)}>
+                      <td className={cn("py-2.5 pl-6 redesign:pl-3 redesign:sm:pl-6", rowFigures)}>
                         {formatTokens(model.totalTokens)}
                       </td>
                     </tr>
@@ -1031,7 +1066,7 @@ function UsageOverview({
                   breakdownPeriods.map((period) => (
                     <tr
                       key={"hourStart" in period ? period.hourStart : period.day}
-                      className="border-b border-border/50 transition-colors hover:bg-muted/50"
+                      className="border-b border-border/50 transition-colors hover:bg-muted/50 redesign:border-transparent redesign:hover:border-border/50"
                     >
                       <td className="py-2 text-foreground">
                         {"hourStart" in period
@@ -1151,7 +1186,7 @@ function CursorEnableRow({
       <span className="flex min-w-0 items-center gap-2 text-sm text-foreground">
         <span
           aria-hidden
-          className="size-2 shrink-0 rounded-full"
+          className="size-2 shrink-0 rounded-full redesign:hidden"
           style={{ backgroundColor: PROVIDER_PRESENTATION.cursor.color }}
         />
         <ProviderMark provider="cursor" className="size-4" />
@@ -1176,7 +1211,7 @@ function CursorEnableLimits({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
         <ProviderInstanceIcon
           driverKind={ProviderDriverKind.make("cursor")}
           displayName="Cursor"
@@ -1186,7 +1221,7 @@ function CursorEnableLimits({
         />
         Cursor
       </h2>
-      <div className="flex flex-col items-start gap-3 rounded-lg border border-border/60 p-4">
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-border/60 p-4 redesign:rounded-xl redesign:border-transparent redesign:bg-muted/30 redesign:p-5">
         <p className="text-xs text-muted-foreground">{CURSOR_KEYCHAIN_COPY}</p>
         <div className="flex flex-wrap gap-2">
           {environments.map((environment) => (
@@ -1236,10 +1271,13 @@ function Metric({
   readonly loading: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5">
+    <div className="flex min-w-0 flex-col gap-0.5 redesign:gap-1.5 redesign:rounded-lg redesign:bg-muted/30 redesign:p-3">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span
-        className={cn("text-base font-medium text-foreground tabular-nums", figureClass(loading))}
+        className={cn(
+          "text-base font-medium text-foreground tabular-nums redesign:text-lg redesign:font-semibold",
+          figureClass(loading),
+        )}
       >
         {value}
       </span>
@@ -1488,14 +1526,17 @@ function UsageProviderFilter({
 function UsageSkeleton() {
   return (
     <>
-      <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] redesign:gap-8 redesign:rounded-xl redesign:bg-muted/25 redesign:p-5">
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1">
             <Skeleton className="h-10 w-36" />
             <Skeleton className="h-4 w-32" />
           </div>
           {PROVIDER_ORDER.map((provider) => (
-            <div key={provider} className="flex flex-col gap-1">
+            <div
+              key={provider}
+              className="group/usage-provider-row flex flex-col gap-1 redesign:rounded-lg redesign:py-2"
+            >
               <div className="flex min-h-5 items-center justify-between gap-4">
                 <span className="flex items-center gap-2">
                   <Skeleton shape="pill" className="size-2 shrink-0" />
@@ -1519,13 +1560,15 @@ function UsageSkeleton() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-foreground">Totals</h2>
+        <h2 className="text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
+          Totals
+        </h2>
         <MetricSkeletons
           labels={["Processed tokens", "Cached input", "Uncached input", "Output", "Cache savings"]}
         />
       </section>
 
-      <section className="grid gap-x-12 gap-y-8 lg:grid-cols-2">
+      <section className="grid gap-x-12 gap-y-8 lg:grid-cols-2 redesign:gap-x-8">
         <div className="flex flex-col gap-2.5">
           <Skeleton className="h-5 w-28" />
           <Skeleton className="h-2" />
@@ -1535,7 +1578,9 @@ function UsageSkeleton() {
 
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+          <h2 className="text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
+            Breakdown
+          </h2>
           <Skeleton shape="card" className="h-7 w-28" />
         </div>
         <Skeleton className="h-44" />
@@ -1546,7 +1591,7 @@ function UsageSkeleton() {
 
 function MetricSkeletons({ labels }: { readonly labels: readonly string[] }) {
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5">
+    <div className="grid grid-cols-2 gap-x-6 gap-y-4 py-1 md:grid-cols-5 redesign:gap-2 redesign:py-0">
       {labels.map((label) => (
         <div key={label} className="flex flex-col gap-0.5">
           <span className="text-xs text-muted-foreground">{label}</span>

@@ -25,14 +25,14 @@ export function PreviewRecentUrlCard({ threadRef, entry, onOpen, onRemove }: Pro
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full items-center gap-3 px-3 py-3 pr-10 text-left hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full items-center gap-3 px-3 py-3 pr-10 text-left hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring redesign:rounded-lg redesign:hover:bg-foreground/4 redesign:focus-visible:bg-foreground/4 redesign:focus-visible:ring-foreground/40"
       >
         <PreviewFaviconIcon threadRef={threadRef} url={entry.url} />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium text-foreground">
+        <div className="flex min-w-0 flex-1 flex-col redesign:gap-0.5">
+          <span className="truncate text-sm font-medium text-foreground redesign:text-foreground/75 redesign:group-hover:text-foreground redesign:group-focus-within:text-foreground">
             {entry.title ?? label}
           </span>
-          <span className="truncate text-xs text-muted-foreground">
+          <span className="truncate text-xs text-muted-foreground redesign:text-secondary-label">
             {entry.title ? `${label} · ` : ""}
             {visitedAt}
           </span>
@@ -42,7 +42,7 @@ export function PreviewRecentUrlCard({ threadRef, entry, onOpen, onRemove }: Pro
         type="button"
         aria-label={`Remove ${label} from history`}
         onClick={onRemove}
-        className="absolute right-3 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover:opacity-100"
+        className="absolute right-3 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover:opacity-100 redesign:focus-visible:ring-foreground/40"
       >
         <X className="size-3.5" />
       </button>

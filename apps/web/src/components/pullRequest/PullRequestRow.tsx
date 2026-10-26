@@ -61,7 +61,7 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
   );
 }
 
-const PAGE_ROW_CLASS = "px-3 py-2.5";
+const PAGE_ROW_CLASS = "px-3 py-2.5 redesign:py-2";
 
 export type PullRequestRowTarget = Pick<
   EnvironmentPullRequestEntry,
@@ -107,7 +107,7 @@ function PullRequestRowImpl({
       data-pull-request-stats-key={statsKey}
       data-pull-request-key={statsKey}
       className={cn(
-        "flex items-center rounded-md [content-visibility:auto] [contain-intrinsic-block-size:56.5px]",
+        "flex items-center rounded-md [content-visibility:auto] [contain-intrinsic-block-size:56.5px] redesign:rounded-lg redesign:[contain-intrinsic-block-size:54px]",
         selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
@@ -118,7 +118,7 @@ function PullRequestRowImpl({
         className={cn(
           PULL_REQUEST_ROW_CLASS,
           PAGE_ROW_CLASS,
-          "min-w-0 flex-1 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+          "min-w-0 flex-1 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring redesign:focus-visible:ring-foreground/30",
         )}
       >
         <PullRequestRowGlyph
@@ -224,8 +224,8 @@ function PullRequestRowImpl({
               ) : null}
               <PullRequestRowAuthor
                 actor={entry.author}
-                className="min-w-3.5 max-w-40"
-                labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
+                className="min-w-3.5 max-w-40 redesign:shrink-0"
+                labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate redesign:not-sr-only redesign:truncate"
               />
               {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
               {environmentLabel ? (

@@ -54,7 +54,7 @@ export function PullRequestListGhost({ rows = 7, caption }: { rows?: number; cap
     <div
       role="status"
       aria-label={caption ?? "Loading pull requests"}
-      className="motion-safe:animate-skeleton space-y-0.5"
+      className="motion-safe:animate-skeleton space-y-0.5 redesign:animate-none"
     >
       {caption ? (
         <p className="px-3 pb-1 text-xs font-medium text-muted-foreground/70">{caption}</p>
@@ -62,7 +62,7 @@ export function PullRequestListGhost({ rows = 7, caption }: { rows?: number; cap
       {Array.from({ length: rows }, (_, index) => (
         <div
           key={index}
-          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2.5"
+          className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2.5 redesign:rounded-lg redesign:py-2"
         >
           <GhostBar className="size-4 rounded-full" />
           <div className="min-w-0 space-y-1.5">

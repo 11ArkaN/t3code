@@ -34,6 +34,7 @@ import { useProjectEntriesQuery } from "./projectFilesQueryState";
 interface FileBreadcrumbsProps {
   readonly cwd: string;
   readonly environmentId: EnvironmentId;
+  readonly hideCurrentFile: boolean;
   /** Navigates to a folder; an empty path is the workspace root. */
   readonly onNavigateFolder: (relativePath: string) => void;
   readonly onOpenFile: (relativePath: string) => void;
@@ -301,13 +302,16 @@ export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
 
   return (
     <nav aria-label="File path" className="flex h-full">
-      <ol className="flex items-center">
+      <ol className="flex items-center redesign:text-2xs redesign:text-secondary-label">
         {breadcrumbs.map((crumb, index) => {
           const current = index === currentIndex;
           return (
             <li
               key={crumb.path || "project"}
-              className="flex min-w-0 shrink-0 items-center"
+              className={cn(
+                "flex min-w-0 shrink-0 items-center",
+                current && props.hideCurrentFile && "redesign:hidden",
+              )}
               data-file-crumb
               data-current-file-crumb={current}
             >

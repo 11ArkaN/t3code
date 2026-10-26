@@ -6,6 +6,7 @@ import type {
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import { useClientSettings } from "~/hooks/useSettings";
 import { RelativeTime } from "~/components/RelativeTime";
 
 import { MiddleTruncate } from "../ui/middle-truncate";
@@ -17,7 +18,7 @@ import {
 } from "./pullRequestPresentation";
 
 export const PULL_REQUEST_ROW_CLASS =
-  "group/pr-row flex w-full items-center gap-2 rounded-md py-1 pr-1 text-left";
+  "group/pr-row flex w-full items-center gap-2 rounded-md py-1 pr-1 text-left redesign:rounded-lg";
 
 export const PULL_REQUEST_ROW_NUMBER_CLASS =
   "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
@@ -74,6 +75,38 @@ export function PullRequestRowLines({
   metaClassName?: string;
   updatedAt?: string | null | undefined;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
+  if (redesign) {
+    return (
+      <span className="@container/pr-lines min-w-0 flex-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate text-sm font-medium text-foreground/75 group-hover/pr-row:text-foreground group-focus-within/pr-row:text-foreground group-aria-[current=true]/pr-row:text-foreground">
+            {title}
+          </span>
+          {signals ? (
+            <span className="flex shrink-0 items-center gap-1 text-2xs">{signals}</span>
+          ) : null}
+          {status ? (
+            <span className="ml-auto flex shrink-0 items-center gap-1.5 text-2xs">{status}</span>
+          ) : null}
+        </span>
+        <span
+          className={cn(
+            "flex min-w-0 items-center gap-1.5 overflow-hidden text-2xs text-secondary-label",
+            metaClassName,
+          )}
+        >
+          {number}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">{meta}</span>
+          {updatedAt ? (
+            <span className="hidden shrink-0 whitespace-nowrap tabular-nums @md/pr-lines:inline">
+              <RelativeTime timestamp={updatedAt} />
+            </span>
+          ) : null}
+        </span>
+      </span>
+    );
+  }
   return (
     <span className="min-w-0 flex-1">
       <span className="flex min-w-0 items-center gap-1.5">

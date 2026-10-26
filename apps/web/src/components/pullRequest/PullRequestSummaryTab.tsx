@@ -25,6 +25,7 @@ import { useRef, useState, type ReactNode } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { useClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { useOpenLink } from "~/browser/useOpenLink";
 import { RelativeTime } from "~/components/RelativeTime";
@@ -232,7 +233,7 @@ function CollapsedComment({
   const statusTriggerRef = useRef<HTMLButtonElement>(null);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
-      <article className="group rounded-lg border border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
+      <article className="group rounded-lg border border-border/60 redesign:rounded-xl redesign:border-transparent redesign:bg-muted/30 redesign:hover:border-border/60 [contain-intrinsic-block-size:44px] [content-visibility:auto]">
         <div className="p-3">
           <div className="flex flex-wrap items-baseline gap-2">
             <CommentIdentity comment={comment} detail={detail} />
@@ -297,7 +298,7 @@ function MetaRow({
 }) {
   return (
     <div className="grid min-h-7 min-w-0 grid-cols-[6rem_minmax(0,1fr)] items-center gap-2 text-xs sm:min-h-6">
-      <span className="flex items-center gap-1.5 text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-muted-foreground redesign:text-secondary-label">
         {icon}
         {label}
       </span>
@@ -308,17 +309,21 @@ function MetaRow({
 
 function Section({
   title,
+  count,
   defaultOpen = true,
   keepMounted = false,
   actions,
   children,
 }: {
   title: string;
+  count?: number;
   defaultOpen?: boolean;
   keepMounted?: boolean;
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
+  const label = count === undefined || redesign ? title : `${title} (${count})`;
   const [open, setOpen] = useState(defaultOpen);
   const headingRef = useRef<HTMLDivElement>(null);
   const setOpenWithScrollAnchor = (nextOpen: boolean) => {
@@ -343,15 +348,18 @@ function Section({
     <Collapsible
       open={open}
       onOpenChange={setOpenWithScrollAnchor}
-      render={<section aria-label={title} />}
+      render={<section aria-label={label} />}
       data-pull-request-summary-section
     >
       <div
         ref={headingRef}
-        className="sticky top-0 z-10 flex w-full items-center bg-background pr-4"
+        className="sticky top-0 z-10 flex w-full items-center bg-background pr-4 redesign:flex-wrap"
       >
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground">
-          <span>{title}</span>
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1.5 px-4 py-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground redesign:text-foreground">
+          <span>{label}</span>
+          {redesign && count !== undefined ? (
+            <span className="text-xs font-normal tabular-nums text-secondary-label">{count}</span>
+          ) : null}
           <ChevronRightIcon
             aria-hidden
             className={cn(
@@ -569,9 +577,9 @@ export function PullRequestSummaryTab({
     return (
       <article
         key={`${detail.url}:${comment.id}`}
-        className="group rounded-lg border border-border/60 bg-background [contain-intrinsic-block-size:160px] [content-visibility:auto]"
+        className="group rounded-lg border border-border/60 bg-background redesign:rounded-xl redesign:border-transparent redesign:bg-muted/30 redesign:hover:border-border/60 [contain-intrinsic-block-size:160px] [content-visibility:auto]"
       >
-        <div className="flex flex-wrap items-baseline gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5">
+        <div className="flex flex-wrap items-baseline gap-2 rounded-t-lg bg-muted/25 px-3 py-2.5 redesign:rounded-t-xl redesign:bg-transparent">
           <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 text-xs text-muted-foreground">
             <CommentIdentity comment={comment} detail={detail} />
             {outcome ? (
@@ -617,7 +625,7 @@ export function PullRequestSummaryTab({
     const thread = item.kind === "thread" ? item.thread : undefined;
     const replies =
       item.kind === "thread" && item.replies.length > 0 ? (
-        <div className="ml-4 space-y-2 border-l-2 border-border/60 pl-3">
+        <div className="ml-4 space-y-2 border-l-2 border-border/60 pl-3 redesign:border-l">
           {item.replies.map((reply) => renderCommentCard(reply, undefined, { reply: true }))}
         </div>
       ) : null;
@@ -844,7 +852,8 @@ export function PullRequestSummaryTab({
       </Section>
 
       <Section
-        title={`Comments (${detail.commentCount})`}
+        title="Comments"
+        count={detail.commentCount}
         actions={
           <div className="flex shrink-0 items-center gap-1">
             <Menu>
@@ -911,9 +920,11 @@ export function PullRequestSummaryTab({
               </p>
             ) : null}
             {items.length === 0 ? (
-              <p className="py-2 text-xs text-muted-foreground">No comments yet.</p>
+              <p className="py-2 text-xs text-muted-foreground redesign:text-secondary-label">
+                No comments yet.
+              </p>
             ) : filteredItems.length === 0 ? (
-              <p className="py-2 text-xs text-muted-foreground">
+              <p className="py-2 text-xs text-muted-foreground redesign:text-secondary-label">
                 {filteredOutCount === 1
                   ? "The only comment is hidden by the filter."
                   : `All ${filteredOutCount} comments are hidden by the filter.`}

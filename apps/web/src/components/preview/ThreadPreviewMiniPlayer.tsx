@@ -1,3 +1,4 @@
+import { useClientSettings } from "~/hooks/useSettings";
 import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
 import { previewPdfAssetUrl } from "@t3tools/shared/preview";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
@@ -115,6 +116,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, miniPlayer }: Props) {
 }
 
 function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly tabId: string }) {
+  const redesign = useClientSettings((s) => s.redesignEnabled);
   const httpBaseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const previewState = useThreadPreviewState(threadRef);
   const snapshot = previewState.sessions[tabId] ?? null;
@@ -197,7 +199,7 @@ function BrowserMiniPlayer({ threadRef, tabId, miniPlayer }: Props & { readonly 
             <TooltipTrigger
               render={
                 <Button
-                  variant={poppedOut ? "secondary" : "ghost"}
+                  variant={poppedOut ? "secondary" : redesign ? "ghost-muted" : "ghost"}
                   size="icon-xs"
                   aria-label={
                     poppedOut ? "Close popped-out preview" : "Pop preview into separate window"
@@ -338,6 +340,8 @@ function MiniPlayerShell({
   readonly cornerRadius?: (frame: PreviewMiniPlayerSize) => number;
   readonly children: (frame: PreviewMiniPlayerFrame) => ReactNode;
 }) {
+  const redesignEnabled = useClientSettings((s) => s.redesignEnabled);
+  const redesign = redesignEnabled && miniPlayer.source.kind === "browser";
   const canvas = useChatCanvas();
   const gestureRef = useRef<PointerGesture | null>(null);
   // Touch toggles the pill after the tap's click so that click cannot land on the newly opened pill.
@@ -468,7 +472,10 @@ function MiniPlayerShell({
           <div
             ref={handleRef}
             data-pill-open={pillOpen ? "" : undefined}
-            className="group pointer-events-auto absolute z-[49] size-3 touch-none cursor-grab active:cursor-grabbing pointer-coarse:-m-2.5 pointer-coarse:size-8"
+            className={cn(
+              "group pointer-events-auto absolute z-[49] size-3 touch-none cursor-grab active:cursor-grabbing pointer-coarse:-m-2.5 pointer-coarse:size-8",
+              redesign && "size-5",
+            )}
             style={{ right: pillInset, top: pillInset }}
             onPointerDown={(event) => beginGesture(event, null)}
             onPointerMove={handlePointerMove}
@@ -495,7 +502,12 @@ function MiniPlayerShell({
                 )}
               />
             </div>
-            <div className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5">
+            <div
+              className={cn(
+                "pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-data-pill-open:pointer-events-auto group-data-pill-open:opacity-100 active:cursor-grabbing pointer-coarse:right-2.5 pointer-coarse:top-2.5",
+                redesign && "border-foreground/10 bg-popover shadow-md/10",
+              )}
+            >
               {recording ? (
                 <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
                   <span className="size-2 rounded-full bg-destructive motion-safe:animate-status-pulse" />
@@ -505,7 +517,7 @@ function MiniPlayerShell({
                 <TooltipTrigger
                   render={
                     <Button
-                      variant="ghost"
+                      variant={redesign ? "ghost-muted" : "ghost"}
                       size="icon-xs"
                       aria-label="Open preview in right panel"
                       onPointerDown={(event) => event.stopPropagation()}
@@ -522,7 +534,7 @@ function MiniPlayerShell({
                 <TooltipTrigger
                   render={
                     <Button
-                      variant="ghost"
+                      variant={redesign ? "ghost-muted" : "ghost"}
                       size="icon-xs"
                       aria-label="Close floating preview"
                       onPointerDown={(event) => event.stopPropagation()}

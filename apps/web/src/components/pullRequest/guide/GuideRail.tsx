@@ -70,15 +70,19 @@ function RailRow({
       aria-current={active ? "step" : undefined}
       onClick={onClick}
       className={cn(
-        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-        active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+        "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left redesign:rounded-lg redesign:focus-visible:ring-foreground/30 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+        active
+          ? "bg-accent text-accent-foreground"
+          : "hover:bg-accent/50 redesign:text-foreground/75 redesign:hover:text-foreground",
       )}
     >
       {lead}
       <span className="flex min-w-0 flex-col gap-0.5">
-        <span className="text-sm text-foreground">{title}</span>
+        <span className="text-sm text-foreground redesign:font-medium redesign:text-inherit">
+          {title}
+        </span>
         {detail !== null ? (
-          <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground redesign:text-secondary-label">
             {detail}
           </span>
         ) : null}

@@ -136,7 +136,7 @@ export function MediaVideoPlayer({
         <span
           role="alert"
           className={cn(
-            "flex aspect-video max-h-full min-h-28 w-full flex-col items-center justify-center gap-3 rounded-lg border border-border/40 bg-muted/40 p-4 text-center text-sm text-muted-foreground",
+            "flex aspect-video max-h-full min-h-28 w-full flex-col items-center justify-center gap-3 rounded-lg border border-border/40 bg-muted/40 p-4 text-center text-sm text-muted-foreground redesign:gap-4 redesign:rounded-xl redesign:bg-muted/20 redesign:p-6",
             stateClassName,
           )}
         >
@@ -172,7 +172,7 @@ export function MediaVideoPlayer({
           playsInline
           preload={preload === "metadata" || preloaded ? "metadata" : "none"}
           className={cn(
-            "aspect-video max-h-full w-full bg-black object-contain",
+            "aspect-video max-h-full w-full bg-black object-contain redesign:rounded-lg",
             onOpen && "pointer-events-none",
             videoClassName,
           )}
@@ -208,7 +208,7 @@ export function MediaVideoPlayer({
           onClick={onOpen}
           className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
         >
-          <span className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white">
+          <span className="flex size-8 items-center justify-center rounded-full bg-black/50 text-white redesign:size-11 redesign:rounded-xl redesign:bg-black/70">
             <PlayIcon aria-hidden className="size-4 fill-current" />
           </span>
         </button>

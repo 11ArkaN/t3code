@@ -53,7 +53,12 @@ import { useProject, useThreadCheckpointSummaries, useQuietThreadShell } from ".
 import { useClientSettings, updateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
-import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import {
+  DiffPanelEmptyState,
+  DiffPanelLoadingState,
+  DiffPanelShell,
+  type DiffPanelMode,
+} from "./DiffPanelShell";
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
@@ -198,6 +203,7 @@ export default function DiffPanel({
 }: DiffPanelProps) {
   const resolvedTheme = useRenderedAppearance();
   const settings = useClientSettings((settings) => ({
+    redesignEnabled: settings.redesignEnabled,
     diffFilesCollapsed: settings.diffFilesCollapsed,
     diffIgnoreWhitespace: settings.diffIgnoreWhitespace,
     diffLayout: settings.diffLayout,
@@ -664,7 +670,16 @@ export default function DiffPanel({
       <div className="flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<Button size="xs" variant="secondary" />}
+            render={
+              settings.redesignEnabled ? (
+                <button
+                  type="button"
+                  className="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-xs font-medium text-foreground/75 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30"
+                />
+              ) : (
+                <Button size="xs" variant="secondary" />
+              )
+            }
             className="max-w-full"
             aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
@@ -711,7 +726,7 @@ export default function DiffPanel({
         </DropdownMenu>
         {selectedRunId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
           <div
-            className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
+            className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground redesign:text-secondary-label"
             aria-label={`Comparing ${selectedGitSource.headRef ?? "HEAD"} against ${selectedGitSource.baseRef}`}
           >
             <Tooltip>
@@ -969,37 +984,39 @@ export default function DiffPanel({
   return (
     <DiffPanelShell mode={mode} header={headerRow}>
       {!activeThread ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        <DiffPanelEmptyState title="Select a thread">
           Select a thread to inspect turn diffs.
-        </div>
+        </DiffPanelEmptyState>
       ) : !isGitRepo ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        <DiffPanelEmptyState title="Diffs unavailable">
           Turn diffs are unavailable because this project is not a git repository.
-        </div>
+        </DiffPanelEmptyState>
       ) : selectedRunId !== null && orderedTurnDiffSummaries.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+        <DiffPanelEmptyState title="No completed turns">
           No completed turns yet.
-        </div>
+        </DiffPanelEmptyState>
       ) : selectedRunId === null && !canReadFiles ? (
         fileAccess.isPending ? (
           <DiffPanelLoadingState label="Checking file access..." />
         ) : (
-          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+          <DiffPanelEmptyState title="File access unavailable">
             {fileAccess.error ?? "This connection cannot read local diffs."}
-          </div>
+          </DiffPanelEmptyState>
         )
       ) : (
         <>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
             {isSelectedPatchTruncated && !lazySource && (
-              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground">
+              <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-2xs text-muted-foreground redesign:mx-3 redesign:my-2 redesign:rounded-lg redesign:border-transparent redesign:px-3 redesign:py-2 redesign:text-xs">
                 This preview exceeds the size limit. Changes shown are incomplete.
                 {selectedGitSource?.files ? " Totals include all changes." : ""}
               </p>
             )}
             {selectedPatchError && !renderablePatch && (
-              <div className="px-3">
-                <p className="mb-2 text-2xs text-error/80">{selectedPatchError}</p>
+              <div className="px-3 redesign:py-2">
+                <p className="mb-2 text-2xs text-error/80 redesign:rounded-lg redesign:bg-muted/40 redesign:p-3 redesign:text-xs">
+                  {selectedPatchError}
+                </p>
               </div>
             )}
             {!renderablePatch && !lazySource ? (
@@ -1014,13 +1031,16 @@ export default function DiffPanel({
                   }
                 />
               ) : (
-                <div className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70">
+                <DiffPanelEmptyState
+                  title={hasNoNetChanges ? "No changes" : "Diff unavailable"}
+                  className="flex h-full items-center justify-center px-3 py-2 text-xs text-muted-foreground/70"
+                >
                   <p>
                     {hasNoNetChanges
                       ? "No net changes in this selection."
                       : "No patch available for this selection."}
                   </p>
-                </div>
+                </DiffPanelEmptyState>
               )
             ) : lazySource || renderablePatch?.kind === "files" ? (
               <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -1123,7 +1143,11 @@ export default function DiffPanel({
                           fileKey={fileKey}
                           collapsed={unavailable || collapsedDiffFileKeys.has(fileKey)}
                           unavailable={unavailable}
-                          iconClassName={getDiffCollapseIconClassName(fileDiff)}
+                          iconClassName={
+                            settings.redesignEnabled
+                              ? "text-muted-foreground"
+                              : getDiffCollapseIconClassName(fileDiff)
+                          }
                           onToggle={toggleDiffFileCollapsed}
                         />
                       );

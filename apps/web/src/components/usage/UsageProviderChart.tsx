@@ -361,7 +361,7 @@ function UsageChartPlot({
   return (
     <div
       ref={plotRef}
-      className="relative h-56 flex-1"
+      className="relative h-56 flex-1 redesign:min-w-0 redesign:max-sm:h-44"
       onMouseMove={handleMove}
       onMouseLeave={() => {
         hoverPositionRef.current = null;
@@ -444,7 +444,7 @@ export function UsageProviderChart({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex gap-2">
-        <div className="relative h-56 w-14 shrink-0">
+        <div className="relative h-56 w-14 shrink-0 redesign:max-sm:h-44 redesign:max-sm:w-10">
           {scale.labeled
             ? scale.ticks.map((tick) => (
                 <span
@@ -508,7 +508,7 @@ export function UsageProviderChart({
         </UsageChartPlot>
       </div>
 
-      <div className="flex justify-between pl-16 text-3xs text-muted-foreground uppercase">
+      <div className="flex justify-between pl-16 text-3xs text-muted-foreground uppercase redesign:pt-2 redesign:normal-case redesign:max-sm:pl-12">
         <span>{periods[0] === undefined ? "" : formatPeriod(periods[0])}</span>
         <span>
           {periods[Math.floor(periods.length / 2)] === undefined

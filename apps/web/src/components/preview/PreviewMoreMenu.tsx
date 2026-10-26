@@ -1,3 +1,5 @@
+import { Fragment } from "react";
+import { useClientSettings } from "~/hooks/useSettings";
 import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 
@@ -51,12 +53,19 @@ interface Props {
   move?: { readonly label: string; readonly onMove: () => void };
 }
 
-const MenuTriggerButton = () => (
+const MenuTriggerButton = ({ redesign }: { redesign: boolean }) => (
   <Tooltip>
     <TooltipTrigger
       render={
         <MenuTrigger
-          render={<Button variant="ghost" size="icon-xs" type="button" aria-label="Preview menu" />}
+          render={
+            <Button
+              variant={redesign ? "ghost-muted" : "ghost"}
+              size="icon-xs"
+              type="button"
+              aria-label="Preview menu"
+            />
+          }
         />
       }
     >
@@ -77,92 +86,137 @@ export function PreviewMoreMenu({
   profileName,
   move,
 }: Props) {
+  const redesign = useClientSettings((s) => s.redesignEnabled);
+  const PageGroup = redesign ? MenuGroup : Fragment;
   const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
   const disabled = !enabled;
   return (
     <Menu>
-      <MenuTriggerButton />
+      <MenuTriggerButton redesign={redesign} />
       <MenuPopup align="end" sideOffset={6}>
-        <MenuItem onClick={actions.hardReload} disabled={disabled}>
-          Hard reload
-        </MenuItem>
-        {actions.openDevTools ? (
-          <MenuItem onClick={actions.openDevTools} disabled={disabled}>
-            Open DevTools
+        <PageGroup>
+          <MenuItem onClick={actions.hardReload} disabled={disabled}>
+            Hard reload
           </MenuItem>
-        ) : null}
-        {actions.toggleNativePictureInPicture ? (
-          <MenuItem onClick={actions.toggleNativePictureInPicture} disabled={disabled}>
-            {nativePictureInPicture
-              ? "Close separate preview window"
-              : "Open separate preview window"}
+          {actions.openDevTools ? (
+            <MenuItem onClick={actions.openDevTools} disabled={disabled}>
+              Open DevTools
+            </MenuItem>
+          ) : null}
+          {actions.toggleNativePictureInPicture ? (
+            <MenuItem onClick={actions.toggleNativePictureInPicture} disabled={disabled}>
+              {nativePictureInPicture
+                ? "Close separate preview window"
+                : "Open separate preview window"}
+            </MenuItem>
+          ) : null}
+          {move ? <MenuItem onClick={move.onMove}>{move.label}</MenuItem> : null}
+          <MenuItem onClick={onToggleDeviceToolbar} disabled={disabled}>
+            {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
           </MenuItem>
-        ) : null}
-        {move ? <MenuItem onClick={move.onMove}>{move.label}</MenuItem> : null}
-        <MenuItem onClick={onToggleDeviceToolbar} disabled={disabled}>
-          {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
-        </MenuItem>
-        <MenuSub>
-          <MenuSubTrigger disabled={disabled}>Appearance</MenuSubTrigger>
-          <MenuSubPopup>
-            <MenuRadioGroup
-              value={colorScheme}
-              onValueChange={(value) => actions.setColorScheme(value as DesktopPreviewColorScheme)}
-            >
-              {COLOR_SCHEME_OPTIONS.map((option) => (
-                <MenuRadioItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuRadioItem>
-              ))}
-            </MenuRadioGroup>
-          </MenuSubPopup>
-        </MenuSub>
+          <MenuSub>
+            <MenuSubTrigger disabled={disabled}>Appearance</MenuSubTrigger>
+            <MenuSubPopup>
+              <MenuRadioGroup
+                value={colorScheme}
+                onValueChange={(value) =>
+                  actions.setColorScheme(value as DesktopPreviewColorScheme)
+                }
+              >
+                {COLOR_SCHEME_OPTIONS.map((option) => (
+                  <MenuRadioItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuSubPopup>
+          </MenuSub>
+        </PageGroup>
         <MenuSeparator />
-        <MenuItem
-          closeOnClick={false}
-          onClick={(event: React.MouseEvent) => event.preventDefault()}
-          className="justify-between"
-          disabled={disabled}
-        >
-          <span>Zoom</span>
-          <span className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon-xs"
-              type="button"
-              onClick={actions.zoomOut}
-              aria-label="Zoom out"
-              disabled={disabled}
-            >
-              <Minus />
-            </Button>
-            <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
-              {zoomLabel}
+        {redesign ? (
+          <div className="flex items-center justify-between gap-3 px-3 py-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-secondary-label">Zoom</span>
+              <span className="text-xs font-medium tabular-nums">{zoomLabel}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                onClick={actions.zoomOut}
+                aria-label="Zoom out"
+                disabled={disabled}
+              >
+                <Minus />
+              </Button>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                onClick={actions.zoomIn}
+                aria-label="Zoom in"
+                disabled={disabled}
+              >
+                <PlusIcon />
+              </Button>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                onClick={actions.resetZoom}
+                aria-label="Reset zoom"
+                disabled={disabled}
+              >
+                <RotateCcw />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <MenuItem
+            closeOnClick={false}
+            onClick={(event: React.MouseEvent) => event.preventDefault()}
+            className="justify-between"
+            disabled={disabled}
+          >
+            <span>Zoom</span>
+            <span className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon-xs"
+                type="button"
+                onClick={actions.zoomOut}
+                aria-label="Zoom out"
+                disabled={disabled}
+              >
+                <Minus />
+              </Button>
+              <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
+                {zoomLabel}
+              </span>
+              <Button
+                variant="outline"
+                size="icon-xs"
+                type="button"
+                onClick={actions.zoomIn}
+                aria-label="Zoom in"
+                disabled={disabled}
+              >
+                <PlusIcon />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                type="button"
+                onClick={actions.resetZoom}
+                aria-label="Reset zoom"
+                disabled={disabled}
+              >
+                <RotateCcw />
+              </Button>
             </span>
-            <Button
-              variant="outline"
-              size="icon-xs"
-              type="button"
-              onClick={actions.zoomIn}
-              aria-label="Zoom in"
-              disabled={disabled}
-            >
-              <PlusIcon />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              type="button"
-              onClick={actions.resetZoom}
-              aria-label="Reset zoom"
-              disabled={disabled}
-            >
-              <RotateCcw />
-            </Button>
-          </span>
-        </MenuItem>
+          </MenuItem>
+        )}
         <MenuSeparator />
         <MenuGroup>
+          {redesign && !profileName ? <MenuGroupLabel>Browser data</MenuGroupLabel> : null}
           {profileName ? (
             <MenuGroupLabel className="max-w-64">
               <span className="block truncate">Profile: {profileName}</span>

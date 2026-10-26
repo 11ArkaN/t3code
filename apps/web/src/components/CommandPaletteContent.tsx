@@ -64,7 +64,7 @@ export function CommandPaletteContent({
           {children}
         </CommandPanel>
         <CommandFooter className="max-sm:flex-col max-sm:items-start">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 redesign:min-w-0 redesign:flex-wrap redesign:gap-y-2">
             <KbdGroup>
               <Kbd>
                 <ArrowUpIcon />

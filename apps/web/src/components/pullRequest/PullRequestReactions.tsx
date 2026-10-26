@@ -24,7 +24,7 @@ import {
 } from "@t3tools/client-runtime/pull-request-reactions";
 
 const PILL_CLASS =
-  "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+  "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs outline-none redesign:rounded-md redesign:focus-visible:ring-foreground/30 transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 const EMPTY_PENDING: ReadonlyMap<PullRequestReactionContent, boolean> = new Map();
 
@@ -99,7 +99,7 @@ export function PullRequestReactionBar({
                   PILL_CLASS,
                   reaction.viewerHasReacted
                     ? "border-primary/60 bg-primary/10 text-foreground"
-                    : "border-border/70 bg-muted/40 text-muted-foreground",
+                    : "border-border/70 bg-muted/40 text-muted-foreground redesign:border-transparent redesign:bg-transparent redesign:text-secondary-label",
                   canReact ? "hover:border-primary/60" : "cursor-default",
                 )}
                 onClick={() => void toggle(reaction.content, !reaction.viewerHasReacted)}

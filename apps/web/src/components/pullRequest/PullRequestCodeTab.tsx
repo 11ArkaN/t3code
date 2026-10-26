@@ -980,7 +980,7 @@ function PullRequestCodeTab({
     setSelectedLines(null);
   };
   const toolbar = (
-    <div className="@container flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-4 text-xs text-muted-foreground">
+    <div className="@container flex h-10 min-h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-background px-4 text-xs text-muted-foreground redesign:border-border/40 redesign:text-secondary-label">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {orderedCommits.length > 0 ? (
           <DropdownMenu>
@@ -1331,7 +1331,7 @@ function PullRequestCodeTab({
 
   if (items.length === 0 && nextCursor === null) {
     return withToolbar(
-      <p className="px-4 py-5 text-sm text-muted-foreground">
+      <p className="px-4 py-5 text-sm text-muted-foreground redesign:mx-auto redesign:max-w-md redesign:text-center redesign:text-secondary-label">
         {commit === null ? `This ${term} has no file changes.` : "This commit has no file changes."}
       </p>,
     );

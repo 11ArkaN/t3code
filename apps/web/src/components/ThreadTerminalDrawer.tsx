@@ -1210,7 +1210,11 @@ function TerminalActionButton({
         render={
           <button
             type="button"
-            className={cn(className, disabled && "opacity-64 cursor-not-allowed")}
+            className={cn(
+              className,
+              "redesign:rounded-md redesign:text-muted-foreground redesign:hover:bg-black/[0.035] redesign:hover:text-foreground dark:redesign:hover:bg-white/[0.08] redesign:focus-visible:outline redesign:focus-visible:outline-1 redesign:focus-visible:outline-foreground/40",
+              disabled && "opacity-64 cursor-not-allowed",
+            )}
             onClick={disabled ? undefined : onClick}
             aria-label={label}
             aria-disabled={disabled}
@@ -1364,10 +1368,10 @@ function TerminalSidebarGroup({
       {showHeader && (
         <button
           type="button"
-          className={`flex h-[22px] w-full cursor-pointer items-center gap-1 rounded px-1.5 text-2xs ${
+          className={`flex h-[22px] w-full cursor-pointer items-center gap-1 rounded px-1.5 text-2xs redesign:rounded-md ${
             isGroupActive
-              ? "bg-accent/50 text-foreground"
-              : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+              ? "bg-accent/50 text-foreground redesign:bg-transparent"
+              : "text-muted-foreground hover:bg-accent/40 hover:text-foreground redesign:hover:bg-black/[0.035] dark:redesign:hover:bg-white/[0.08]"
           }`}
           onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
         >
@@ -1390,8 +1394,8 @@ function TerminalSidebarGroup({
               className={cn(
                 "group/tab flex h-6 w-full items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
                 isActive
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  ? "bg-accent text-foreground redesign:bg-black/[0.035] dark:redesign:bg-white/[0.08]"
+                  : "text-muted-foreground hover:bg-accent/60 hover:text-foreground redesign:hover:bg-black/[0.035] dark:redesign:hover:bg-white/[0.08]",
               )}
             >
               {canOperateTerminal ? (
@@ -1451,6 +1455,7 @@ export default function ThreadTerminalDrawer({
 }: ThreadTerminalDrawerProps) {
   const canOperateTerminal = useEnvironmentScope(threadRef.environmentId, AuthTerminalOperateScope);
   const isPanel = mode === "panel";
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
     false,
@@ -1800,7 +1805,10 @@ export default function ThreadTerminalDrawer({
           />
         ) : null}
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center text-sm text-muted-foreground">
-          <p>No terminal sessions for this thread yet.</p>
+          {redesign && <h3 className="text-base font-semibold text-foreground">Terminal</h3>}
+          <p className="redesign:max-w-64 redesign:text-balance redesign:text-xs">
+            No terminal sessions for this thread yet.
+          </p>
           <Button
             size="xs"
             variant="outline"
@@ -1838,7 +1846,7 @@ export default function ThreadTerminalDrawer({
 
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
+          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs redesign:border-transparent redesign:shadow-none">
             <TerminalActionButton
               disabled={!canOperateTerminal}
               className={`p-1 text-foreground/90 transition-colors ${
@@ -1851,7 +1859,7 @@ export default function ThreadTerminalDrawer({
             >
               <SquareSplitHorizontal className="size-3.25" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
+            <div className="h-4 w-px bg-border/80 redesign:bg-transparent" />
             <TerminalActionButton
               disabled={!canOperateTerminal}
               className={`p-1 text-foreground/90 transition-colors ${
@@ -1864,7 +1872,7 @@ export default function ThreadTerminalDrawer({
             >
               <SquareSplitVertical className="size-3.25" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
+            <div className="h-4 w-px bg-border/80 redesign:bg-transparent" />
             <TerminalActionButton
               disabled={!canOperateTerminal}
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
@@ -1873,7 +1881,7 @@ export default function ThreadTerminalDrawer({
             >
               <Plus className="size-3.25" />
             </TerminalActionButton>
-            <div className="h-4 w-px bg-border/80" />
+            <div className="h-4 w-px bg-border/80 redesign:bg-transparent" />
             <TerminalActionButton
               disabled={!canOperateTerminal}
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
@@ -1914,8 +1922,8 @@ export default function ThreadTerminalDrawer({
           </div>
 
           {hasTerminalSidebar && (
-            <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10">
-              <div className="flex h-[22px] items-stretch justify-end border-b border-border/70">
+            <aside className="flex w-36 min-w-36 flex-col border border-border/70 bg-muted/10 redesign:mr-2 redesign:mb-2 redesign:min-w-0 redesign:max-w-[40%] redesign:rounded-lg redesign:border-transparent redesign:bg-transparent">
+              <div className="flex h-[22px] items-stretch justify-end border-b border-border/70 redesign:border-transparent">
                 <div className="inline-flex h-full items-stretch">
                   <TerminalActionButton
                     disabled={!canOperateTerminal}
@@ -1931,7 +1939,7 @@ export default function ThreadTerminalDrawer({
                   </TerminalActionButton>
                   <TerminalActionButton
                     disabled={!canOperateTerminal}
-                    className={`inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors ${
+                    className={`inline-flex h-full items-center border-l border-border/70 px-1 redesign:border-transparent text-foreground/90 transition-colors ${
                       hasReachedSplitLimit
                         ? "cursor-not-allowed opacity-64 hover:bg-transparent"
                         : "hover:bg-accent/70"
@@ -1943,7 +1951,7 @@ export default function ThreadTerminalDrawer({
                   </TerminalActionButton>
                   <TerminalActionButton
                     disabled={!canOperateTerminal}
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className="inline-flex h-full items-center border-l border-border/70 px-1 redesign:border-transparent text-foreground/90 transition-colors hover:bg-accent/70"
                     onClick={onNewTerminalAction}
                     label={newTerminalActionLabel}
                   >
@@ -1951,7 +1959,7 @@ export default function ThreadTerminalDrawer({
                   </TerminalActionButton>
                   <TerminalActionButton
                     disabled={!canOperateTerminal}
-                    className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
+                    className="inline-flex h-full items-center border-l border-border/70 px-1 redesign:border-transparent text-foreground/90 transition-colors hover:bg-accent/70"
                     onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
                     label={closeTerminalActionLabel}
                   >

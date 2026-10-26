@@ -51,7 +51,7 @@ export function PullRequestMarkdownEditor({
 
   return (
     <div
-      className={cn("space-y-2", className)}
+      className={cn("space-y-2 redesign:[--ring:var(--foreground)]", className)}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         if (
@@ -89,7 +89,7 @@ export function PullRequestMarkdownEditor({
         <Toggle value="preview">Preview</Toggle>
       </ToggleGroup>
       {preview ? (
-        <div className="rounded-lg border border-border/60 px-3 py-2">
+        <div className="rounded-lg border border-border/60 px-3 py-2 redesign:rounded-xl redesign:border-transparent redesign:bg-muted/30">
           {empty ? (
             <p className="text-xs text-muted-foreground">Nothing to preview.</p>
           ) : (

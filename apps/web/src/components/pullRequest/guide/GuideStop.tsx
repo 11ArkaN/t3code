@@ -131,7 +131,9 @@ export function GuideStop({
         </Collapsible>
 
         <div className="flex max-w-[60rem] flex-col gap-2">
-          <h2 className="text-lg font-semibold text-foreground">{stop.title}</h2>
+          <h2 className="text-lg font-semibold text-foreground redesign:text-balance">
+            {stop.title}
+          </h2>
           {stop.summary.trim() !== "" ? (
             <div className="text-sm text-muted-foreground">
               <GuideProse text={stop.summary} />
@@ -173,7 +175,7 @@ export function GuideStop({
 
         {otherFiles.length > 0 ? (
           <section className="flex flex-col gap-1.5">
-            <h3 className="text-xs font-medium text-muted-foreground">
+            <h3 className="text-xs font-medium text-muted-foreground redesign:text-foreground">
               {stop.excerpts.length > 0 ? "Also in this stop" : "Files in this stop"}
             </h3>
             <DiffWorkerPoolProvider>
@@ -182,7 +184,10 @@ export function GuideStop({
                   const diff = files.get(file.path);
                   const stat = diff === undefined ? null : getDiffLineStat([diff]);
                   return (
-                    <li key={file.path} className="border-border/60 not-first:border-t">
+                    <li
+                      key={file.path}
+                      className="border-border/60 not-first:border-t redesign:border-transparent redesign:hover:border-border/60"
+                    >
                       <Collapsible>
                         <CollapsibleTrigger className="group flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left text-xs outline-none hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset">
                           <ChevronRightIcon
@@ -232,7 +237,9 @@ export function GuideStop({
         {stop.questions.length > 0 || onAsk !== null ? (
           <section className="flex flex-col gap-1.5">
             {stop.questions.length > 0 ? (
-              <h3 className="text-xs font-medium text-muted-foreground">Questions to consider</h3>
+              <h3 className="text-xs font-medium text-muted-foreground redesign:text-foreground">
+                Questions to consider
+              </h3>
             ) : null}
             <div className="flex flex-col items-start gap-1.5">
               {stop.questions.map((question) =>
@@ -270,12 +277,12 @@ export function GuideStop({
 
         <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-border/60 pt-4">
           {nextTitle !== null ? (
-            <Button className="min-w-0" onClick={() => onStep(1)}>
+            <Button variant="default" className="min-w-0" onClick={() => onStep(1)}>
               <span className="min-w-0 truncate">Next: {nextTitle}</span>
               <ArrowRightIcon aria-hidden />
             </Button>
           ) : onFinish !== null ? (
-            <Button onClick={onFinish}>
+            <Button variant="default" onClick={onFinish}>
               <MessageSquareIcon aria-hidden />
               Finish review
             </Button>

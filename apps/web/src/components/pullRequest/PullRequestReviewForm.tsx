@@ -130,7 +130,7 @@ export function PullRequestReviewForm({
         aria-label="Review summary"
         onChange={(event) => setSummary(reviewKey, event.target.value)}
       />
-      <div className="mt-2 flex justify-end gap-2">
+      <div className="mt-2 flex justify-end gap-2 redesign:flex-wrap redesign:items-center">
         {offered.length > 1 ? (
           <Select
             value={selectedVerdict?.value ?? null}
@@ -159,6 +159,7 @@ export function PullRequestReviewForm({
         ) : null}
         <Button
           size="xs"
+          variant="default"
           disabled={
             pending || selectedVerdict === undefined || !canSubmit(selectedVerdict.value, body)
           }

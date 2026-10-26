@@ -73,11 +73,11 @@ export function UsageModelDialog({
     >
       <DialogPopup className="max-w-3xl">
         <DialogHeader>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 redesign:gap-3">
             <ProviderInstanceIcon
               driverKind={presentation.driverKind}
               displayName={presentation.label}
-              iconClassName="size-5"
+              iconClassName="size-5 redesign:grayscale redesign:opacity-60"
             />
             <DialogTitle>{model.model}</DialogTitle>
           </div>
@@ -88,11 +88,16 @@ export function UsageModelDialog({
         </DialogHeader>
         <DialogPanel>
           <div className="flex flex-col gap-8">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4 redesign:gap-2">
               {stats.map((stat) => (
-                <div key={stat.label} className="flex min-w-0 flex-col gap-0.5">
+                <div
+                  key={stat.label}
+                  className="flex min-w-0 flex-col gap-0.5 redesign:gap-2 redesign:rounded-lg redesign:bg-muted/40 redesign:p-3"
+                >
                   <span className="text-xs text-muted-foreground">{stat.label}</span>
-                  <span className="text-2xl font-semibold text-foreground">{stat.value}</span>
+                  <span className="text-2xl font-semibold text-foreground redesign:tabular-nums redesign:tracking-tight">
+                    {stat.value}
+                  </span>
                 </div>
               ))}
             </div>
@@ -111,7 +116,7 @@ export function UsageModelDialog({
               hour12={chartWindow.hour12}
             />
 
-            <div className="grid gap-x-10 gap-y-8 sm:grid-cols-2">
+            <div className="grid gap-x-10 gap-y-8 sm:grid-cols-2 redesign:gap-4">
               {costUnknown ? null : (
                 <UsageShareBar
                   label="Cost by type"

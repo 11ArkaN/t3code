@@ -139,6 +139,7 @@ export function useCommandPaletteThreadItems(input: {
         null;
       return (
         <ThreadCommandSubtitle
+          className="redesign:text-secondary-label"
           project={projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
           projectTitle={projectTitle ?? null}
           environmentLabel={

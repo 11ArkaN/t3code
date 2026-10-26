@@ -118,7 +118,7 @@ export function PullRequestGuideTab({
         <p className="text-sm font-medium text-foreground">
           {running ? "Writing a review guide" : "No review guide yet"}
         </p>
-        <p className="max-w-md text-xs text-muted-foreground">
+        <p className="max-w-md text-xs text-muted-foreground redesign:text-balance redesign:text-secondary-label">
           {failure ??
             query.error ??
             (running

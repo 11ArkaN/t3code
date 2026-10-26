@@ -90,7 +90,7 @@ function EmptyContentSearchDialog() {
       testId="project-content-search"
       value=""
     >
-      <p className="m-auto px-6 text-center text-muted-foreground text-sm">
+      <p className="m-auto px-6 text-center text-muted-foreground text-sm redesign:max-w-80 redesign:text-secondary-label redesign:text-balance">
         Open a project to search its files.
       </p>
     </CommandPaletteContent>
@@ -167,7 +167,7 @@ function OpenContentSearchDialog(props: {
       escapeLabel="Back"
       footerActionLabel="Open file"
       inputAccessory={
-        <div className="absolute inset-e-2.5 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5">
+        <div className="absolute inset-e-2.5 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-lg border bg-muted/30 p-0.5 redesign:border-transparent redesign:bg-foreground/[0.04]">
           <SearchOptionButton
             active={caseSensitive}
             disabled={!search.canReadFiles}
@@ -225,7 +225,7 @@ function OpenContentSearchDialog(props: {
       value={query}
     >
       {showSearchStatus ? (
-        <div className="flex h-9 shrink-0 items-center border-b px-3 text-xs text-muted-foreground">
+        <div className="flex h-9 shrink-0 items-center border-b px-3 text-xs text-muted-foreground redesign:border-transparent redesign:px-4 redesign:text-secondary-label">
           {search.isPending ? (
             <span className="flex items-center gap-2">
               <Spinner size="sm" /> Searching…
@@ -241,7 +241,7 @@ function OpenContentSearchDialog(props: {
       ) : null}
 
       {matches.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground redesign:mx-auto redesign:max-w-80 redesign:py-12 redesign:text-secondary-label redesign:text-balance">
           {search.isCheckingAccess
             ? "Checking file access…"
             : !search.canReadFiles
@@ -256,21 +256,23 @@ function OpenContentSearchDialog(props: {
             {groups.map((group) => {
               const path = splitPath(group.path);
               return (
-                <section className="pb-2" key={group.path}>
-                  <div className="sticky top-0 z-10 flex h-8 items-center gap-2 bg-popover/95 px-3 text-xs backdrop-blur-sm">
+                <section className="pb-2 redesign:px-2" key={group.path}>
+                  <div className="sticky top-0 z-10 flex h-8 items-center gap-2 bg-popover/95 px-3 text-xs backdrop-blur-sm redesign:px-2">
                     <PierreEntryIcon
                       pathValue={group.path}
                       kind="file"
                       theme={resolvedTheme}
-                      className="size-3.5"
+                      className="size-3.5 redesign:opacity-60 redesign:grayscale"
                     />
-                    <span className="font-medium text-foreground">{path.name}</span>
+                    <span className="font-medium text-foreground redesign:min-w-0 redesign:max-w-[65%] redesign:shrink-0 redesign:truncate redesign:font-semibold">
+                      {path.name}
+                    </span>
                     {path.directory ? (
-                      <span className="min-w-0 truncate text-muted-foreground">
+                      <span className="min-w-0 truncate text-muted-foreground redesign:text-secondary-label">
                         {path.directory}
                       </span>
                     ) : null}
-                    <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-3xs text-muted-foreground">
+                    <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 tabular-nums text-3xs text-muted-foreground redesign:bg-transparent redesign:text-xs redesign:text-secondary-label">
                       {group.matches.length}
                     </span>
                   </div>
@@ -282,14 +284,15 @@ function OpenContentSearchDialog(props: {
                         match.resultIndex === selectedIndex ? scrollSelectedRowIntoView : undefined
                       }
                       className={cn(
-                        "flex h-7 w-full min-w-0 items-center gap-3 px-3 text-left font-mono text-xs hover:bg-accent/60 disabled:pointer-events-none",
-                        match.resultIndex === selectedIndex && "bg-accent text-accent-foreground",
+                        "flex h-7 w-full min-w-0 items-center gap-3 px-3 text-left font-mono text-xs hover:bg-accent/60 disabled:pointer-events-none redesign:rounded-md redesign:px-2 redesign:hover:bg-foreground/[0.06] redesign:focus-visible:outline-1 redesign:focus-visible:outline-foreground/30",
+                        match.resultIndex === selectedIndex &&
+                          "bg-accent text-accent-foreground redesign:bg-foreground/[0.09] redesign:text-foreground",
                       )}
                       disabled={!canOpenMatches}
                       onMouseEnter={() => setSelectedIndex(match.resultIndex)}
                       onClick={() => openMatch(match)}
                     >
-                      <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground/70">
+                      <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground/70 redesign:w-9 redesign:text-secondary-label">
                         {match.lineNumber}
                       </span>
                       <span className="min-w-0 flex-1 truncate whitespace-pre">

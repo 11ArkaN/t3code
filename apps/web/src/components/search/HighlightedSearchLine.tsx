@@ -111,7 +111,7 @@ function HighlightedTokens(props: {
     .map((segment) =>
       segment.isMatch ? (
         <mark
-          className="rounded-xs bg-primary/25 text-inherit"
+          className="rounded-xs bg-primary/25 text-inherit redesign:bg-foreground/15"
           key={`${segment.start}:${segment.end}:match`}
           style={tokenStyle(segment.token)}
         >

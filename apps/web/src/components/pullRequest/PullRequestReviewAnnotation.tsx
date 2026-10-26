@@ -31,7 +31,7 @@ import { PullRequestReactionBar } from "./PullRequestReactions";
 import type { PendingReviewComment } from "./pullRequestReviewStore";
 
 const CARD_CLASS =
-  "mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 text-sm shadow-sm";
+  "mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 text-sm shadow-sm redesign:border-border/40 redesign:shadow-none redesign:[--ring:var(--foreground)]";
 
 function submitKeys(input: {
   readonly value: string;
@@ -346,6 +346,7 @@ export function ReviewThreadCard({
                   </Button>
                   <Button
                     size="xs"
+                    variant="default"
                     disabled={pending || reply.trim().length === 0}
                     onClick={() => void send()}
                   >

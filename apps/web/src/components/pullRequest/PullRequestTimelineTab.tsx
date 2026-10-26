@@ -217,7 +217,7 @@ function ConversationCard({
   };
 
   return (
-    <article className="group py-2">
+    <article className="group py-2 redesign:rounded-xl redesign:hover:bg-muted/30">
       <div className="px-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -323,14 +323,16 @@ function ConversationGroup({
           <CollapsibleTrigger
             className={cn(
               "flex w-full min-w-0 items-center gap-3 py-2 text-left transition-opacity hover:opacity-100",
-              open ? "text-foreground opacity-100" : "text-muted-foreground opacity-55",
+              open
+                ? "text-foreground opacity-100"
+                : "text-muted-foreground opacity-55 redesign:text-foreground/75 redesign:opacity-100",
             )}
           >
             <span className="min-w-0 flex-1">
               <span className="block text-xs font-semibold">
                 {events.length.toLocaleString()} {events.length === 1 ? "comment" : "comments"}
               </span>
-              <span className="block truncate text-3xs text-muted-foreground">
+              <span className="block truncate text-3xs text-muted-foreground redesign:text-secondary-label">
                 {actors.length.toLocaleString()} {actors.length === 1 ? "author" : "authors"} ·{" "}
                 <RelativeTime timestamp={first.at} />
               </span>
@@ -473,7 +475,7 @@ function CommitEvent({
   return (
     <button
       type="button"
-      className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left outline-none [contain-intrinsic-block-size:48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="group relative mb-5 block w-full cursor-pointer rounded-sm pl-12 text-left redesign:rounded-lg redesign:hover:bg-muted/30 outline-none [contain-intrinsic-block-size:48px] [content-visibility:auto] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       aria-label={`View commit ${event.id}`}
       onClick={() => onOpen(event.id)}
     >
@@ -483,10 +485,10 @@ function CommitEvent({
       />
       <div className="flex min-w-0 items-center gap-2.5 py-1.5">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-semibold text-foreground transition-colors group-hover:text-primary">
+          <div className="truncate text-xs font-semibold text-foreground transition-colors group-hover:text-primary redesign:whitespace-normal redesign:wrap-anywhere redesign:font-medium redesign:text-foreground/75">
             {event.body ?? "Untitled commit"}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-3xs text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-3xs text-muted-foreground redesign:text-secondary-label">
             <code className="font-mono">{event.id.slice(0, 7)}</code>
             <span>
               <RelativeTime timestamp={event.at} />

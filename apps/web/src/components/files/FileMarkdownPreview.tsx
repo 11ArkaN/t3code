@@ -29,7 +29,7 @@ export function FileMarkdownPreview(props: {
       imageBaseDir={imageBaseDir}
       threadRef={props.threadRef}
       workspaceMutationId={props.workspaceMutationId}
-      className="mx-auto max-w-4xl px-6 py-5"
+      className="mx-auto max-w-4xl px-6 py-5 redesign:max-w-3xl redesign:px-8 redesign:py-8 redesign:leading-7"
       onTaskListChange={props.onTaskListChange}
     />
   );

@@ -300,7 +300,7 @@ function WorkspaceVideoPreview(props: {
   const latestUrl = assetUrl._tag === "Success" ? `${assetUrl.url}${revisionSuffix}` : null;
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 redesign:bg-muted/20 redesign:p-6">
       <MediaVideoPlayer
         src={latestUrl}
         sourceFailed={assetUrl._tag === "Failure"}
@@ -855,7 +855,7 @@ function EditableFileSurface({
     <EditProvider createEditor={createFileEditor}>
       <div ref={surfaceRef} className="flex min-h-0 flex-1">
         <Virtualizer
-          className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
+          className="file-preview-virtualizer min-h-0 flex-1 overflow-auto redesign:py-3"
           config={{
             overscrollSize: 600,
             intersectionObserverMargin: 1200,
@@ -1004,6 +1004,7 @@ export default function FilePreviewPanel({
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const canOperatePreview = useEnvironmentScope(environmentId, AuthPreviewOperateScope);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const remoteOpenState = useRemoteOpenState(environmentId);
@@ -1172,12 +1173,13 @@ export default function FilePreviewPanel({
   useEffect(() => {
     const crumbs = breadcrumbRef.current?.querySelectorAll<HTMLElement>("[data-file-crumb]");
     // Show the deepest crumb when it fits, but never at the cost of the current one.
-    crumbs?.[crumbs.length - 1]?.scrollIntoView({ block: "nearest", inline: "end" });
+    const lastVisibleCrumb = Array.from(crumbs ?? []).findLast((crumb) => crumb.offsetWidth > 0);
+    lastVisibleCrumb?.scrollIntoView({ block: "nearest", inline: "end" });
     breadcrumbRef.current
       ?.querySelector<HTMLElement>("[data-current-file-crumb='true']")
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A new path or trail re-renders the crumbs, so the current one scrolls back into view.
-  }, [breadcrumbPath, breadcrumbTrail]);
+  }, [breadcrumbPath, breadcrumbTrail, redesign]);
 
   const toggleExplorer = () => {
     setExplorerOpen((current) => {
@@ -1226,7 +1228,7 @@ export default function FilePreviewPanel({
       );
     }
     return (
-      <div className="p-4 text-sm text-muted-foreground">
+      <div className="p-4 text-sm text-muted-foreground redesign:m-4 redesign:rounded-lg redesign:border redesign:border-border/60 redesign:p-6 redesign:text-secondary-label redesign:text-balance">
         {fileAccess.error ?? "This connection cannot read host files."}
       </div>
     );
@@ -1236,27 +1238,38 @@ export default function FilePreviewPanel({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       {breadcrumbPath !== null && breadcrumbTrail !== null ? (
         <div className={FILE_SURFACE_SUBHEADER_CLASS} data-surface-subheader>
-          <ScrollArea
-            radius="none"
-            ref={breadcrumbRef}
-            hideScrollbars
-            scrollFade
-            className="min-w-0 flex-1"
-            data-file-breadcrumbs
-          >
-            <div className="flex h-full w-max min-w-full items-center text-xs">
-              <FileBreadcrumbs
-                cwd={cwd}
-                environmentId={environmentId}
-                onNavigateFolder={navigateToFolder}
-                onOpenFile={onOpenFile}
-                projectName={projectName}
-                relativePath={breadcrumbPath}
-                trail={breadcrumbTrail}
-                workspaceMutationId={workspaceMutationId}
-              />
-            </div>
-          </ScrollArea>
+          <div className="contents redesign:flex redesign:min-w-0 redesign:flex-1 redesign:flex-col redesign:in-data-[preview-panel-mode=inline]:flex-row redesign:in-data-[preview-panel-mode=inline]:items-center redesign:in-data-[preview-panel-mode=inline]:gap-2">
+            <span
+              className={cn(
+                "hidden truncate text-xs leading-4 font-semibold redesign:in-data-[preview-panel-mode=inline]:max-w-40",
+                !isFolder && "redesign:block",
+              )}
+            >
+              {breadcrumbPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectName}
+            </span>
+            <ScrollArea
+              radius="none"
+              ref={breadcrumbRef}
+              hideScrollbars
+              scrollFade
+              className="min-w-0 flex-1 redesign:h-5 redesign:flex-none redesign:in-data-[preview-panel-mode=inline]:flex-1"
+              data-file-breadcrumbs
+            >
+              <div className="flex h-full w-max min-w-full items-center text-xs">
+                <FileBreadcrumbs
+                  cwd={cwd}
+                  environmentId={environmentId}
+                  hideCurrentFile={!isFolder}
+                  onNavigateFolder={navigateToFolder}
+                  onOpenFile={onOpenFile}
+                  projectName={projectName}
+                  relativePath={breadcrumbPath}
+                  trail={breadcrumbTrail}
+                  workspaceMutationId={workspaceMutationId}
+                />
+              </div>
+            </ScrollArea>
+          </div>
           {absolutePath &&
           (environmentId === primaryEnvironmentId || remoteOpenState.mode !== "local-exec") ? (
             <OpenInPicker
@@ -1434,7 +1447,7 @@ export default function FilePreviewPanel({
               role="alert"
               className="scrollbar-gutter-both flex min-h-0 flex-1 flex-col overflow-auto"
             >
-              <div className="my-auto flex shrink-0 flex-col gap-3 px-6 py-6 text-center text-xs leading-relaxed">
+              <div className="my-auto flex shrink-0 flex-col gap-3 px-6 py-6 text-center text-xs leading-relaxed redesign:mx-auto redesign:max-w-lg redesign:gap-4 redesign:py-10 redesign:text-sm">
                 <p className="text-destructive">
                   {file.readError ? filePreviewReadErrorMessage(file.readError) : file.error}
                 </p>
@@ -1516,7 +1529,7 @@ export default function FilePreviewPanel({
             className={cn(
               "flex min-h-0 shrink-0 bg-background",
               previewPath
-                ? "w-[min(22rem,46%)] min-w-64 border-l border-border/60"
+                ? "w-[min(22rem,46%)] min-w-64 border-l border-border/60 redesign:min-w-48 redesign:border-border/30"
                 : "min-w-0 flex-1",
             )}
           >

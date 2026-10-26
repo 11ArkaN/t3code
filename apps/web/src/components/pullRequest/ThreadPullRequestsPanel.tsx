@@ -174,7 +174,7 @@ function LinkRowImpl({
                   }),
                 )
         }
-        className="flex min-w-0 flex-1"
+        className="flex min-w-0 flex-1 redesign:focus-visible:rounded-md redesign:focus-visible:outline-2 redesign:focus-visible:outline-foreground/30"
       >
         <PullRequestRowLines
           number={
@@ -427,10 +427,13 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
   if (linkCount === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <PullRequestGlyph.link aria-hidden className="size-6 text-muted-foreground/60" />
-        <p className="text-sm font-medium">No linked pull requests</p>
-        <p className="max-w-60 text-xs text-muted-foreground">
+      <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center redesign:[--ring:var(--muted-foreground)]">
+        <PullRequestGlyph.link
+          aria-hidden
+          className="size-6 text-muted-foreground/60 redesign:text-secondary-label"
+        />
+        <p className="text-sm font-medium redesign:font-semibold">No linked pull requests</p>
+        <p className="max-w-60 text-xs text-muted-foreground redesign:text-balance redesign:text-secondary-label">
           Pull requests the agent opens from this thread land here. Link one yourself from a URL or
           a number.
         </p>
@@ -444,7 +447,7 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 
   return (
     <PullRequestSpeedModeContext value={speedMode}>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex h-full min-h-0 flex-col redesign:[--ring:var(--muted-foreground)]">
         {/* Threads that run a stack or a sweep link hundreds of pull requests; only the rows in
           view are mounted. */}
         <LegendList<PullRequestListLine>
@@ -471,7 +474,7 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
           drawDistance={440}
           className="min-h-0 flex-1 overscroll-contain p-1.5"
         />
-        <footer className="flex items-center justify-between border-t border-border/60 px-2 py-1.5 text-2xs text-muted-foreground">
+        <footer className="flex items-center justify-between border-t border-border/60 px-2 py-1.5 text-2xs text-muted-foreground redesign:border-transparent redesign:text-secondary-label">
           <span>
             {openCount} open · {linkCount} linked
             {lastSynced ? (

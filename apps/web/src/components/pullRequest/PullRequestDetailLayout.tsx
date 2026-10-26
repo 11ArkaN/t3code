@@ -28,15 +28,15 @@ export function PullRequestDetailHeaderBody({
   return (
     <div className="col-span-2 mt-1 min-w-0 px-4 pb-4">
       {title}
-      <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground redesign:flex-wrap redesign:text-secondary-label">
         <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
           {author}
           {updated}
         </PullRequestMetaLine>
         {checkout}
       </div>
-      <div className="mt-4 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-muted-foreground/70">
+      <div className="mt-4 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground redesign:flex-wrap redesign:text-secondary-label">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs text-muted-foreground/70 redesign:text-secondary-label">
           {base}
           <ArrowLeftIcon
             aria-label="receives changes from"
@@ -118,7 +118,7 @@ export function PullRequestChecksStatusLine({
   return (
     <span
       className={cn(
-        "ml-auto flex h-4 min-w-0 flex-1 flex-wrap content-start items-center justify-end gap-x-1.5 overflow-hidden text-xs",
+        "ml-auto flex h-4 min-w-0 flex-1 flex-wrap content-start items-center justify-end gap-x-1.5 overflow-hidden text-xs redesign:min-w-max redesign:flex-nowrap",
         className,
       )}
       {...props}

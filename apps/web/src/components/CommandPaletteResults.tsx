@@ -35,7 +35,7 @@ interface CommandPaletteResultsProps {
 
 function CommandPaletteEmptyState(props: { emptyStateMessage?: string; isActionsOnly: boolean }) {
   return (
-    <div className="py-10 text-center text-sm text-muted-foreground">
+    <div className="py-10 text-center text-sm text-muted-foreground redesign:px-8 redesign:text-secondary-label redesign:text-balance">
       {props.emptyStateMessage ??
         (props.isActionsOnly
           ? "No matching actions."
@@ -53,7 +53,13 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
     <CommandList>
       {props.groups.map((group) => (
         <CommandGroup items={group.items} key={group.value}>
-          {group.label ? <CommandGroupLabel>{group.label}</CommandGroupLabel> : null}
+          {group.label ? (
+            <CommandGroupLabel>
+              <span className="redesign:font-semibold redesign:text-secondary-label">
+                {group.label}
+              </span>
+            </CommandGroupLabel>
+          ) : null}
           <CommandCollection>
             {(item) =>
               item.disabled ? (
@@ -120,7 +126,11 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
         renderItem={({ item: row }) =>
           row.kind === "label" ? (
             <div className={row.first ? undefined : "pt-1.5"}>
-              <CommandListHeading>{row.label}</CommandListHeading>
+              <CommandListHeading>
+                <span className="redesign:font-semibold redesign:text-secondary-label">
+                  {row.label}
+                </span>
+              </CommandListHeading>
             </div>
           ) : row.itemIndex === null ? (
             <DisabledCommandPaletteResultRow item={row.item} />
@@ -149,7 +159,11 @@ export function CommandPaletteVirtualizedResults(props: CommandPaletteVirtualize
 }
 
 export function CommandPaletteTitleIcon(props: { children: ReactNode }) {
-  return <span className="flex h-5 shrink-0 items-center self-start pt-0.5">{props.children}</span>;
+  return (
+    <span className="flex h-5 shrink-0 items-center self-start pt-0.5 redesign:opacity-60 redesign:grayscale redesign:group-hover/palette-row:opacity-100 redesign:group-hover/palette-row:grayscale-0 redesign:group-data-active/palette-row:opacity-100 redesign:group-data-active/palette-row:grayscale-0">
+      {props.children}
+    </span>
+  );
 }
 
 function CommandPaletteTitle({
@@ -159,7 +173,10 @@ function CommandPaletteTitle({
 }) {
   const { title } = item;
   return (
-    <span className="truncate" dir={typeof title === "string" ? textDirection(title) : undefined}>
+    <span
+      className="truncate redesign:text-foreground/75 redesign:group-hover/palette-row:text-foreground redesign:group-data-active/palette-row:text-foreground"
+      dir={typeof title === "string" ? textDirection(title) : undefined}
+    >
       {title}
     </span>
   );
@@ -180,7 +197,7 @@ function ThreadRowContext({
     .filter((part) => part && part !== item.matchHint?.text)
     .join(" · ");
   return context ? (
-    <span className="max-w-[45%] shrink-0 truncate text-muted-foreground/70 text-xs">
+    <span className="max-w-[45%] shrink-0 truncate text-muted-foreground/70 text-xs redesign:text-secondary-label">
       {context}
     </span>
   ) : null;
@@ -204,7 +221,7 @@ function DisabledCommandPaletteResultRow(props: {
           ) : props.item.matchHint ? (
             <SearchMatchHintLine hint={props.item.matchHint} />
           ) : props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
+            <span className="min-w-0 text-muted-foreground/70 text-xs redesign:text-secondary-label redesign:grayscale redesign:group-hover/palette-row:grayscale-0 redesign:group-data-active/palette-row:grayscale-0 redesign:[&_svg]:opacity-60 redesign:group-hover/palette-row:[&_svg]:opacity-100 redesign:group-data-active/palette-row:[&_svg]:opacity-100">
               {props.item.description}
             </span>
           ) : null}
@@ -234,6 +251,7 @@ function CommandPaletteResultRow(props: {
   return (
     <CommandItem
       {...(props.index === undefined ? {} : { index: props.index })}
+      className="group/palette-row"
       value={props.item.value}
       active={props.isActive}
       onMouseDown={(event) => {
@@ -256,7 +274,7 @@ function CommandPaletteResultRow(props: {
           ) : props.item.matchHint ? (
             <SearchMatchHintLine hint={props.item.matchHint} />
           ) : props.item.description ? (
-            <span className="min-w-0 text-muted-foreground/70 text-xs">
+            <span className="min-w-0 text-muted-foreground/70 text-xs redesign:text-secondary-label redesign:grayscale redesign:group-hover/palette-row:grayscale-0 redesign:group-data-active/palette-row:grayscale-0 redesign:[&_svg]:opacity-60 redesign:group-hover/palette-row:[&_svg]:opacity-100 redesign:group-data-active/palette-row:[&_svg]:opacity-100">
               {props.item.description}
             </span>
           ) : null}
@@ -269,7 +287,7 @@ function CommandPaletteResultRow(props: {
       )}
       {props.item.titleTrailingContent}
       {props.item.timestamp ? (
-        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70">
+        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70 redesign:self-start redesign:leading-5 redesign:text-secondary-label">
           {props.item.timestamp}
         </span>
       ) : null}

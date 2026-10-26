@@ -42,6 +42,17 @@ function annotationSide(range: SelectedLineRange): AnnotationSide {
   return (range.endSide ?? range.side) === "deletions" ? "deletions" : "additions";
 }
 
+function describeCommentRange(range: SelectedLineRange): string {
+  const startSide = range.side === "deletions" ? "Old" : "New";
+  const endSide = (range.endSide ?? range.side) === "deletions" ? "Old" : "New";
+  if (startSide !== endSide) {
+    return `${startSide} line ${range.start} to ${endSide.toLowerCase()} line ${range.end}`;
+  }
+  return range.start === range.end
+    ? `${startSide} line ${range.start}`
+    : `${startSide} lines ${range.start} to ${range.end}`;
+}
+
 function appendAnnotationEntry(
   annotations: ReadonlyArray<DiffCommentLineAnnotation>,
   range: SelectedLineRange,
@@ -287,13 +298,18 @@ export function AnnotatableCodeView({
         const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
         return (
           <div
-            className={hasDraft ? "py-1" : "divide-y divide-border/30 border-y border-border/30"}
+            className={
+              hasDraft
+                ? "py-1"
+                : "divide-y divide-border/30 border-y border-border/30 redesign:divide-transparent redesign:border-transparent"
+            }
           >
             {annotation.metadata.entries.map((entry) => (
               <DiffCommentAnnotation
                 key={entry.id}
                 kind={entry.kind}
                 rangeLabel={entry.rangeLabel}
+                rangeDescription={describeCommentRange(entry.range)}
                 text={entry.kind === "draft" ? draftText : entry.text}
                 onTextChange={setDraftText}
                 onCancel={() => removeEntry(entry.id)}

@@ -10,6 +10,7 @@ import {
 import type { Ref } from "react";
 
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
+import { useClientSettings } from "~/hooks/useSettings";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
 
 export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
@@ -203,6 +204,41 @@ export const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 }
 `;
 
+const REDESIGN_DIFF_HEADER_HEIGHT = 32;
+const REDESIGN_DIFF_VIEW_CSS = `
+[data-diffs-header] {
+  height: ${REDESIGN_DIFF_HEADER_HEIGHT}px !important;
+  min-height: ${REDESIGN_DIFF_HEADER_HEIGHT}px !important;
+  padding-inline: 12px !important;
+  font-size: 13px !important;
+}
+
+[data-diffs-header] [data-title] {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--code-foreground) 75%, transparent) !important;
+}
+
+[data-diffs-header]:hover [data-title] {
+  color: var(--code-foreground) !important;
+}
+
+[data-diffs-header]:hover {
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--code-foreground) 12%, transparent);
+}
+
+[data-diffs-header] :is([data-change-icon], [data-rename-icon]) {
+  color: color-mix(in srgb, var(--code-foreground) 55%, transparent) !important;
+}
+
+:is([data-line], [data-line-annotation], [data-gutter-buffer], [data-column-number])[data-selected-line] {
+  --diffs-line-bg: color-mix(in srgb, var(--code-background) 94%, var(--code-foreground)) !important;
+}
+
+[data-indicators="bars"] :is([data-column-number], [data-gutter-buffer="annotation"])[data-selected-line]::before {
+  background-color: color-mix(in srgb, var(--code-foreground) 55%, transparent) !important;
+}
+`;
+
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<
   NonNullable<CodeViewProps<LAnnotation, undefined>["options"]>,
   "unsafeCSS" | "itemMetrics" | "layout"
@@ -224,6 +260,10 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
+  const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
+  const surfaceCSS = redesignEnabled
+    ? `${DIFF_VIEW_UNSAFE_CSS}\n${REDESIGN_DIFF_VIEW_CSS}`
+    : DIFF_VIEW_UNSAFE_CSS;
   return (
     <DiffWorkerPoolProvider>
       <CodeView<LAnnotation>
@@ -236,11 +276,9 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
         }
         options={{
           ...options,
-          unsafeCSS: unsafeCSSExtra
-            ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
-            : DIFF_VIEW_UNSAFE_CSS,
+          unsafeCSS: unsafeCSSExtra ? `${surfaceCSS}\n${unsafeCSSExtra}` : surfaceCSS,
           itemMetrics: {
-            diffHeaderHeight: 32,
+            diffHeaderHeight: redesignEnabled ? REDESIGN_DIFF_HEADER_HEIGHT : 32,
             hunkSeparatorHeight: 24,
             // Zero both spacing and paddingTop; Pierre's expanded-file fallback otherwise adds an 8px header
             // gap.

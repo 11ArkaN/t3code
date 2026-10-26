@@ -22,8 +22,10 @@ function HighlightedSearchText(props: { text: string; ranges: ReadonlyArray<Sear
 /** Why a row matched when its title does not show it: the field and its match. */
 export function SearchMatchHintLine(props: { hint: SearchMatchHint }) {
   return (
-    <span className="truncate text-xs text-muted-foreground/85">
-      <span className="text-muted-foreground/70">{props.hint.label}:</span>{" "}
+    <span className="truncate text-xs text-muted-foreground/85 redesign:text-secondary-label">
+      <span className="text-muted-foreground/70 redesign:text-secondary-label">
+        {props.hint.label}:
+      </span>{" "}
       <HighlightedSearchText text={props.hint.text} ranges={props.hint.ranges} />
     </span>
   );
@@ -38,8 +40,14 @@ export function ThreadSearchMatchExcerpt(props: {
 }) {
   const isUser = props.match.source === "user";
   return (
-    <span className="truncate text-xs text-muted-foreground/85">
-      <span className={isUser ? "text-info-foreground" : "text-success-foreground"}>
+    <span className="truncate text-xs text-muted-foreground/85 redesign:text-secondary-label">
+      <span
+        className={
+          isUser
+            ? "text-info-foreground redesign:text-secondary-label"
+            : "text-success-foreground redesign:text-secondary-label"
+        }
+      >
         {isUser ? "You:" : "Agent:"}
       </span>{" "}
       <HighlightedSearchText

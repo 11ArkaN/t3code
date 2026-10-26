@@ -10,7 +10,7 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -21,6 +21,7 @@ import { useComposerHandleContext } from "~/composerHandleContext";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useTheme } from "~/hooks/useTheme";
+import { useClientSettings } from "~/hooks/useSettings";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { useFileContextMenu, type FileContextMenuAction } from "~/fileContextMenu";
 import { readLocalApi } from "~/localApi";
@@ -34,6 +35,22 @@ import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
 import { loadFileAncestors } from "./loadFileAncestors";
 import { useDirectoryEntries } from "./useDirectoryEntries";
 import { useProjectPathSearch } from "~/state/queries";
+
+const REDESIGNED_FILE_TREE_CSS = `${PIERRE_TREE_UNSAFE_CSS}
+  :host {
+    --trees-accent-override: var(--foreground);
+    --trees-fg-override: color-mix(in srgb, var(--foreground) 75%, transparent);
+    --trees-selected-fg-override: var(--foreground);
+    --trees-selected-bg-override: color-mix(in srgb, var(--foreground) 8%, transparent);
+    --trees-selected-focused-border-color-override: transparent;
+    --trees-focus-ring-color-override: color-mix(in srgb, var(--foreground) 30%, transparent);
+    --trees-font-size-override: 13px;
+    --trees-padding-inline-override: 8px;
+  }
+  button[data-type='item']:is(:hover, [aria-selected='true']) { color: var(--foreground); }
+  button[data-type='item'] svg { filter: grayscale(1); opacity: 0.65; }
+  button[data-type='item']:is(:hover, [aria-selected='true']) svg { filter: none; opacity: 1; }
+`;
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -81,23 +98,32 @@ function FileSearchField(props: {
   onValueChange: (value: string) => void;
   value: string;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
+  const inputProps = {
+    type: "search",
+    name: props.name,
+    value: props.value,
+    "aria-label": props.ariaLabel,
+    placeholder: "Search files",
+    spellCheck: false,
+    onChange: (event) => props.onValueChange(event.target.value),
+    onKeyDown: (event) => {
+      if (event.key !== "Escape") return;
+      props.onClose();
+      event.currentTarget.blur();
+    },
+  } satisfies ComponentProps<"input">;
+  if (redesign) {
+    return (
+      <input
+        {...inputProps}
+        className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-secondary-label focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-foreground/30 [&::-webkit-search-cancel-button]:grayscale"
+      />
+    );
+  }
   return (
     <InputGroup variant="ghost" className="h-7 min-w-0 flex-1">
-      <InputGroupInput
-        type="search"
-        name={props.name}
-        size="sm"
-        value={props.value}
-        aria-label={props.ariaLabel}
-        placeholder="Search files"
-        spellCheck={false}
-        onChange={(event) => props.onValueChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Escape") return;
-          props.onClose();
-          event.currentTarget.blur();
-        }}
-      />
+      <InputGroupInput {...inputProps} size="sm" />
     </InputGroup>
   );
 }
@@ -146,6 +172,7 @@ export default function FileBrowserPanel({
   const panelPath = (relativePath: string) =>
     hostFolder ? joinHostPath(cwd, relativePath) : relativePath;
   const { resolvedTheme } = useTheme();
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   const composerRef = useComposerHandleContext();
   const fileContextMenu = useFileContextMenu(environmentId);
   const {
@@ -299,7 +326,7 @@ export default function FileBrowserPanel({
         : null,
     search: false,
     onSearchChange: (value) => setQuery(value ?? ""),
-    unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
+    unsafeCSS: redesign ? REDESIGNED_FILE_TREE_CSS : PIERRE_TREE_UNSAFE_CSS,
   });
   useEffect(() => {
     if (loadingDirectoriesRef.current === loadingDirectories) return;
@@ -495,7 +522,7 @@ export default function FileBrowserPanel({
       data-file-browser-panel={`${environmentId}:${cwd}`}
     >
       <div
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-9 in-data-[preview-panel-mode=inline]:min-h-9 in-data-[preview-panel-mode=inline]:border-b-transparent"
+        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-1 in-data-[preview-panel-mode=inline]:h-9 in-data-[preview-panel-mode=inline]:min-h-9 in-data-[preview-panel-mode=inline]:border-b-transparent redesign:mx-3 redesign:mb-2 redesign:rounded-lg redesign:border-transparent redesign:bg-muted/30 redesign:px-1"
         data-surface-subheader
       >
         <RefreshFilesButton isPending={isPending} onRefresh={handleRefresh} />
@@ -538,7 +565,7 @@ export default function FileBrowserPanel({
         <button
           type="button"
           onClick={handleRefresh}
-          className="p-4 text-left text-xs leading-relaxed text-destructive"
+          className="p-4 text-left text-xs leading-relaxed text-destructive redesign:mx-4 redesign:my-2 redesign:rounded-lg redesign:border redesign:border-border/60 redesign:text-balance"
         >
           {error ?? pathSearch.error} Click to retry.
         </button>
@@ -562,15 +589,22 @@ export default function FileBrowserPanel({
       )}
       {hasNoSearchMatches ? (
         ready && !isPending && !pathSearch.isPending && !error && !pathSearch.error ? (
-          <div role="status" className="px-3 py-4 text-xs text-muted-foreground">
+          <div
+            role="status"
+            className="px-3 py-4 text-xs text-muted-foreground redesign:px-6 redesign:py-10 redesign:text-center redesign:text-sm redesign:text-secondary-label"
+          >
             No matching files.
           </div>
         ) : null
+      ) : redesign && ready && !isPending && entries.length === 0 && !error ? (
+        <div role="status" className="px-6 py-10 text-center text-sm text-secondary-label">
+          This folder is empty.
+        </div>
       ) : (
         <FileTree
           model={model}
           aria-label={`${projectName} files`}
-          className="min-h-0 flex-1 overflow-hidden"
+          className="min-h-0 flex-1 overflow-hidden redesign:mx-2 redesign:mb-2"
           style={pierreTreeStyle(resolvedTheme)}
         />
       )}

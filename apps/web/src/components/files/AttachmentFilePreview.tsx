@@ -281,7 +281,11 @@ export function AttachmentFilePreview(props: {
       </Suspense>
     ) : kind === "markdown" && rendered ? (
       <ScrollArea className="min-h-0 flex-1">
-        <ChatMarkdown text={content.text} cwd={undefined} className="mx-auto max-w-4xl px-6 py-5" />
+        <ChatMarkdown
+          text={content.text}
+          cwd={undefined}
+          className="mx-auto max-w-4xl px-6 py-5 redesign:max-w-3xl redesign:px-8 redesign:py-8 redesign:leading-7"
+        />
       </ScrollArea>
     ) : (
       <ReadOnlySourcePreview name={props.name} text={content.text} />
@@ -318,13 +322,13 @@ export function AttachmentFilePreview(props: {
   ) : kind === "audio" ? (
     <AudioPreview src={url} name={props.name} onError={() => setError("Unable to load audio.")} />
   ) : kind === "video" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
+    <div className="flex min-h-0 flex-1 items-center justify-center bg-black redesign:bg-muted/20 redesign:p-6">
       <video
         controls
         playsInline
         src={url}
         aria-label={props.name}
-        className="max-h-full max-w-full"
+        className="max-h-full max-w-full redesign:rounded-lg"
         onError={() => setError("Unable to load video.")}
       />
     </div>
@@ -337,9 +341,11 @@ export function AttachmentFilePreview(props: {
       onError={() => setError("Unable to load image.")}
     />
   ) : (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
-      <p className="text-sm font-medium">No preview for this file</p>
-      <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 px-6 text-center redesign:gap-2 redesign:py-8">
+      <p className="text-sm font-medium redesign:text-base redesign:font-semibold">
+        No preview for this file
+      </p>
+      <p className="max-w-sm text-xs leading-relaxed text-muted-foreground redesign:text-sm redesign:text-secondary-label redesign:text-balance">
         Save it to open in an app that supports {props.name.split(".").at(-1) || "this format"}{" "}
         files.
       </p>
@@ -349,16 +355,19 @@ export function AttachmentFilePreview(props: {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       <div className={cn(FILE_SURFACE_SUBHEADER_CLASS)} data-surface-subheader>
-        <div className="flex min-w-0 flex-1 items-center text-xs">
-          <span className="shrink-0 px-0.5 text-muted-foreground">
+        <div className="flex min-w-0 flex-1 items-center text-xs redesign:grid redesign:grid-cols-[minmax(0,1fr)_auto] redesign:gap-x-2 redesign:gap-y-1">
+          <span className="shrink-0 px-0.5 text-muted-foreground redesign:col-start-1 redesign:row-start-2 redesign:truncate redesign:text-2xs redesign:text-secondary-label">
             {props.origin ?? "Attachment"}
           </span>
-          <ChevronRightIcon className="mx-1 size-3.5 shrink-0 text-muted-foreground/60" />
-          <span aria-current="page" className="min-w-0 truncate px-0.5 font-medium text-foreground">
+          <ChevronRightIcon className="mx-1 size-3.5 shrink-0 text-muted-foreground/60 redesign:hidden" />
+          <span
+            aria-current="page"
+            className="min-w-0 truncate px-0.5 font-medium text-foreground redesign:col-span-2 redesign:row-start-1 redesign:text-sm redesign:font-semibold"
+          >
             {props.name}
           </span>
           {props.sizeBytes > 0 ? (
-            <span className="ml-2 shrink-0 text-muted-foreground">
+            <span className="ml-2 shrink-0 text-muted-foreground redesign:col-start-2 redesign:row-start-2 redesign:ml-0 redesign:text-2xs redesign:text-secondary-label">
               {formatAttachmentSize(props.sizeBytes)}
             </span>
           ) : null}

@@ -1,3 +1,4 @@
+import { useClientSettings } from "~/hooks/useSettings";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { PlusIcon, SearchIcon } from "lucide-react";
 
@@ -11,7 +12,7 @@ function BranchMark({ joined }: { joined: boolean }) {
     <svg
       aria-hidden
       viewBox="0 0 120 72"
-      className="h-20 w-32 text-muted-foreground/60"
+      className="h-20 w-32 text-muted-foreground/60 redesign:h-12 redesign:w-20 redesign:text-secondary-label"
       fill="none"
       stroke="currentColor"
       strokeWidth={2}
@@ -68,9 +69,10 @@ export function PullRequestListEmptyState({
   onLoadMore: () => void;
   onRefresh: () => void;
 }) {
+  const redesign = useClientSettings((settings) => settings.redesignEnabled);
   if (!hasProjects) {
     return (
-      <Empty>
+      <Empty size={redesign ? "compact" : "default"}>
         <BranchMark joined={false} />
         <EmptyHeader>
           <EmptyTitle>No projects in this workspace</EmptyTitle>
@@ -99,7 +101,7 @@ export function PullRequestListEmptyState({
 
   if (query.length > 0) {
     return (
-      <Empty>
+      <Empty size={redesign ? "compact" : "default"}>
         <BranchMark joined={false} />
         <EmptyHeader>
           <EmptyTitle>
@@ -124,7 +126,7 @@ export function PullRequestListEmptyState({
   }
 
   return (
-    <Empty>
+    <Empty size={redesign ? "compact" : "default"}>
       <BranchMark joined={false} />
       <EmptyHeader>
         <EmptyTitle>{filtered ? "Nothing under these filters" : "No pull requests"}</EmptyTitle>

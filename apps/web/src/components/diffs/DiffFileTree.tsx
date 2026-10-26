@@ -3,6 +3,7 @@ import { FileTree, useFileTree, useFileTreeSelector } from "@pierre/trees/react"
 import { ChevronsDownUp, ChevronsUpDown } from "lucide";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { useTheme } from "~/hooks/useTheme";
 import { cn } from "~/lib/utils";
@@ -20,6 +21,29 @@ import {
   diffFileTreePositions,
   type DiffFileTreeEntry,
 } from "./diffFileTree.logic";
+
+const DIFF_FILE_TREE_CSS = `${PIERRE_TREE_UNSAFE_CSS}
+:host([data-diff-redesign]) {
+  --trees-focus-ring-color-override: color-mix(in srgb, currentColor 40%, transparent);
+  --trees-fg-override: var(--foreground);
+  --trees-fg-muted-override: var(--secondary-label);
+  --trees-selected-fg-override: var(--foreground);
+}
+:host([data-diff-redesign]) [data-item-section="content"] {
+  color: color-mix(in srgb, var(--foreground) 75%, transparent);
+}
+:host([data-diff-redesign]) :is([aria-selected="true"], :hover) > [data-item-section="content"] {
+  color: var(--foreground);
+}
+:host([data-diff-redesign]) [data-item-section="icon"] {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+:host([data-diff-redesign]) :is([aria-selected="true"], :hover) > [data-item-section="icon"] {
+  filter: none;
+  opacity: 1;
+}
+`;
 
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
@@ -45,6 +69,7 @@ export function DiffFileTree({
   className,
 }: DiffFileTreeProps) {
   const { resolvedTheme } = useTheme();
+  const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
   const paths = entries.map((entry) => entry.path);
   const presented = diffFileTreeModel(paths);
   const modelPaths = presented.paths;
@@ -89,7 +114,7 @@ export function DiffFileTree({
     paths: [],
     search: false,
     sort: ordering.sort,
-    unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
+    unsafeCSS: DIFF_FILE_TREE_CSS,
   });
   const allDirectoriesExpanded = useFileTreeSelector(model, (currentModel) =>
     areAllDirectoriesExpanded(currentModel, directoryPaths),
@@ -180,11 +205,16 @@ export function DiffFileTree({
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>
       <div
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
+        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent redesign:gap-2 redesign:border-transparent redesign:px-3 redesign:in-data-[preview-panel-mode=inline]:mb-0"
         data-surface-subheader
       >
-        <span className="px-1 font-medium text-foreground">Files</span>
-        <span className="ml-auto tabular-nums">{entries.length}</span>
+        <span className="px-1 font-medium text-foreground redesign:px-0 redesign:text-foreground/75">
+          Files
+        </span>
+        <span className="ml-auto tabular-nums redesign:ml-0 redesign:text-secondary-label">
+          {entries.length}
+        </span>
+        <span className="hidden redesign:block redesign:flex-1" />
         {headerAccessory}
         {directoryPaths.length > 0 ? (
           <Tooltip>
@@ -216,6 +246,7 @@ export function DiffFileTree({
       </div>
       <FileTree
         model={model}
+        data-diff-redesign={redesignEnabled ? "" : undefined}
         aria-label={ariaLabel}
         onClickCapture={(event) => {
           if (
@@ -239,7 +270,7 @@ export function DiffFileTree({
             );
           if (clickedSelectedRow) onSelectFile(presented.selectionPath(path));
         }}
-        className="min-h-0 flex-1 overflow-hidden"
+        className="min-h-0 flex-1 overflow-hidden redesign:px-1 redesign:pb-2"
         style={pierreTreeStyle(resolvedTheme)}
       />
       {footer}

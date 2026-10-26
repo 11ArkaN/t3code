@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { useClientSettings } from "~/hooks/useSettings";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { Globe, History, RadioTower } from "lucide-react";
 
@@ -26,6 +28,8 @@ export function PreviewEmptyState({
   onRemoveRecent,
   onOpenUrl,
 }: Props) {
+  const redesign = useClientSettings((s) => s.redesignEnabled);
+  const List = redesign ? PreviewDiscoveryList : DiscoveryList;
   const servers = useDiscoveredLocalServers({
     environmentId,
     configuredUrls,
@@ -33,6 +37,19 @@ export function PreviewEmptyState({
   const recents = recentEntries.filter((entry) => URL.canParse(entry.url)).slice(0, 8);
 
   if (servers.length === 0 && recents.length === 0) {
+    if (redesign)
+      return (
+        <div className="scrollbar-gutter-both flex h-full min-h-0 items-center justify-center overflow-y-auto px-6 py-10">
+          <div className="flex w-full max-w-72 flex-col items-center text-center">
+            <Globe className="mb-5 size-7 text-secondary-label" />
+            <h2 className="text-base font-semibold text-foreground">No preview yet</h2>
+            <p className="mt-2 text-balance text-sm leading-relaxed text-secondary-label">
+              Type a URL above, or run a dev script. Browser-ready localhost servers will show up
+              here automatically.
+            </p>
+          </div>
+        </div>
+      );
     return (
       <Empty>
         <EmptyMedia variant="icon">
@@ -48,15 +65,22 @@ export function PreviewEmptyState({
   }
 
   return (
-    <div className="scrollbar-gutter-both flex h-full min-h-0 overflow-y-auto px-5 py-8">
-      <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
+    <div className="scrollbar-gutter-both flex h-full min-h-0 overflow-y-auto px-5 py-8 redesign:px-4 redesign:py-6">
+      <div className="mx-auto flex w-full max-w-xl flex-col gap-6 redesign:gap-8">
         {recents.length > 0 ? (
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground redesign:px-2 redesign:text-secondary-label">
               <History className="size-4 shrink-0" />
-              <h2 className="font-medium">Recently used</h2>
+              <h2 className="font-medium redesign:text-base redesign:font-semibold redesign:text-foreground">
+                Recently used
+                {redesign ? (
+                  <span className="ml-2 text-sm font-normal text-secondary-label">
+                    {recents.length}
+                  </span>
+                ) : null}
+              </h2>
             </div>
-            <DiscoveryList>
+            <List>
               {recents.map((entry) => (
                 <PreviewRecentUrlCard
                   key={entry.url}
@@ -66,16 +90,23 @@ export function PreviewEmptyState({
                   onRemove={() => onRemoveRecent(entry.url)}
                 />
               ))}
-            </DiscoveryList>
+            </List>
           </div>
         ) : null}
         {servers.length > 0 ? (
           <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground redesign:px-2 redesign:text-secondary-label">
               <RadioTower className="size-4 shrink-0" />
-              <h2 className="font-medium">Local servers</h2>
+              <h2 className="font-medium redesign:text-base redesign:font-semibold redesign:text-foreground">
+                Local servers
+                {redesign ? (
+                  <span className="ml-2 text-sm font-normal text-secondary-label">
+                    {servers.length}
+                  </span>
+                ) : null}
+              </h2>
             </div>
-            <DiscoveryList>
+            <List>
               {servers.map((server) => (
                 <PreviewLocalServerCard
                   key={`${server.host}:${server.port}`}
@@ -84,7 +115,7 @@ export function PreviewEmptyState({
                   onOpen={() => onOpenUrl(server.requestedUrl)}
                 />
               ))}
-            </DiscoveryList>
+            </List>
             <p className="px-1 text-xs text-muted-foreground">
               Select a live local server to open it in this browser tab.
             </p>
@@ -93,4 +124,8 @@ export function PreviewEmptyState({
       </div>
     </div>
   );
+}
+
+function PreviewDiscoveryList({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col gap-1">{children}</div>;
 }

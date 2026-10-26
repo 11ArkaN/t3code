@@ -2779,11 +2779,17 @@ function OpenCommandPaletteDialog(props: {
         />
       ) : null}
       {browseAccessError ? (
-        <div role="alert" className="px-4 py-3 text-sm text-muted-foreground">
+        <div
+          role="alert"
+          className="px-4 py-3 text-sm text-muted-foreground redesign:mx-2 redesign:mb-2 redesign:rounded-lg redesign:bg-foreground/[0.035] redesign:text-secondary-label"
+        >
           {browseAccessError}
         </div>
       ) : isBrowsePending && browseResult === null ? (
-        <div role="status" className="px-4 py-3 text-sm text-muted-foreground">
+        <div
+          role="status"
+          className="px-4 py-3 text-sm text-muted-foreground redesign:py-8 redesign:text-center redesign:text-secondary-label"
+        >
           Loading folders...
         </div>
       ) : null}

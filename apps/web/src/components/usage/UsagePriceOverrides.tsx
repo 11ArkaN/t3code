@@ -6,6 +6,7 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { useRef, useState } from "react";
 
 import { cn } from "../../lib/utils";
+import { useClientSettings } from "../../hooks/useSettings";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { environmentSession, readEnvironmentScope } from "../../state/session";
@@ -104,6 +105,7 @@ export function UsagePriceOverrides({
   readonly initialModel?: string | undefined;
   readonly onOpenChange: (open: boolean) => void;
 }) {
+  const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
   const environments = useAtomValue(priceTargetsAtom);
   const [selectedIds, setSelectedIds] = useState(initialSelectedEnvironmentIds);
   const selected = environments.filter(
@@ -180,6 +182,9 @@ export function UsagePriceOverrides({
   const destinationLabel =
     selected.length === 1 ? selected[0]!.label : `${selected.length} environments`;
   const selectionLabel = selectedIds === null ? "All environments" : destinationLabel;
+  const emptyMessage = selected.some((environment) => environment.prices === null)
+    ? "Some environment prices are unavailable."
+    : "No custom prices or mappings. Add a row to set one.";
   const discard = () => {
     setDrafts([]);
     setAttempt(null);
@@ -195,6 +200,11 @@ export function UsagePriceOverrides({
         : [...previous, draft],
     );
     setAttempt(null);
+  };
+  const addModel = () => {
+    const id = `new:${nextRowId.current++}`;
+    focusRowRef.current = id;
+    updateDraft({ id, model: "", isNew: true, values: {} });
   };
   const matchesSaved = (
     row: UsagePriceDraft,
@@ -284,7 +294,7 @@ export function UsagePriceOverrides({
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 redesign:gap-4 redesign:rounded-xl redesign:bg-muted/30 redesign:p-4">
             <div className="flex min-w-0 items-center gap-2">
               <Label id="usage-prices-apply-label" className="shrink-0">
                 Apply to
@@ -334,17 +344,25 @@ export function UsagePriceOverrides({
                 </MenuPopup>
               </Menu>
             </div>
-            <span className="text-xs text-muted-foreground">USD / million tokens</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">USD / million tokens</span>
+              {redesignEnabled && selected.length > 0 ? (
+                <Button variant="outline" size="sm" disabled={locked} onClick={addModel}>
+                  <PlusIcon aria-hidden />
+                  Add model
+                </Button>
+              ) : null}
+            </div>
           </div>
           {selected.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground redesign:rounded-xl redesign:bg-muted/30 redesign:p-6 redesign:text-balance">
               {environments.length === 0
                 ? "Connect an environment to set model prices."
                 : "Select an environment to see and change its model prices."}
             </p>
           ) : (
             <>
-              <div className="min-w-0 overflow-hidden rounded-lg border border-border">
+              <div className="min-w-0 overflow-hidden rounded-lg border border-border redesign:rounded-xl redesign:border-border/60">
                 <Table className="min-w-180 table-fixed" aria-label="Custom model prices">
                   <colgroup>
                     <col className="w-[22%]" />
@@ -362,33 +380,31 @@ export function UsagePriceOverrides({
                         <TableHead key={field.key}>{field.label}</TableHead>
                       ))}
                       <TableHead>
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label="Add model price"
-                          disabled={locked}
-                          onClick={() => {
-                            const id = `new:${nextRowId.current++}`;
-                            focusRowRef.current = id;
-                            updateDraft({ id, model: "", isNew: true, values: {} });
-                          }}
-                        >
-                          <PlusIcon aria-hidden />
-                        </Button>
+                        {redesignEnabled ? null : (
+                          <Button
+                            size="icon-xs"
+                            variant="ghost"
+                            aria-label="Add model price"
+                            disabled={locked}
+                            onClick={addModel}
+                          >
+                            <PlusIcon aria-hidden />
+                          </Button>
+                        )}
                       </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center whitespace-normal">
-                          <p className="py-6 text-muted-foreground">
-                            {selected.some((environment) => environment.prices === null)
-                              ? "Some environment prices are unavailable."
-                              : "No custom prices or mappings. Add a row to set one."}
-                          </p>
-                        </TableCell>
-                      </TableRow>
+                      redesignEnabled ? null : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center whitespace-normal">
+                            <p className="py-6 text-muted-foreground redesign:py-12 redesign:text-balance">
+                              {emptyMessage}
+                            </p>
+                          </TableCell>
+                        </TableRow>
+                      )
                     ) : (
                       rows.map((row) => {
                         const aliasCell = usageAliasCell(selected, row.model);
@@ -538,7 +554,17 @@ export function UsagePriceOverrides({
                     )}
                   </TableBody>
                 </Table>
+                {redesignEnabled && rows.length === 0 ? (
+                  <p className="px-6 py-12 text-center text-sm text-balance text-secondary-label">
+                    {emptyMessage}
+                  </p>
+                ) : null}
               </div>
+              {redesignEnabled ? (
+                <p className="text-xs text-secondary-label sm:hidden">
+                  Scroll across the table to edit all rates.
+                </p>
+              ) : null}
               <datalist id="usage-price-models">
                 {models
                   .filter((model) => !customModels.includes(model))
@@ -557,7 +583,7 @@ export function UsagePriceOverrides({
                     <option key={model} value={model} />
                   ))}
               </datalist>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground redesign:max-w-2xl redesign:text-balance redesign:leading-relaxed">
                 Blank cache rates use the input price. Enter 0 for free tokens. A mapped model’s
                 usage counts as the model it maps to.
                 {selected.length > 1
@@ -567,7 +593,10 @@ export function UsagePriceOverrides({
             </>
           )}
           {attempt ? (
-            <div role="status" className="grid gap-1 text-xs">
+            <div
+              role="status"
+              className="grid gap-1 text-xs redesign:gap-2 redesign:rounded-xl redesign:bg-muted/30 redesign:p-4"
+            >
               {attempt.destinations.map((destination) => {
                 const result = attempt.results.get(destination.environmentId);
                 return (

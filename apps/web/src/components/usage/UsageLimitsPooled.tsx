@@ -94,7 +94,7 @@ function AccountAvatar({
         showBadge={Boolean(account.displayName)}
         indicatorBackground="var(--popover)"
         className={cn("size-5", className)}
-        iconClassName="size-4 text-foreground/80"
+        iconClassName="size-4 text-foreground/80 redesign:text-secondary-label redesign:grayscale"
       />
     );
   }
@@ -160,7 +160,7 @@ function SegmentPopover({
   return (
     <div className="flex w-72 max-w-[calc(100vw-3rem)] flex-col gap-2.5 text-xs">
       <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <span className="flex items-center gap-2 text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
           <AccountAvatar account={account} />
           <span className="truncate">
             {account.displayName ?? providerClients.get(account.driver)?.label ?? account.driver}
@@ -536,11 +536,13 @@ function PoolWindowCard({
 }) {
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
   return (
-    <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
+    <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)] redesign:gap-y-4 redesign:rounded-xl redesign:border-transparent redesign:bg-muted/30 redesign:p-5 redesign:md:grid-cols-[10rem_minmax(0,1fr)]">
       <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-foreground">{label ?? pool.label}</span>
+        <span className="text-sm font-medium text-foreground redesign:text-foreground/75">
+          {label ?? pool.label}
+        </span>
         <span className="flex items-baseline gap-2">
-          <span className="text-3xl font-semibold text-foreground tabular-nums">
+          <span className="text-3xl font-semibold text-foreground tabular-nums redesign:text-4xl redesign:tracking-tight">
             {pool.remainingPercent}%
           </span>
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -556,7 +558,9 @@ function PoolWindowCard({
       </div>
       <PoolBar pool={pool} color={color} now={now} />
       {description ? (
-        <p className="text-xs text-muted-foreground md:col-span-2">{description}</p>
+        <p className="text-xs text-muted-foreground md:col-span-2 redesign:max-w-2xl redesign:text-balance redesign:leading-relaxed">
+          {description}
+        </p>
       ) : null}
     </div>
   );
@@ -568,13 +572,13 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
   const windows = displayLimitWindows(pool);
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground redesign:text-base redesign:font-semibold">
         <ProviderInstanceIcon
           driverKind={pool.driver}
           displayName={label}
           indicatorBackground="var(--background)"
           className="size-5"
-          iconClassName="size-4 text-foreground/80"
+          iconClassName="size-4 text-foreground/80 redesign:text-secondary-label redesign:grayscale"
         />
         {label}
       </h2>
@@ -617,7 +621,7 @@ export function UsageLimitsPooled({
   return (
     <div className="flex flex-col gap-8">
       {pools.length === 0 && notices.length === 0 && !cursorPrompt && externalLinks.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground redesign:rounded-xl redesign:bg-muted/30 redesign:px-6 redesign:py-12 redesign:text-center redesign:text-balance">
           No provider on the selected environments reports subscription limits.
         </p>
       ) : null}
@@ -646,14 +650,16 @@ export function UsageLimitsPooled({
       {externalLinks.map((link) => (
         <section
           key={link.url}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 redesign:gap-4 redesign:border-transparent redesign:bg-muted/30 redesign:p-5"
         >
           <div className="flex min-w-0 flex-1 items-center gap-3">
             {link.url === CHATGPT_USAGE_URL ? (
               <OpenAI className="size-5 shrink-0" aria-hidden="true" />
             ) : null}
             <div className="min-w-0 space-y-1">
-              <h2 className="text-sm font-medium">{link.label}</h2>
+              <h2 className="text-sm font-medium redesign:text-base redesign:font-semibold">
+                {link.label}
+              </h2>
               {link.url === CHATGPT_USAGE_URL ? (
                 <p className="text-xs text-muted-foreground">
                   View usage in ChatGPT with your connected account.
@@ -681,13 +687,18 @@ export function UsageLimitsPooled({
 function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
   if (notices.length === 0) return null;
   return (
-    <Alert variant="warning" controlAlignment="first-line">
-      <AlertTriangleIcon />
-      {notices.map((notice) => (
-        <AlertTitle key={notice} className="break-words">
-          {notice}
-        </AlertTitle>
-      ))}
-    </Alert>
+    <div className="redesign:space-y-3 redesign:rounded-xl redesign:bg-muted/30 redesign:p-5">
+      <h2 className="hidden text-base font-semibold text-foreground redesign:block">
+        Provider notices
+      </h2>
+      <Alert variant="warning" controlAlignment="first-line">
+        <AlertTriangleIcon />
+        {notices.map((notice) => (
+          <AlertTitle key={notice} className="break-words">
+            {notice}
+          </AlertTitle>
+        ))}
+      </Alert>
+    </div>
   );
 }
