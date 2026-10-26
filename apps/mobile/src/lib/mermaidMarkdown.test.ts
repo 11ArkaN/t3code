@@ -71,6 +71,15 @@ describe("splitMermaidMarkdown", () => {
     expect(last?.type === "paragraph" && last.children[0]?.type).toBe("imageReference");
   });
 
+  it.each([
+    "<!--\n```mermaid\ngraph LR\nA --- B\n```\n-->",
+    "<pre>\n```mermaid\ngraph LR\nA --- B\n```\n</pre>",
+  ])("keeps fences inside raw HTML in their original markdown context", (markdown) => {
+    expect(splitMermaidMarkdown(markdown)).toEqual([
+      { kind: "markdown", markdown, sourceOffset: 0 },
+    ]);
+  });
+
   it("splits tilde fences and closes on a longer fence", () => {
     const segments = splitMermaidMarkdown("~~~ Mermaid\ngraph LR\n~~~~\n");
     expect(segments).toEqual([

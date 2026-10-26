@@ -22,6 +22,12 @@ const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/s;
 export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMarkdownSegment> {
   if (!/mermaid/i.test(markdown)) return [{ kind: "markdown", markdown, sourceOffset: 0 }];
 
+  const document = parser.parse(markdown);
+  const codeOffsets = new Set(
+    document.children
+      .filter((node) => node.type === "code" && node.lang?.toLowerCase() === "mermaid")
+      .map((node) => node.position?.start.offset),
+  );
   const segments: MermaidMarkdownSegment[] = [];
   let cursor = 0;
   let open: { fence: string; start: number; bodyStart: number; mermaid: boolean } | null = null;
@@ -49,7 +55,7 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
         fence.length >= open.fence.length &&
         info.trim() === ""
       ) {
-        if (open.mermaid) {
+        if (open.mermaid && codeOffsets.has(open.start)) {
           const source = markdown.slice(open.bodyStart, lineStart);
           if (source.trim().length > 0) {
             if (open.start > cursor) {
@@ -79,7 +85,7 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
   }
   const definitions = new Map<string, string>();
   const references: { offset: number; identifier: string }[] = [];
-  const pending: Nodes[] = [parser.parse(markdown)];
+  const pending: Nodes[] = [document];
   while (pending.length > 0) {
     const node = pending.pop();
     if (!node) continue;
