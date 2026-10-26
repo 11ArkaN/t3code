@@ -80,7 +80,9 @@ const keepEntries = (text: string, header: string, keep: ReadonlySet<string>) =>
 
 const trimClaude = (native: Native) => {
   const firstAssistant = native.messages.findIndex((message) => message.role === "assistant");
-  const head = structuredClone(native.messages.slice(0, firstAssistant));
+  const head = structuredClone(
+    native.messages.slice(0, firstAssistant === -1 ? undefined : firstAssistant),
+  );
   const [first] = head;
   if (!first || !Array.isArray(first.content))
     throw new Error("The capture has no first user turn.");
