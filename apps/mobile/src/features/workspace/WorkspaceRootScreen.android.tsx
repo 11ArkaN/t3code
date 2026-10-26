@@ -31,48 +31,29 @@ export function WorkspaceRootScreen() {
   const context = useMemo(
     () => ({
       ...workspace,
-      bottomClearance: workspace.state.selectedTab === "threads" ? fabClearance + 16 : 16,
+      bottomClearance: layout.usesSplitView
+        ? workspace.bottomClearance
+        : workspace.state.selectedTab === "threads"
+          ? fabClearance + 16
+          : 16,
     }),
-    [workspace, fabClearance],
+    [workspace, fabClearance, layout.usesSplitView],
   );
   const tab = workspace.state.selectedTab;
 
-  if (layout.usesSplitView) {
-    if (enabled.length === 0) return <View className="flex-1 bg-screen" />;
-    return (
-      <WorkspaceTabPanes
-        tabs={TABS}
-        selected={tab}
-        renderTab={(tab) =>
-          tab === "threads" ? (
-            <HomeRouteScreen />
-          ) : tab !== "pullRequests" ? (
-            <WorkspaceExtraTab tab={tab} />
-          ) : (
-            <>
-              <NativeStackScreenOptions options={{ headerShown: false }} />
-              <AndroidScreenHeader title="Pull requests" />
-              <View className="flex-1 items-center justify-center px-10">
-                <EmptyState
-                  title="Select a pull request"
-                  detail="Choose a pull request from the sidebar to review it."
-                  variant="plain"
-                />
-              </View>
-            </>
-          )
-        }
-      />
-    );
-  }
-
   return (
     <WorkspaceTabsContext value={context}>
-      <View className="flex-1 bg-header">
-        <NativeStackScreenOptions options={{ headerShown: false }} />
-        <SafeAreaInsetsContext value={{ ...insets, bottom: 0 }}>
+      <View className={layout.usesSplitView ? "flex-1 bg-screen" : "flex-1 bg-header"}>
+        {!layout.usesSplitView ? (
+          <NativeStackScreenOptions options={{ headerShown: false }} />
+        ) : null}
+        <SafeAreaInsetsContext value={layout.usesSplitView ? insets : { ...insets, bottom: 0 }}>
           {enabled.length === 0 ? (
-            <WorkspaceNoTabs />
+            layout.usesSplitView ? (
+              <View className="flex-1 bg-screen" />
+            ) : (
+              <WorkspaceNoTabs />
+            )
           ) : (
             <WorkspaceTabPanes
               tabs={TABS}
@@ -82,6 +63,18 @@ export function WorkspaceRootScreen() {
                   <HomeRouteScreen />
                 ) : tab !== "pullRequests" ? (
                   <WorkspaceExtraTab tab={tab} />
+                ) : layout.usesSplitView ? (
+                  <>
+                    <NativeStackScreenOptions options={{ headerShown: false }} />
+                    <AndroidScreenHeader title="Pull requests" />
+                    <View className="flex-1 items-center justify-center px-10">
+                      <EmptyState
+                        title="Select a pull request"
+                        detail="Choose a pull request from the sidebar to review it."
+                        variant="plain"
+                      />
+                    </View>
+                  </>
                 ) : (
                   <PullRequestFilterMenuProvider>
                     <PullRequestToolbar />
@@ -94,7 +87,7 @@ export function WorkspaceRootScreen() {
             />
           )}
         </SafeAreaInsetsContext>
-        <AndroidWorkspaceNavigation onNewThread={startNewTask} />
+        {!layout.usesSplitView ? <AndroidWorkspaceNavigation onNewThread={startNewTask} /> : null}
       </View>
     </WorkspaceTabsContext>
   );
