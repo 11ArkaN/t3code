@@ -64,15 +64,17 @@ function block(routeDraftId: string | null) {
   );
 }
 
-it("lists an empty draft while its project script terminal is still running", async () => {
+it("lists empty drafts while their script terminal exists, even after it exits", async () => {
   const running = DraftId.make("draft-running");
-  const finished = DraftId.make("draft-finished");
-  state.terminals = [terminal("thread-running", true), terminal("thread-finished", false)];
+  const exited = DraftId.make("draft-exited");
+  const idle = DraftId.make("draft-idle");
+  state.terminals = [terminal("thread-running", true), terminal("thread-exited", false)];
   useComposerDraftStore.setState({
     draftsByThreadKey: {},
     draftThreadsByThreadKey: {
-      [running]: draftSession("thread-running", "2026-10-25T00:00:02.000Z"),
-      [finished]: draftSession("thread-finished", "2026-10-25T00:00:01.000Z"),
+      [running]: draftSession("thread-running", "2026-10-25T00:00:03.000Z"),
+      [exited]: draftSession("thread-exited", "2026-10-25T00:00:02.000Z"),
+      [idle]: draftSession("thread-idle", "2026-10-25T00:00:01.000Z"),
     },
   });
   using _drafts = {
@@ -81,9 +83,9 @@ it("lists an empty draft while its project script terminal is still running", as
   };
 
   await using screen = await render(block(running));
-  const rows = () => [...document.querySelectorAll('[data-testid="sidebar-draft-row"]')];
-  expect(rows()).toHaveLength(1);
+  const rows = () => document.querySelectorAll('[data-testid="sidebar-draft-row"]');
+  expect(rows()).toHaveLength(2);
 
   await screen.rerender(block(null));
-  expect(rows()).toHaveLength(1);
+  expect(rows()).toHaveLength(2);
 });
