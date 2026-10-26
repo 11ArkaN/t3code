@@ -68,6 +68,26 @@ describe("PDF document navigation", () => {
     );
   });
 
+  it("says a PDF from any site cannot be shown instead of downloading it", async () => {
+    const test = fixture();
+    await installPdfDocumentNavigation(test.cdp);
+    const url = "https://example.com/papers/paper.pdf";
+    const result = await test.navigate(url);
+    expect(result.method).toBe("Fetch.fulfillRequest");
+    const body = Buffer.from(String(result.params.body), "base64").toString();
+    expect(body).toContain("paper.pdf");
+    expect(body).toMatch(/can(not|'t) (be )?(displayed|rendered|shown)/i);
+    // The fixture pauses every request; the real browser only pauses enabled patterns.
+    const { patterns } = test.send.mock.calls.find(([method]) => method === "Fetch.enable")![1] as {
+      patterns: Array<{ urlPattern: string }>;
+    };
+    const glob = (pattern: string) =>
+      new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*")}$`);
+    expect(patterns).toSatisfy((enabled: typeof patterns) =>
+      enabled.some(({ urlPattern }) => glob(urlPattern).test(url)),
+    );
+  });
+
   it("resumes navigation when committing the document fails", async () => {
     const test = fixture();
     await installPdfDocumentNavigation(test.cdp);
