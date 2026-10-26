@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 /**
- * Replays small fake threads on a Claude or Codex model to check T3's MCP tool use. A captured
- * harness request supplies the system prompt and native tools; T3's copy comes from this checkout.
- * A cheap model plays the shell, so nothing runs on the host. Usage: `--template <capture>
- * --out <dir>`, `--model <id in MODELS>`, `--dry-run`, `--case <id>`, `--cases <file.jsonl>`.
+ * Replays small fake threads on a Claude or Codex model to check T3's MCP tool use. A trimmed
+ * harness capture supplies the prompt and native tools; a cheap model plays the shell. Run
+ * `pnpm eval:mcp --out <dir>` from apps/server with `ANTHROPIC_API_KEY` in the repo's `.env`.
  */
 import * as NodeChildProcess from "node:child_process";
-import * as NodeOS from "node:os";
 import * as NodeUtil from "node:util";
 import * as NodeVM from "node:vm";
+import * as NodeZlib from "node:zlib";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { OrchestratorMcpTaskRole, ProviderInstanceId } from "@t3tools/contracts";
@@ -1672,14 +1671,19 @@ const main = Effect.gen(function* () {
       (setup.harness === undefined || setup.harness === harness),
   );
   if (selected.length === 0) return yield* Effect.die(new Error("No case matches --case."));
+  // Trimmed captures without user data ship beside the cases. `--template` also takes a raw
+  // CLIProxyAPI capture.
   const templatePath =
     flags.template ||
     path.join(
-      NodeOS.homedir(),
-      ".t3/scratch/mcp-eval/templates",
-      codex ? "codex-raw.json" : "claude-raw.json",
+      import.meta.dirname,
+      "mcp-tool-use-templates",
+      codex ? "codex.json.gz" : "claude.json.gz",
     );
-  const template = yield* fs.readFileString(templatePath);
+  const templateBytes = yield* fs.readFile(templatePath);
+  const template = new TextDecoder().decode(
+    templatePath.endsWith(".gz") ? NodeZlib.gunzipSync(templateBytes) : templateBytes,
+  );
   const keepUserInstructions = flags["user-instructions"] === "keep";
   const buildFor = (subagent: boolean): Effect.Effect<Base, Schema.SchemaError> =>
     codex
