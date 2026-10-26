@@ -1465,6 +1465,54 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ]);
   });
 
+  const cancelStaleQuestionWakes = Effect.fn("Orchestrator.cancelStaleQuestionWakes")(function* (
+    projection: OrchestrationV2ThreadProjection,
+  ) {
+    const events = yield* Ref.make<Array<OrchestrationV2DomainEvent>>([]);
+    for (const run of projection.runs) {
+      if (run.status !== "queued") continue;
+      const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+      const notification = message?.notification;
+      if (notification?.source.kind !== "delegated_task" || notification.outcome !== "updated")
+        continue;
+      const source = notification.source;
+      const task = projection.subagents.find((candidate) => source.taskIds.includes(candidate.id));
+      let pending = false;
+      if (
+        task !== undefined &&
+        task.childThreadId !== null &&
+        !["completed", "failed", "cancelled", "interrupted"].includes(task.status)
+      ) {
+        const child = yield* projectionStore.getThreadRecords(task.childThreadId, [
+          "runtimeRequests",
+        ]);
+        pending = child.runtimeRequests.some(
+          (request) =>
+            request.kind === "user_input" &&
+            request.status === "pending" &&
+            message?.id === `message:delegated-task-question:${projection.thread.id}:${request.id}`,
+        );
+      }
+      if (pending) continue;
+      yield* emitQueuedRunCancellation({
+        command: {
+          type: "queued-run.cancel",
+          commandId: CommandId.make(`command:system:stale-question:${run.id}`),
+          threadId: projection.thread.id,
+          runId: run.id,
+        },
+        events,
+        projection,
+        run,
+        now: yield* DateTime.now,
+      });
+    }
+    const cancellations = yield* Ref.get(events);
+    if (cancellations.length === 0) return false;
+    yield* writeSystemEvents(cancellations);
+    return true;
+  });
+
   const startNextQueuedRun = Effect.fn("Orchestrator.startNextQueuedRun")(
     function* (
       threadId: ThreadId,
@@ -1475,7 +1523,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       },
     ) {
       if (!(yield* projectionStore.canStartQueuedRun(threadId))) return;
-      const projection = yield* readCommandProjection(threadId);
+      let projection = yield* readCommandProjection(threadId);
       if (
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
@@ -1485,6 +1533,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return;
       }
 
+      if (yield* cancelStaleQuestionWakes(projection)) {
+        projection = yield* readCommandProjection(threadId);
+      }
       const storedQueuedRun =
         options?.queuedRunId === undefined
           ? nextQueuedRun(projection)

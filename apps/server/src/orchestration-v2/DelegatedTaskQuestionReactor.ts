@@ -133,11 +133,31 @@ const make = Effect.gen(function* () {
           return;
         }
         // A settled task can no longer use an answer to its still-pending questions.
-        const child = yield* projections.getThreadRecords(task.childThreadId, ["runtimeRequests"]);
+        const child = yield* projections.getThreadRecords(task.childThreadId, [
+          "runtimeRequests",
+          "runs",
+          "nodes",
+        ]);
+        const taskRunIds = new Set(
+          child.runs
+            .filter(
+              (run) =>
+                run.delegatedTaskId === task.id ||
+                (run.delegatedTaskId === undefined &&
+                  child.thread.forkedFrom?.type === "node" &&
+                  child.thread.forkedFrom.nodeId === task.id),
+            )
+            .map((run) => run.id),
+        );
+        const taskNodeIds = new Set(
+          child.nodes
+            .filter((node) => node.runId !== null && taskRunIds.has(node.runId))
+            .map((node) => node.id),
+        );
         yield* cancelQueuedWakes(
           task.threadId,
           child.runtimeRequests
-            .filter((request) => request.kind === "user_input")
+            .filter((request) => request.kind === "user_input" && taskNodeIds.has(request.nodeId))
             .map((request) => request.id),
         );
         return;
