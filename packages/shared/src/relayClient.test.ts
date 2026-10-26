@@ -506,7 +506,7 @@ describe("RelayClient", () => {
             const newPath = `${baseDir}/new/cloudflared`;
             yield* writeExecutable(oldPath);
             yield* writeExecutable(newPath);
-            versions[oldPath] = "2023.8.2";
+            versions[oldPath] = "2026.9.3";
             versions[newPath] = RelayClient.CLOUDFLARED_MIN_VERSION;
             const manager = yield* RelayClient.makeCloudflaredRelayClient({ baseDir });
             const env = { PATH: `${baseDir}/old:${baseDir}/new` };
@@ -535,10 +535,16 @@ describe("RelayClient", () => {
         (baseDir) =>
           Effect.gen(function* () {
             const overridePath = `${baseDir}/override/cloudflared`;
+            const pathBinary = `${baseDir}/bin/cloudflared`;
+            const pinned = managedPathFor(baseDir, RelayClient.CLOUDFLARED_VERSION);
             yield* writeExecutable(overridePath);
-            versions[overridePath] = "2025.6.0";
+            yield* writeExecutable(pathBinary);
+            yield* writeExecutable(pinned);
+            versions[overridePath] = "2026.9.3";
+            versions[pathBinary] = RelayClient.CLOUDFLARED_MIN_VERSION;
+            versions[pinned] = RelayClient.CLOUDFLARED_VERSION;
             const manager = yield* RelayClient.makeCloudflaredRelayClient({ baseDir });
-            const env = { PATH: "", T3CODE_CLOUDFLARED_PATH: overridePath };
+            const env = { PATH: `${baseDir}/bin`, T3CODE_CLOUDFLARED_PATH: overridePath };
             const withEnv = Effect.provideService(
               ConfigProvider.ConfigProvider,
               ConfigProvider.fromEnv({ env }),
@@ -554,6 +560,132 @@ describe("RelayClient", () => {
       );
     });
 
+    it.effect.skipIf(windowsHost)("accepts an override at the minimum version", () => {
+      const versions: Record<string, string> = {};
+      return run(
+        (baseDir) =>
+          Effect.gen(function* () {
+            const overridePath = `${baseDir}/override/cloudflared`;
+            yield* writeExecutable(overridePath);
+            versions[overridePath] = RelayClient.CLOUDFLARED_MIN_VERSION;
+            const manager = yield* RelayClient.makeCloudflaredRelayClient({ baseDir });
+            expect(
+              yield* manager.resolve.pipe(
+                Effect.provideService(
+                  ConfigProvider.ConfigProvider,
+                  ConfigProvider.fromEnv({
+                    env: { PATH: "", T3CODE_CLOUDFLARED_PATH: overridePath },
+                  }),
+                ),
+              ),
+            ).toEqual({
+              status: "available",
+              executablePath: overridePath,
+              source: "override",
+              version: RelayClient.CLOUDFLARED_MIN_VERSION,
+            });
+          }),
+        { versions },
+      );
+    });
+
+    it.effect.skipIf(windowsHost)(
+      "reports no client when only affected PATH and managed copies remain",
+      () => {
+        const versions: Record<string, string> = {};
+        return run(
+          (baseDir) =>
+            Effect.gen(function* () {
+              const pathBinary = `${baseDir}/bin/cloudflared`;
+              const affectedManaged = managedPathFor(baseDir, "2026.10.0");
+              const pinned = managedPathFor(baseDir, RelayClient.CLOUDFLARED_VERSION);
+              const floor = managedPathFor(baseDir, RelayClient.CLOUDFLARED_MIN_VERSION);
+              versions[pathBinary] = "2026.9.3";
+              versions[affectedManaged] = "2026.10.0";
+              versions[pinned] = "2026.9.3";
+              versions[floor] = RelayClient.CLOUDFLARED_MIN_VERSION;
+              yield* writeExecutable(pathBinary);
+              yield* writeExecutable(affectedManaged);
+              yield* writeExecutable(pinned);
+              const manager = yield* RelayClient.makeCloudflaredRelayClient({ baseDir });
+              const resolveWith = manager.resolve.pipe(
+                Effect.provideService(
+                  ConfigProvider.ConfigProvider,
+                  ConfigProvider.fromEnv({ env: { PATH: `${baseDir}/bin` } }),
+                ),
+                Effect.provideService(HostProcess.Environment, { PATH: `${baseDir}/bin` }),
+              );
+
+              expect(yield* resolveWith).toEqual({
+                status: "missing",
+                version: RelayClient.CLOUDFLARED_VERSION,
+              });
+
+              yield* writeExecutable(floor);
+              expect(yield* resolveWith).toMatchObject({
+                executablePath: floor,
+                source: "managed",
+                version: RelayClient.CLOUDFLARED_MIN_VERSION,
+              });
+            }),
+          { versions },
+        );
+      },
+    );
+
+    it.effect.skipIf(windowsHost)(
+      "installs the managed pin when PATH is below the minimum version",
+      () => {
+        const versions: Record<string, string> = {};
+        const bytes = new TextEncoder().encode("test-cloudflared-binary");
+        return Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-cloudflared-test-",
+          });
+          const pathBinary = `${baseDir}/bin/cloudflared`;
+          versions[pathBinary] = "2026.9.3";
+          yield* writeExecutable(pathBinary);
+          const manager = yield* RelayClient.makeCloudflaredRelayClient({
+            baseDir,
+            releaseAsset: {
+              url: "https://example.test/cloudflared",
+              sha256: Hex.encode(sha256(bytes)),
+              archive: "binary",
+            },
+          });
+          const env = { PATH: `${baseDir}/bin` };
+          const resolveWith = manager.resolve.pipe(
+            Effect.provideService(
+              ConfigProvider.ConfigProvider,
+              ConfigProvider.fromEnv({ env }),
+            ),
+            Effect.provideService(HostProcess.Environment, env),
+          );
+          expect(yield* resolveWith).toEqual({
+            status: "missing",
+            version: RelayClient.CLOUDFLARED_VERSION,
+          });
+          const installed = yield* manager.install;
+          expect(installed).toMatchObject({
+            source: "managed",
+            version: RelayClient.CLOUDFLARED_VERSION,
+          });
+          expect(yield* resolveWith).toEqual(installed);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              NodeServices.layer,
+              layerHttpClient(bytes),
+              layerSpawner([], versions),
+              layerHostRuntime({ PATH: "" }),
+            ),
+          ),
+        );
+      },
+    );
+
     it.effect.skipIf(windowsHost)(
       "prefers the pinned release, then the newest older managed release, then PATH",
       () => {
@@ -563,15 +695,15 @@ describe("RelayClient", () => {
             Effect.gen(function* () {
               const fileSystem = yield* FileSystem.FileSystem;
               const pathBinary = `${baseDir}/bin/cloudflared`;
-              const older = managedPathFor(baseDir, "2025.9.0");
-              const newer = managedPathFor(baseDir, "2026.1.0");
+              const older = managedPathFor(baseDir, "2026.10.2");
+              const newer = managedPathFor(baseDir, "2026.10.3");
               const pinned = managedPathFor(baseDir, RelayClient.CLOUDFLARED_VERSION);
               const newerServer = managedPathFor(baseDir, "2099.1.0");
               versions[newerServer] = "2099.1.0";
               yield* writeExecutable(newerServer);
-              versions[pathBinary] = "2026.9.3";
-              versions[older] = "2025.9.0";
-              versions[newer] = "2026.1.0";
+              versions[pathBinary] = "2026.10.2";
+              versions[older] = "2026.10.2";
+              versions[newer] = "2026.10.3";
               yield* writeExecutable(pathBinary);
               yield* writeExecutable(older);
               yield* writeExecutable(newer);
@@ -584,7 +716,7 @@ describe("RelayClient", () => {
                 Effect.provideService(HostProcess.Environment, { PATH: `${baseDir}/bin` }),
               );
 
-              expect(yield* resolveWith).toMatchObject({ source: "managed", version: "2026.1.0" });
+              expect(yield* resolveWith).toMatchObject({ source: "managed", version: "2026.10.3" });
 
               yield* writeExecutable(pinned);
               expect(yield* resolveWith).toMatchObject({
@@ -596,14 +728,14 @@ describe("RelayClient", () => {
               yield* manager.pruneManagedVersions;
               expect(
                 (yield* fileSystem.readDirectory(`${baseDir}/tools/cloudflared`)).sort(),
-              ).toEqual(["2026.1.0", RelayClient.CLOUDFLARED_VERSION, "2099.1.0"]);
+              ).toEqual(["2026.10.3", RelayClient.CLOUDFLARED_VERSION, "2099.1.0"]);
 
               yield* fileSystem.remove(pinned);
-              expect(yield* resolveWith).toMatchObject({ source: "managed", version: "2026.1.0" });
-              yield* fileSystem.remove(`${baseDir}/tools/cloudflared/2026.1.0`, {
+              expect(yield* resolveWith).toMatchObject({ source: "managed", version: "2026.10.3" });
+              yield* fileSystem.remove(`${baseDir}/tools/cloudflared/2026.10.3`, {
                 recursive: true,
               });
-              expect(yield* resolveWith).toMatchObject({ source: "path", version: "2026.9.3" });
+              expect(yield* resolveWith).toMatchObject({ source: "path", version: "2026.10.2" });
             }),
           { versions },
         );
@@ -618,7 +750,7 @@ describe("RelayClient", () => {
           (baseDir) =>
             Effect.gen(function* () {
               const pinned = managedPathFor(baseDir, RelayClient.CLOUDFLARED_VERSION);
-              versions[pinned] = "2026.9.3";
+              versions[pinned] = "2026.10.3";
               yield* writeExecutable(pinned);
               const manager = yield* RelayClient.makeCloudflaredRelayClient({ baseDir });
               const resolved = yield* manager.resolve;
@@ -626,7 +758,7 @@ describe("RelayClient", () => {
                 status: "available",
                 executablePath: pinned,
                 source: "managed",
-                version: "2026.9.3",
+                version: "2026.10.3",
               });
               expect(
                 resolved.status === "available" && RelayClient.isPinnedManagedRelayClient(resolved),
@@ -647,6 +779,9 @@ describe("RelayClient", () => {
     expect(RelayClient.parseCloudflaredVersionOutput("Incorrect Usage")).toBeNull();
     expect(RelayClient.compareCloudflaredVersions("2025.10.0", "2025.6.1")).toBeGreaterThan(0);
     expect(RelayClient.compareCloudflaredVersions("2023.8.2", "2025.6.1")).toBeLessThan(0);
+    expect(RelayClient.compareCloudflaredVersions("2026.9.3", "2026.10.2")).toBeLessThan(0);
+    expect(RelayClient.compareCloudflaredVersions("2026.10.2", "2026.10.2")).toBe(0);
+    expect(RelayClient.compareCloudflaredVersions("2026.10.4", "2026.10.2")).toBeGreaterThan(0);
   });
 
   it.effect.each([

@@ -152,9 +152,10 @@ failed update, which could not run again without it.
 The version comes from running `cloudflared version`, not from the folder name.
 Connectors from before `--no-autoupdate` replaced themselves in place, so a
 managed folder can hold another release. Such a binary still runs as a fallback
-while the pin installs. Every binary needs `CLOUDFLARED_MIN_VERSION`, the oldest
-release that accepts every flag the connector is started with. Raise it whenever
-a new flag is added.
+while the pin installs when it meets `CLOUDFLARED_MIN_VERSION`. That floor is the
+oldest release that accepts every flag the connector starts with and that drops
+the compromised eMudhra intermediates. Raise it when a new flag or a
+certificate-trust fix requires a newer release.
 
 ## OAuth traps
 
