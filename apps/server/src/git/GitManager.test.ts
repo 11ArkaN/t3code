@@ -1558,7 +1558,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
-  it.effect.each(["MERGED", "CLOSED"] as const)(
+  it.effect.each(["merged", "closed"] as const)(
     "status and discovery drop a %s PR only beyond its head and recover after external resets",
     (state) =>
       Effect.gen(function* () {
@@ -1577,21 +1577,21 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Unrelated work"]);
         const diverged = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
         yield* runGit(repoDir, ["checkout", "develop"]);
-        const { manager, ghCalls } = yield* makeManager({
-          ghScenario: {
+        const { manager, providerCalls } = yield* makeManager({
+          providerScenario: {
             prListByHeadSelector: {
-              develop: encodeCliJson([
+              develop: [
                 {
                   number: 301,
                   title: "Release",
                   url: "https://github.com/pingdotgg/t3code/pull/301",
                   baseRefName: "main",
                   headRefName: "develop",
-                  headRefOid: head,
+                  headSha: head,
                   state,
                   updatedAt: "2026-04-02T15:00:00Z",
                 },
-              ]),
+              ],
             },
           },
         });
@@ -1622,14 +1622,14 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           { position: "behind", discovered: 301, status: 301 },
           { position: "diverged", discovered: 301, status: 301 },
         ]);
-        expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(1);
+        expect(listed(providerCalls)).toHaveLength(1);
       }),
   );
 
   it.effect.each([
-    { state: "MERGED", head: "unfetched" },
-    { state: "CLOSED", head: "missing" },
-    { state: "OPEN", head: "ancestor" },
+    { state: "merged", head: "unfetched" },
+    { state: "closed", head: "missing" },
+    { state: "open", head: "ancestor" },
   ] as const)("keeps a $state PR with a $head head", ({ state, head }) =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -1641,9 +1641,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["push", "-u", "origin", "develop"]);
       yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Continue work"]);
       const { manager } = yield* makeManager({
-        ghScenario: {
+        providerScenario: {
           prListByHeadSelector: {
-            develop: encodeCliJson([
+            develop: [
               {
                 number: 301,
                 title: "Release",
@@ -1652,10 +1652,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 headRefName: "develop",
                 ...(head === "missing"
                   ? {}
-                  : { headRefOid: head === "ancestor" ? headSha : "f".repeat(40) }),
+                  : { headSha: head === "ancestor" ? headSha : "f".repeat(40) }),
                 state,
               },
-            ]),
+            ],
           },
         },
       });
@@ -1681,19 +1681,19 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Later work"]);
       yield* runGit(repoDir, ["branch", "feature/release/child"]);
       const { manager } = yield* makeManager({
-        ghScenario: {
+        providerScenario: {
           prListByHeadSelector: {
-            "feature/release": encodeCliJson([
+            "feature/release": [
               {
                 number: 301,
                 title: "Deleted release branch",
                 url: "https://github.com/pingdotgg/t3code/pull/301",
                 baseRefName: "main",
                 headRefName: "feature/release",
-                headRefOid: head,
-                state: "MERGED",
+                headSha: head,
+                state: "merged",
               },
-            ]),
+            ],
           },
         },
       });
@@ -1714,20 +1714,20 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       yield* runGit(repoDir, ["push", "-u", "origin", "develop"]);
-      const { manager, ghCalls } = yield* makeManager({
-        ghScenario: {
+      const { manager, providerCalls } = yield* makeManager({
+        providerScenario: {
           prListSequence: [
-            encodeCliJson([
+            [
               {
                 number: 301,
                 title: "Release",
                 url: "https://github.com/pingdotgg/t3code/pull/301",
                 baseRefName: "main",
                 headRefName: "develop",
-                headRefOid: head,
-                state: "MERGED",
+                headSha: head,
+                state: "merged",
               },
-            ]),
+            ],
           ],
           failWith: "Host unavailable",
           failAfterCalls: 1,
@@ -1737,7 +1737,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       yield* runGit(repoDir, ["commit", "--allow-empty", "-m", "Work after release"]);
       yield* manager.invalidateStatus(repoDir);
       const status = yield* manager.status({ cwd: repoDir });
-      expect(ghCalls.filter((call) => call.startsWith("pr list ")).length).toBeGreaterThan(1);
+      expect(listed(providerCalls).length).toBeGreaterThan(1);
       expect(status.pr).toBeNull();
     }),
   );
@@ -1808,21 +1808,21 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           },
         ]) {
           const url = `https://github.com/${saved.repository}/pull/${saved.number}`;
-          const { manager, ghCalls } = yield* makeManager({
-            ghScenario: {
+          const { manager, providerCalls } = yield* makeManager({
+            providerScenario: {
               prListByHeadSelector: {
-                [branch]: encodeCliJson([
+                [branch]: [
                   {
                     number: 30,
                     title: "Older release updated most recently",
                     url: "https://github.com/pingdotgg/t3code/pull/30",
                     baseRefName: "production",
                     headRefName: branch,
-                    headRefOid: released,
-                    state: "MERGED",
+                    headSha: released,
+                    state: "merged",
                     updatedAt: "2026-04-03T15:00:00Z",
                   },
-                ]),
+                ],
               },
               pullRequest: {
                 number: saved.number,
@@ -1856,7 +1856,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                 concurrency: "unbounded",
               }),
             ).toEqual([false, false, false]);
-            const savedReads = () => ghCalls.filter((call) => call.startsWith("pr view ")).length;
+            const savedReads = () =>
+              providerCalls.filter((call) => call.operation === "getChangeRequest").length;
             expect(savedReads()).toBe(1);
             yield* TestClock.adjust("5 minutes");
             expect(yield* superseded()).toBe(false);
