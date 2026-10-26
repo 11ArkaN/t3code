@@ -74,7 +74,6 @@ import {
 } from "./MessagesTimeline.logic";
 import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
-import type { ThreadFindPositionReader } from "./threadFind";
 import { TooltipScrollDismissArea } from "../ui/tooltip";
 import { WorktreeSetupCard } from "./WorktreeSetupCard";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
@@ -267,7 +266,6 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls | undefined;
   loadEarlier?: CitationHistoryPage | null;
-  findPositionReaderRef?: React.RefObject<ThreadFindPositionReader | null>;
   findExpanded?: boolean;
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
@@ -315,7 +313,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
   findQuery = "",
   activeFindMatch = null,
   findNavigationId = 0,
-  findPositionReaderRef,
   latestRun,
   announcedRun = null,
   detailBehindShell = false,
@@ -1024,7 +1021,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   };
 
   useThreadFindPositionReader({
-    findPositionReaderRef,
+    threadKey: listIdentityKey,
     timelineViewportElement,
     findFoldRunIds,
     timelineEntries,
@@ -1118,9 +1115,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
           className="flex h-full items-center justify-center ps-(--chat-lane-inset-start) pe-(--chat-lane-inset-end)"
           style={{ paddingBottom: emptyPlaceholderInset }}
         >
-          <p className="text-sm text-muted-foreground/30">
-            Send a message to start the conversation.
-          </p>
+          <p className="text-sm text-muted-foreground">Send a message to start the conversation.</p>
         </div>
       </>
     );
