@@ -269,10 +269,11 @@ const make = Effect.gen(function* () {
     return { ...facts, edgeReachable: edgeResults.some(Boolean), exitNode };
   });
 
-  const check = Effect.gen(function* () {
+  const check: Effect.Effect<EnvironmentConnectReachability> = Effect.gen(function* () {
     const order = yield* Ref.updateAndGet(checkCounter, (count) => count + 1);
     const tunnelConfig = yield* readTunnelConfig;
     const facts = yield* gatherFacts(tunnelConfig);
+    if ((yield* readTunnelConfig) !== tunnelConfig) return yield* check;
     const result = classifyReachability(facts, DateTime.formatIso(yield* DateTime.now));
     const previous = yield* Ref.modify(latestRef, (current) =>
       Option.isSome(current) && current.value.order > order

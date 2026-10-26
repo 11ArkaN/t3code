@@ -11,15 +11,18 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as ConnectReachability from "./ConnectReachability.ts";
+import {
+  ConnectReachability,
+  layer,
+  classifyReachability,
+  type ReachabilityFacts,
+} from "./ConnectReachability.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
 const checkedAt = "2026-10-19T00:00:00.000Z";
 const connected = { readyConnections: 4, hostname: "env.example.test", protocol: "quic" };
 const notConnected = { readyConnections: 0, hostname: null, protocol: null };
-const facts = (
-  overrides: Partial<ConnectReachability.ReachabilityFacts>,
-): ConnectReachability.ReachabilityFacts => ({
+const facts = (overrides: Partial<ReachabilityFacts>): ReachabilityFacts => ({
   managedTunnelConfigured: true,
   connector: connected,
   endpoint: null,
@@ -34,21 +37,21 @@ describe("classifyReachability", () => {
     [{ kind: "status", status: 530 }, "no_connector"],
     [{ kind: "network_error" }, "timeout"],
   ] as const)("maps endpoint result %o to %s", (endpoint, cause) => {
-    expect(
-      ConnectReachability.classifyReachability(facts({ endpoint, edgeReachable: true }), checkedAt),
-    ).toMatchObject({ status: "unreachable", cause });
+    expect(classifyReachability(facts({ endpoint, edgeReachable: true }), checkedAt)).toMatchObject(
+      { status: "unreachable", cause },
+    );
   });
 
   it("keeps the endpoint cause when the TCP edge test cannot explain it", () => {
     // QUIC (UDP) can connect while TCP 7844 is blocked.
     expect(
-      ConnectReachability.classifyReachability(
+      classifyReachability(
         facts({ endpoint: { kind: "status", status: 502 }, edgeReachable: false }),
         checkedAt,
       ),
     ).toMatchObject({ cause: "origin_unreachable" });
     expect(
-      ConnectReachability.classifyReachability(
+      classifyReachability(
         facts({
           connector: { readyConnections: null, hostname: "env.example.test", protocol: null },
           endpoint: { kind: "status", status: 502 },
@@ -59,7 +62,7 @@ describe("classifyReachability", () => {
     ).toMatchObject({ cause: "origin_unreachable" });
     // Failed DNS also fails the edge lookups.
     expect(
-      ConnectReachability.classifyReachability(
+      classifyReachability(
         facts({
           connector: { readyConnections: null, hostname: "env.example.test", protocol: null },
           endpoint: { kind: "dns_failed" },
@@ -72,10 +75,7 @@ describe("classifyReachability", () => {
 
   it("waits on a connector that has not connected while the edge answers", () => {
     expect(
-      ConnectReachability.classifyReachability(
-        facts({ connector: notConnected, edgeReachable: true }),
-        checkedAt,
-      ),
+      classifyReachability(facts({ connector: notConnected, edgeReachable: true }), checkedAt),
     ).toMatchObject({ cause: "connector_not_ready" });
   });
 });
@@ -84,25 +84,40 @@ describe("ConnectReachability", () => {
   it.effect("exposes the checked tunnel's MCP URL until its config changes", () => {
     const tunnelConfig = { providerKind: "cloudflare_tunnel", connectorToken: "first" };
     let config = new TextEncoder().encode(JSON.stringify(tunnelConfig));
+    let relinkDuringProbe = false;
     const dependencies = Layer.mergeAll(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
         get: () => Effect.sync(() => Option.some(config)),
       }),
       Layer.mock(ManagedEndpointRuntime.CloudManagedEndpointRuntime)({
-        inspectConnector: () => Effect.succeed(connected),
+        inspectConnector: () =>
+          Effect.succeed({
+            ...connected,
+            hostname: new TextDecoder().decode(config).includes("second")
+              ? "replacement.example.test"
+              : connected.hostname,
+          }),
         readinessChanged: Stream.empty,
       }),
       Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
-          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}"))),
+          Effect.sync(() => {
+            if (relinkDuringProbe) {
+              relinkDuringProbe = false;
+              config = new TextEncoder().encode(
+                JSON.stringify({ ...tunnelConfig, connectorToken: "second" }),
+              );
+            }
+            return HttpClientResponse.fromWeb(request, new Response("{}"));
+          }),
         ),
       ),
       Layer.mock(ChildProcessSpawner.ChildProcessSpawner)({}),
     );
 
     return Effect.gen(function* () {
-      const reachability = yield* ConnectReachability.ConnectReachability;
+      const reachability = yield* ConnectReachability;
       yield* reachability.check;
       const result = Option.getOrThrow(yield* reachability.latest);
       expect(result.status === "reachable" && connectReachableMcpUrl(result)).toBe(
@@ -114,7 +129,14 @@ describe("ConnectReachability", () => {
         JSON.stringify({ ...tunnelConfig, connectorToken: "second" }),
       );
       expect(yield* reachability.latest).toEqual(Option.none());
-    }).pipe(Effect.provide(ConnectReachability.layer.pipe(Layer.provide(dependencies))));
+
+      config = new TextEncoder().encode(JSON.stringify(tunnelConfig));
+      relinkDuringProbe = true;
+      const refreshed = yield* reachability.check;
+      expect(refreshed.status === "reachable" && connectReachableMcpUrl(refreshed)).toBe(
+        "https://replacement.example.test/mcp",
+      );
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(dependencies))));
   });
 });
 
