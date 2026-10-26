@@ -1,5 +1,5 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { PreviewSessionSnapshot, ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
@@ -261,7 +261,10 @@ export const useBrowserHistoryStore = create<BrowserHistoryStoreState>()(
             insertOrdered: true,
             environmentHostname: visit.environmentHostname,
           });
-        recordPreviewTitles(ref, readThreadPreviewState(ref));
+        if (pendingVisits)
+          recordPreviewTitles(ref, readThreadPreviewState(ref), {
+            urls: pendingVisits.map((visit) => visit.url),
+          });
       },
     }),
     {
@@ -329,32 +332,42 @@ export function recordVisitForThread(ref: ScopedThreadRef, url: string, at?: num
   }
   state.recordVisit(projectKey, url, visitAt, { environmentHostname });
   // A page can settle before the address bar records its visit.
-  recordPreviewTitles(ref, readThreadPreviewState(ref));
+  recordPreviewTitles(ref, readThreadPreviewState(ref), { urls: [url] });
 }
 
 /**
- * Titles only update entries already in the thread's project history, so they
- * are applied both when a page settles and when its visit is recorded.
+ * Titles only update entries already in history, so they apply on settle and on
+ * visit. Callers pass only what just happened: history is shared across a
+ * project's threads, so replaying an older settle would clobber a newer title.
  */
 function recordPreviewTitles(
   ref: ScopedThreadRef,
   preview: ThreadPreviewState,
-  previousSessions?: ThreadPreviewState["sessions"],
+  only:
+    | { readonly urls: ReadonlyArray<string> }
+    | { readonly changedSince: ThreadPreviewState["sessions"] },
 ): void {
   const state = useBrowserHistoryStore.getState();
   const projectKey = state.projectKeyByThreadKey[scopedThreadKey(ref)];
   if (!projectKey || !state.byProjectKey[projectKey]?.length) return;
   const connection = readPreparedConnection(ref.environmentId);
   const environmentHostname = connection ? new URL(connection.httpBaseUrl).hostname : null;
+  const titleKey = (url: string) => {
+    const normalized = normalizeHistoryUrl(url);
+    return normalized ? titleLookupKey(normalized, environmentHostname) : null;
+  };
+  const visitKeys = "urls" in only ? new Set(only.urls.map(titleKey)) : null;
+  const include = (session: PreviewSessionSnapshot, url: string) =>
+    "changedSince" in only
+      ? only.changedSince[session.tabId] !== session
+      : (visitKeys?.has(titleKey(url)) ?? false);
   // Tabs can share a URL; applying oldest first lets the newest settle win.
-  // Unchanged sessions are skipped so a stale title cannot overwrite a newer
-  // one another thread in the same project recorded since.
-  const sessions = Object.values(preview.sessions)
-    .filter((session) => previousSessions?.[session.tabId] !== session)
-    .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+  const sessions = Object.values(preview.sessions).toSorted((a, b) =>
+    a.updatedAt.localeCompare(b.updatedAt),
+  );
   for (const session of sessions) {
     const status = session.navStatus;
-    if (status._tag !== "Success" || !status.title) continue;
+    if (status._tag !== "Success" || !status.title || !include(session, status.url)) continue;
     state.setTitleForUrl(projectKey, status.url, status.title, environmentHostname);
   }
 }
@@ -373,7 +386,7 @@ export function startPreviewTitleRecording(): () => void {
           if (next.sessions === previousSessions) return;
           const changedSince = previousSessions;
           previousSessions = next.sessions;
-          recordPreviewTitles(threadRef, next, changedSince);
+          recordPreviewTitles(threadRef, next, { changedSince });
         }),
       );
     }

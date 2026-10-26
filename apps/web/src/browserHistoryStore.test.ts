@@ -178,6 +178,22 @@ describe("useBrowserHistoryStore", () => {
     ).toBe("New");
   });
 
+  it("keeps another thread's newer title when this thread records a different visit", () => {
+    const otherThreadRef = { ...threadRef, threadId: ThreadId.make("thread-2") };
+    const store = useBrowserHistoryStore.getState();
+    store.registerThreadProject(threadRef, "proj-a");
+    store.registerThreadProject(otherThreadRef, "proj-a");
+    recordVisitForThread(threadRef, "http://a.test/", 1);
+    settle("http://a.test/", "Old", "tab_a", threadRef);
+    settle("http://a.test/", "New", "tab_a", otherThreadRef);
+    recordVisitForThread(threadRef, "http://b.test/", 2);
+    expect(
+      useBrowserHistoryStore
+        .getState()
+        .byProjectKey["proj-a"]?.find((e) => e.url === "http://a.test/")?.title,
+    ).toBe("New");
+  });
+
   it("sets a title against a settled url that differs from the stored one only by a trailing slash", () => {
     useBrowserHistoryStore.getState().registerThreadProject(threadRef, "proj-a");
     recordVisitForThread(threadRef, "http://a.test/community", 1);
