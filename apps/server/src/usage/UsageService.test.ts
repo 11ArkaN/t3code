@@ -1964,32 +1964,36 @@ describe("UsageService", () => {
             .join("\n") + "\n",
         );
       });
-      const summary = yield* Effect.gen(function* () {
-        const service = yield* UsageService.make;
-        return yield* service.readSummary(WINDOW);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          layerService({
-            prefix: "usage-service-long-context-test",
-            home,
-            settings,
-            ratesDocument: {
-              "gpt-6-sol": {
-                input_cost_per_token: 2e-6,
-                cache_read_input_token_cost: 2e-7,
-                output_cost_per_token: 1e-5,
-                input_cost_per_token_above_272k_tokens: 4e-6,
-                cache_read_input_token_cost_above_272k_tokens: 4e-7,
-                output_cost_per_token_above_272k_tokens: 1.5e-5,
+      // The restart reads the persisted scan and rate caches while the rates endpoint fails.
+      for (const ratesStatus of [200, 500]) {
+        const summary = yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          return yield* service.readSummary(WINDOW);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            layerService({
+              prefix: "usage-service-long-context-test",
+              home,
+              settings,
+              ratesStatus: () => ratesStatus,
+              ratesDocument: {
+                "gpt-6-sol": {
+                  input_cost_per_token: 2e-6,
+                  cache_read_input_token_cost: 2e-7,
+                  output_cost_per_token: 1e-5,
+                  input_cost_per_token_above_272k_tokens: 4e-6,
+                  cache_read_input_token_cost_above_272k_tokens: 4e-7,
+                  output_cost_per_token_above_272k_tokens: 1.5e-5,
+                },
               },
-            },
-          }),
-        ),
-      );
-      const bucket = summary.buckets.find((bucket) => bucket.model === "gpt-6-sol");
-      assert.strictEqual(bucket?.costSource, "modelPriced");
-      assert.closeTo(bucket?.costUsd ?? NaN, 0.207, 1e-9);
+            }),
+          ),
+        );
+        const bucket = summary.buckets.find((bucket) => bucket.model === "gpt-6-sol");
+        assert.strictEqual(bucket?.costSource, "modelPriced");
+        assert.closeTo(bucket?.costUsd ?? NaN, 0.207, 1e-9);
+      }
     }).pipe(Effect.scoped),
   );
 
