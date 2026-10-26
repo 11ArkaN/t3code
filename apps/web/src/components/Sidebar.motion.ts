@@ -301,6 +301,14 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         for (const [clone, exit] of exiting) {
           const p = progress(exit.animation);
           exit.animation.cancel();
+          if (
+            (exit.above && !next.get(exit.above)?.height) ||
+            (exit.below && !next.get(exit.below)?.height)
+          ) {
+            clone.remove();
+            exiting.delete(clone);
+            continue;
+          }
           animateExit(
             clone,
             {
