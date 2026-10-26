@@ -105,7 +105,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
           ref={noticesRef}
           data-composer-banner-stack="true"
           data-chat-composer-collapsed-controls="true"
-          className={cn("relative z-20 min-h-3", stackExpanded && "z-50")}
+          className={cn("relative z-20 min-h-6", stackExpanded && "z-50")}
           onPointerEnter={(event) => {
             if (event.pointerType === "touch") return;
             if (document.activeElement === peekRef.current) {
@@ -137,7 +137,11 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
             <ComposerBanner.Peek
               ref={peekRef}
               variant={firstStackedItem.variant}
-              aria-label="Show other notices"
+              aria-label={
+                "title" in firstStackedItem
+                  ? undefined
+                  : `Show ${stackedItems.length} other notices`
+              }
               aria-expanded={stackExpanded}
               aria-controls={expandedItemsId}
               aria-hidden={stackExpanded || undefined}
@@ -147,7 +151,19 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
                 expandAndFocusNotice();
               }}
               className={cn(stackExpanded && "pointer-events-none invisible opacity-0")}
-            />
+            >
+              {"title" in firstStackedItem ? (
+                <>
+                  {firstStackedItem.icon}
+                  <span className="min-w-0 truncate">{firstStackedItem.title}</span>
+                </>
+              ) : (
+                <span>{stackedItems.length} more</span>
+              )}
+              {"title" in firstStackedItem && stackedItems.length > 1 ? (
+                <span className="flex-none">+{stackedItems.length - 1}</span>
+              ) : null}
+            </ComposerBanner.Peek>
           ) : null}
           <div
             id={expandedItemsId}
