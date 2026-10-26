@@ -1,4 +1,4 @@
-import { Suspense, use, useMemo, type ReactNode } from "react";
+import { Suspense, use, useMemo, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { WebView } from "react-native-webview";
 
@@ -39,6 +39,7 @@ function diagramHtml(svg: string, theme: MobileThemeVariables): string {
 function RenderedMermaidDiagram(props: { readonly source: string; readonly fallback: ReactNode }) {
   const pele = use(loadPele());
   const theme = useUniwindTheme();
+  const [width, setWidth] = useState(0);
   const rendered = useMemo(() => {
     if (!pele) return null;
     try {
@@ -56,6 +57,7 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
 
   return (
     <View
+      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       accessible
       accessibilityRole="image"
       accessibilityLabel="Mermaid diagram"
@@ -64,20 +66,21 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
       style={{
         width: "100%",
         maxWidth: rendered.width,
-        aspectRatio: rendered.width / rendered.height,
         alignSelf: "center",
         marginVertical: 8,
       }}
     >
-      <WebView
-        source={html}
-        javaScriptEnabled={false}
-        scrollEnabled={false}
-        showsHorizontalScrollIndicator={false}
-        showsVerticalScrollIndicator={false}
-        overScrollMode="never"
-        style={{ flex: 1, backgroundColor: "transparent" }}
-      />
+      <View style={{ width: "100%", height: (width * rendered.height) / rendered.width }}>
+        <WebView
+          source={html}
+          javaScriptEnabled={false}
+          scrollEnabled={false}
+          showsHorizontalScrollIndicator={false}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          style={{ flex: 1, backgroundColor: "transparent" }}
+        />
+      </View>
     </View>
   );
 }
