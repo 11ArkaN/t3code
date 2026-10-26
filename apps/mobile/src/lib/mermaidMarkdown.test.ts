@@ -32,6 +32,18 @@ describe("splitMermaidMarkdown", () => {
     ]);
   });
 
+  it("keeps Mermaid examples inside indented outer fences as code", () => {
+    const markdown = "   ````markdown\n```mermaid\ngraph LR\nA --> B\n```\n   ````";
+    expect(splitMermaidMarkdown(markdown)).toEqual([
+      { kind: "markdown", markdown, sourceOffset: 0 },
+    ]);
+  });
+
+  it("accepts an indented closing fence", () => {
+    const markdown = "```mermaid\ngraph LR\nA --> B\n   ```";
+    expect(splitMermaidMarkdown(markdown)[0]?.kind).toBe("mermaid");
+  });
+
   it("splits tilde fences and closes on a longer fence", () => {
     const segments = splitMermaidMarkdown("~~~ Mermaid\ngraph LR\n~~~~\n");
     expect(segments).toEqual([

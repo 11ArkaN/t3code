@@ -7,7 +7,7 @@ export type MermaidMarkdownSegment =
       readonly sourceOffset: number;
     };
 
-const FENCE_PATTERN = /^(`{3,}|~{3,})(.*)$/;
+const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /**
  * Splits closed, unindented mermaid fences out of markdown. Unclosed fences stay
@@ -35,7 +35,7 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
             fence,
             start: lineStart,
             bodyStart: next,
-            mermaid: info.trim().split(/\s/, 1)[0]?.toLowerCase() === "mermaid",
+            mermaid: line[0] !== " " && info.trim().split(/\s/, 1)[0]?.toLowerCase() === "mermaid",
           };
         }
       } else if (
