@@ -489,6 +489,30 @@ describe("resolveAutoSettlementAt", () => {
         thread: { ...input.thread, pullRequests: [merged] },
       }),
     ).toEqual(at(-45 * 60 * 1_000));
+    const later = (state: "closed" | "merged") => ({
+      ...open,
+      number: 43,
+      url: "https://example.test/owner/repository/pull/43",
+      snapshot: {
+        ...open.snapshot!,
+        headBranch: "feature-43",
+        state,
+        [state === "merged" ? "mergedAt" : "closedAt"]: DateTime.formatIso(at(-500)),
+        syncedAt: DateTime.formatIso(at(-500)),
+      },
+    });
+    for (const state of ["closed", "merged"] as const) {
+      const withLater = (first: ReturnType<typeof persistedLink>) =>
+        ThreadSettlementService.resolveAutoSettlementAt({
+          ...input,
+          thread: { ...input.thread, pullRequests: [first, later(state)] },
+        });
+      expect(withLater({ ...merged, watch }), `watched merge, later ${state}`).toBeNull();
+      expect(withLater({ ...merged, endedWatch: watch }), `ended watch, later ${state}`).toEqual(
+        at(-45 * 60 * 1_000),
+      );
+      expect(withLater(merged), `no watch, later ${state}`).toEqual(at(-45 * 60 * 1_000));
+    }
   });
 });
 
