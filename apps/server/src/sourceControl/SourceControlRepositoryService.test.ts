@@ -387,8 +387,11 @@ it.effect.each([
   ["a plain token", "s3cret"],
   ["a token with an apostrophe", "s3'cret"],
   ["a token with a double quote", 's3"cret'],
+  ["a host-only token with an at sign", "abc@secret"],
 ] as const)("keeps %s in the query out of a failed clone's error text", ([, token]) =>
   Effect.gen(function* () {
+    const remote =
+      token === "abc@secret" ? "https://github.com" : "https://github.com/octocat/t3code.git";
     const error = yield* Effect.flip(
       cloneInTemporaryDirectory(
         {
@@ -397,7 +400,7 @@ it.effect.each([
               // Git quotes the URL it was given, query included, and appends a slash.
               yield* (
                 input.progress?.onStderrLine?.(
-                  `fatal: unable to access 'https://github.com/octocat/t3code.git?access_token=${token}/': Could not resolve host: github.com`,
+                  `fatal: unable to access '${remote}?access_token=${token}/': Could not resolve host: github.com`,
                 ) ?? Effect.void
               );
               return yield* new GitCommandError({
@@ -409,13 +412,13 @@ it.effect.each([
               });
             }),
         },
-        { remoteUrl: `https://github.com/octocat/t3code.git?access_token=${token}` },
+        { remoteUrl: `${remote}?access_token=${token}` },
       ),
     );
 
     assert.strictEqual(
       error.detail,
-      "fatal: unable to access 'https://github.com/octocat/t3code.git': Could not resolve host: github.com",
+      `fatal: unable to access '${remote}': Could not resolve host: github.com`,
     );
   }),
 );

@@ -128,18 +128,16 @@ function redactRemoteUrl(remoteUrl: string): string {
 }
 
 // Userinfo can contain @; remove through the last one before the host boundary.
-const URL_WITH_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/]+@/gi;
-// A query is a token, as in redactRemoteUrl. Git quotes the URL and appends a
-// `/`. The token may itself hold a quote, so a quoted query runs to the last
-// matching quote that closes the URL; an unquoted one runs to whitespace.
+const URL_WITH_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]+@/gi;
+// Git leaves quotes inside query tokens unescaped; consume through the closing quote.
 const QUOTED_URL_QUERY = /(['"])([a-z][a-z0-9+.-]*:\/\/[^\s?]*)\?.*\1(?=[\s:]|$)/gi;
 const URL_QUERY = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?'"]*)\?[^\s'"]*/gi;
 
 function redactUrlCredentials(text: string): string {
   return text
-    .replace(URL_WITH_USERINFO, "$1")
     .replace(QUOTED_URL_QUERY, "$1$2$1")
-    .replace(URL_QUERY, "$1");
+    .replace(URL_QUERY, "$1")
+    .replace(URL_WITH_USERINFO, "$1");
 }
 
 // The remote already exists after push failure; advise fixing access and pushing.
