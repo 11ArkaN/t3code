@@ -6,6 +6,18 @@ const MAX_FADED_ROWS_PER_UPDATE = 40;
 type RowPosition = { top: number; left: number; width: number; height: number };
 type Edge = { from: number; to: number };
 type Frame = { opacity: number; y: number };
+type EdgeOf = (node: HTMLElement | undefined, step: -1 | 1) => Edge | undefined;
+type Exit = {
+  animation: Animation;
+  top: number;
+  height: number;
+  from: Frame;
+  to: Frame;
+  above: HTMLElement | undefined;
+  below: HTMLElement | undefined;
+};
+
+const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
 
 /** Clip a travelling row to the space between its neighbours' edges so it never paints over them. */
 function clippedKeyframes(
@@ -16,7 +28,6 @@ function clippedKeyframes(
   above: Edge | undefined,
   below: Edge | undefined,
 ): Keyframe[] {
-  const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
   // Neighbours move with the same timing, so each overlap is linear in eased progress.
   const overlaps = [
     above && ((p: number) => lerp(above.from, above.to, p) - top - lerp(from.y, to.y, p)),
@@ -58,8 +69,11 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     "(prefers-reduced-motion: reduce)",
   );
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
-  const entering = new Map<HTMLElement, { animation: Animation; travel: number }>();
-  const exiting = new Map<HTMLElement, Animation>();
+  const entering = new Map<
+    HTMLElement,
+    { animation: Animation; travel: number; opacity: number }
+  >();
+  const exiting = new Map<HTMLElement, Exit>();
   let released: Map<HTMLElement, number> | null = null;
 
   const remainingOffset = (node: HTMLElement) => {
@@ -69,21 +83,48 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     const enter = entry ? entry.travel * (1 - progress(entry.animation)) : 0;
     return run + enter;
   };
+  const entryOpacity = (node: HTMLElement) => {
+    const entry = entering.get(node);
+    return entry ? lerp(entry.opacity, 1, progress(entry.animation)) : 1;
+  };
   const clearFades = () => {
     for (const entry of entering.values()) entry.animation.cancel();
-    for (const animation of exiting.values()) animation.cancel();
+    for (const exit of exiting.values()) exit.animation.cancel();
     for (const node of exiting.keys()) node.remove();
     entering.clear();
     exiting.clear();
+  };
+  const animateExit = (clone: HTMLElement, exit: Omit<Exit, "animation">, edges: EdgeOf) => {
+    const animation = clone.animate(
+      clippedKeyframes(
+        exit.top,
+        exit.height,
+        exit.from,
+        exit.to,
+        edges(exit.above, -1),
+        edges(exit.below, 1),
+      ),
+      motionTiming,
+    );
+    exiting.set(clone, { ...exit, animation });
+    animation.addEventListener(
+      "finish",
+      () => {
+        if (exiting.get(clone)?.animation !== animation) return;
+        clone.remove();
+        exiting.delete(clone);
+      },
+      { once: true },
+    );
   };
   const fadeOut = (
     node: HTMLElement,
     position: RowPosition,
     travel: number,
-    above: Edge | undefined,
-    below: Edge | undefined,
+    above: HTMLElement | undefined,
+    below: HTMLElement | undefined,
+    edges: EdgeOf,
   ) => {
-    if (position.height === 0) return;
     const clone = node.cloneNode(true) as HTMLElement;
     for (const element of [clone, ...clone.querySelectorAll("*")]) {
       for (const attribute of Array.from(element.attributes)) {
@@ -114,25 +155,35 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
       pointerEvents: "none",
     });
     parent.append(clone);
-    const entry = entering.get(node);
-    const entryProgress = entry ? progress(entry.animation) : 1;
-    const animation = clone.animate(
-      clippedKeyframes(
+    animateExit(
+      clone,
+      {
         top,
-        position.height,
-        { opacity: entryProgress, y: 0 },
-        { opacity: 0, y: travel },
+        height: position.height,
+        from: { opacity: entryOpacity(node), y: 0 },
+        to: { opacity: 0, y: travel },
         above,
         below,
-      ),
+      },
+      edges,
+    );
+  };
+  const enter = (
+    node: HTMLElement,
+    position: RowPosition,
+    from: Frame,
+    above?: Edge,
+    below?: Edge,
+  ) => {
+    const animation = node.animate(
+      clippedKeyframes(position.top, position.height, from, { opacity: 1, y: 0 }, above, below),
       motionTiming,
     );
-    exiting.set(clone, animation);
+    entering.set(node, { animation, travel: from.y, opacity: from.opacity });
     animation.addEventListener(
       "finish",
       () => {
-        clone.remove();
-        exiting.delete(clone);
+        if (entering.get(node)?.animation === animation) entering.delete(node);
       },
       { once: true },
     );
@@ -150,9 +201,7 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   };
   const move = (node: HTMLElement, offset: number) => {
     cancel(node);
-    const entry = entering.get(node);
-    if (entry) entry.travel = 0;
-    if (offset === 0 && !entry) return;
+    if (offset === 0) return;
     const animation = node.animate(
       [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
       motionTiming,
@@ -183,18 +232,13 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
             },
           ]),
       );
-      if (
+      const layoutChanged =
         positions !== null &&
-        (entering.size > 0 || exiting.size > 0 || running.size > 0) &&
         (next.size !== positions.size ||
           [...next].some(([node, position]) => {
             const previous = positions!.get(node);
             return previous?.top !== position.top || previous.height !== position.height;
-          }))
-      ) {
-        // Settle interrupted layouts before their clips can follow stale neighbour paths.
-        suspend();
-      }
+          }));
       let fadeCount = 0;
       if (positions !== null) {
         for (const [node, position] of positions) {
@@ -225,30 +269,49 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         }
         return undefined;
       };
-      const neighbourEdge = (
+      const neighbour = (
         order: readonly HTMLElement[],
         index: number,
         step: -1 | 1,
         retained: (node: HTMLElement) => boolean,
-      ): Edge | undefined => {
+      ) => {
         for (let cursor = index + step; cursor >= 0 && cursor < order.length; cursor += step) {
           const node = order[cursor]!;
-          const position = next.get(node);
-          if (!retained(node) || position === undefined || position.height === 0) continue;
-          const edge = step < 0 ? position.top + position.height : position.top;
-          return { from: edge + (movedDelta.get(node) ?? remainingOffset(node)), to: edge };
+          if (retained(node) && next.get(node)?.height) return node;
         }
         return undefined;
       };
+      const edges: EdgeOf = (node, step) => {
+        const position = node && next.get(node);
+        if (!node || !position?.height) return undefined;
+        const edge = step < 0 ? position.top + position.height : position.top;
+        return { from: edge + (movedDelta.get(node) ?? remainingOffset(node)), to: edge };
+      };
+      const neighbourEdge = (...args: Parameters<typeof neighbour>) =>
+        edges(neighbour(...args), args[2]);
       if (!shouldAnimate) clearFades();
-      else {
+      else if (layoutChanged) {
+        // Every active motion restarts on one shared timeline so neighbour clips stay linear.
         for (const [node, position] of next) {
           const previousTop = positions!.get(node)?.top;
-          if (previousTop === undefined || previousTop === position.top) continue;
+          if (previousTop === undefined) continue;
+          if (previousTop === position.top && !running.has(node) && !entering.has(node)) continue;
           movedDelta.set(node, previousTop + remainingOffset(node) - position.top);
         }
+        for (const [clone, exit] of exiting) {
+          const p = progress(exit.animation);
+          exit.animation.cancel();
+          animateExit(
+            clone,
+            {
+              ...exit,
+              from: { opacity: lerp(exit.from.opacity, 0, p), y: lerp(exit.from.y, exit.to.y, p) },
+            },
+            edges,
+          );
+        }
         for (const [node, position] of positions!) {
-          if (next.has(node)) continue;
+          if (next.has(node) || position.height === 0) continue;
           const index = oldOrder.indexOf(node);
           const retained = (n: HTMLElement) => next.has(n);
           const delta = ridingDelta(oldOrder, index, retained);
@@ -256,8 +319,9 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
             node,
             position,
             delta === undefined ? rowTravel(position.height) : -delta,
-            neighbourEdge(oldOrder, index, -1, retained),
-            neighbourEdge(oldOrder, index, 1, retained),
+            neighbour(oldOrder, index, -1, retained),
+            neighbour(oldOrder, index, 1, retained),
+            edges,
           );
         }
       }
@@ -271,40 +335,40 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         if (!shouldAnimate || !next.has(node)) cancel(node);
       }
       if (shouldAnimate) {
+        const retained = (n: HTMLElement) => positions!.has(n);
         for (const [index, node] of nextOrder.entries()) {
           const position = next.get(node)!;
           const previousTop = positions!.get(node)?.top;
           if (previousTop === undefined) {
             if (position.height > 0) {
-              const retained = (n: HTMLElement) => positions!.has(n);
               const delta = ridingDelta(nextOrder, index, retained);
-              const travel = delta === undefined ? -rowTravel(position.height) : delta;
-              const animation = node.animate(
-                clippedKeyframes(
-                  position.top,
-                  position.height,
-                  { opacity: 0, y: travel },
-                  { opacity: 1, y: 0 },
-                  neighbourEdge(nextOrder, index, -1, retained),
-                  neighbourEdge(nextOrder, index, 1, retained),
-                ),
-                motionTiming,
-              );
-              entering.set(node, { animation, travel });
-              animation.addEventListener(
-                "finish",
-                () => {
-                  if (entering.get(node)?.animation === animation) entering.delete(node);
-                },
-                { once: true },
+              enter(
+                node,
+                position,
+                { opacity: 0, y: delta === undefined ? -rowTravel(position.height) : delta },
+                neighbourEdge(nextOrder, index, -1, retained),
+                neighbourEdge(nextOrder, index, 1, retained),
               );
             }
             continue;
           }
-          const delta = movedDelta.get(node);
           // Computed progress includes easing; carry forward only our translation, never dnd-kit's
           // transforms.
-          if (delta !== undefined) move(node, delta);
+          const delta = movedDelta.get(node);
+          if (delta === undefined) continue;
+          const entry = entering.get(node);
+          if (entry) {
+            const opacity = entryOpacity(node);
+            cancel(node);
+            entry.animation.cancel();
+            enter(
+              node,
+              position,
+              { opacity, y: delta },
+              neighbourEdge(nextOrder, index, -1, retained),
+              neighbourEdge(nextOrder, index, 1, retained),
+            );
+          } else move(node, delta);
         }
       }
       if (released !== null) {
