@@ -99,16 +99,16 @@ describe("mobile workspace projection", () => {
     expect(state.connectionState).toBe("reconnecting");
   });
 
-  it("treats an environment as offline until it is connected with a live shell", () => {
+  it("marks disconnected environments offline without treating connected catch-up as offline", () => {
     const offline = (
       connectionState: EnvironmentPresentation["connection"]["phase"],
-      shellStatus: "empty" | "synchronizing" | "live",
       networkStatus: "online" | "offline" = "online",
-    ) => isEnvironmentOffline({ networkStatus, connectionState, shellStatus });
+    ) => isEnvironmentOffline({ networkStatus, connectionState });
 
-    expect(offline("reconnecting", "synchronizing")).toBe(true);
-    expect(offline("connected", "synchronizing")).toBe(true);
-    expect(offline("connected", "live")).toBe(false);
-    expect(offline("connected", "live", "offline")).toBe(true);
+    expect(offline("reconnecting")).toBe(true);
+    expect(offline("connecting")).toBe(true);
+    expect(offline("error")).toBe(true);
+    expect(offline("connected")).toBe(false);
+    expect(offline("connected", "offline")).toBe(true);
   });
 });
