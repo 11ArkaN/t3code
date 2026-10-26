@@ -8,6 +8,7 @@ import {
   CommandId,
   CheckpointId,
   CodexSettings,
+  ContextHandoffId,
   EnvironmentId,
   MessageId,
   type ModelSelection,
@@ -1998,10 +1999,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           }),
         );
         yield* afterRestart.awaitTerminal(1);
+        const advancedProviderThread = {
+          ...resumed,
+          lastRunOrdinal: 2,
+          handoffIds: [ContextHandoffId.make("restart-context-handoff")],
+        };
         yield* afterRestart.runtime.startTurn({
           ...makeCodexTestTurnInput({
             threadId: afterRestart.threadId,
-            providerThread: resumed,
+            providerThread: advancedProviderThread,
             now: yield* DateTime.now,
             attemptId: RunAttemptId.make("restart-context-changed"),
             text: "changed context",
@@ -2011,6 +2017,116 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         yield* afterRestart.awaitTerminal(2);
         assert.deepEqual(
           afterRestart.terminalEvents().map((event) => event.status),
+          ["completed", "completed"],
+        );
+        const changedProviderThread = afterRestart.events.findLast(
+          (event) => event.type === "provider_thread.updated",
+        )?.providerThread;
+        assert.equal(changedProviderThread?.lastRunOrdinal, 2);
+        assert.deepEqual(changedProviderThread?.handoffIds, advancedProviderThread.handoffIds);
+        assert.notEqual(
+          changedProviderThread?.nativeMetadata?.codexAdditionalContextDigest,
+          persistedProviderThread.nativeMetadata?.codexAdditionalContextDigest,
+        );
+
+        // Compaction before the first post-restart turn has nothing to restore, so the next turn resends.
+        const compactTurnId = "turn-compact";
+        const compactionItem = { type: "contextCompaction", id: "compact-before-turn" };
+        const compactRestart = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "restart-context-compact",
+            entries: [
+              ...preamble,
+              {
+                type: "expect_outbound",
+                label: "thread/resume",
+                frame: {
+                  id: 3,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread/resume",
+                frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+              {
+                type: "expect_outbound",
+                label: "compact",
+                frame: {
+                  id: 4,
+                  method: "thread/compact/start",
+                  params: { threadId: nativeThreadId },
+                },
+              },
+              { type: "emit_inbound", label: "compact", frame: { id: 4, result: {} } },
+              {
+                type: "emit_inbound",
+                label: "compact started",
+                frame: {
+                  method: "turn/started",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: compactTurnId, status: "inProgress" }),
+                  },
+                },
+              },
+              ...(["item/started", "item/completed"] as const).map((method) => ({
+                type: "emit_inbound" as const,
+                label: method,
+                frame: {
+                  method,
+                  params: { threadId: nativeThreadId, turnId: compactTurnId, item: compactionItem },
+                },
+              })),
+              {
+                type: "emit_inbound",
+                label: "compact completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: compactTurnId, status: "completed" }),
+                  },
+                },
+              },
+              ...completed(5, "turn-after-compact", "turn/start", unchangedParams),
+            ],
+          }),
+        );
+        yield* withT3Mcp(compactRestart.threadId);
+        const compactResumed = yield* compactRestart.runtime.resumeThread({
+          providerThread: persistedProviderThread,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        yield* compactRestart.runtime.compactThread!(
+          makeCodexTestTurnInput({
+            threadId: compactRestart.threadId,
+            providerThread: compactResumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-context-compact"),
+            text: "/compact",
+          }),
+        );
+        yield* compactRestart.awaitTerminal(1);
+        yield* compactRestart.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: compactRestart.threadId,
+            providerThread: compactResumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-context-after-compact"),
+            text: "after restart",
+          }),
+        );
+        yield* compactRestart.awaitTerminal(2);
+        assert.deepEqual(
+          compactRestart.terminalEvents().map((event) => event.status),
           ["completed", "completed"],
         );
       }).pipe(

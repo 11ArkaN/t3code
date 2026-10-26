@@ -1672,12 +1672,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             NonNullable<CodexTurnStartParamsWithCollaborationMode["additionalContext"]>
           >(),
         );
+        // Absent: fall back to persisted metadata. Undefined: Codex holds no known context.
+        const deliveredContextDigests = new Map<string, string | undefined>();
         // Codex drops client developer messages during compaction but only
         // resends additionalContext when it changes.
         const restoreAdditionalContext = Effect.fn("CodexAdapterV2.restoreAdditionalContext")(
           function* (threadId: string) {
             const context = (yield* Ref.get(additionalContextByThread)).get(threadId);
-            if (!context) return;
+            // Nothing to restore before this session's first turn, so the next turn must resend.
+            if (!context) {
+              deliveredContextDigests.set(threadId, undefined);
+              return;
+            }
             yield* client.request("thread/inject_items", {
               threadId,
               items: Object.entries(context).map(([key, entry]) =>
@@ -1700,12 +1706,17 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ),
             });
           },
-          Effect.timeout("10 seconds"),
-          Effect.catch((cause) =>
-            Effect.logWarning("Failed to restore Codex additional context after compaction.", {
-              cause,
-            }),
-          ),
+          (effect, threadId) =>
+            effect.pipe(
+              Effect.timeout("10 seconds"),
+              Effect.catch((cause) => {
+                deliveredContextDigests.set(threadId, undefined);
+                return Effect.logWarning(
+                  "Failed to restore Codex additional context after compaction.",
+                  { cause },
+                );
+              }),
+            ),
         );
         const initialized = yield* Ref.make(false);
         // Codex rejects a second initialize on the shared app-server.
@@ -1840,8 +1851,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const turnTerminalizationPermit = yield* Semaphore.make(1);
         const goalsByNativeThread = new Map<string, OrchestrationV2ProviderGoal | null>();
         const rootProviderThreads = new Map<string, OrchestrationV2ProviderThread>();
-        // Absent: fall back to persisted metadata. Undefined: Codex holds no known context.
-        const deliveredContextDigests = new Map<string, string | undefined>();
         const goalHolds = new Map<string, CodexGoalHold>();
         const goalRuns = new Map<ProviderTurnId, Array<ActiveCodexTurnContext>>();
         const goalActivations = new Map<string, { stopped: boolean }>();
@@ -6303,25 +6312,25 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ? paramsWithoutContext
                 : turnStartParams,
             );
+            let providerThread = turnInput.providerThread;
             if (contextDigest !== undefined && contextDigest !== deliveredDigest) {
               deliveredContextDigests.set(threadId, contextDigest);
-              const providerThread = rootProviderThreads.get(threadId) ?? turnInput.providerThread;
-              const updated = {
+              providerThread = {
                 ...providerThread,
                 nativeMetadata: {
                   ...providerThread.nativeMetadata,
                   codexAdditionalContextDigest: contextDigest,
                 },
               };
-              rootProviderThreads.set(threadId, updated);
+              rootProviderThreads.set(threadId, providerThread);
               yield* emitProviderEvent({
                 type: "provider_thread.updated",
                 driver: CODEX_PROVIDER,
-                providerThread: updated,
+                providerThread,
               });
             }
             yield* registerRootTurn({
-              turnInput,
+              turnInput: { ...turnInput, providerThread },
               nativeTurnId: started.turn.id,
               startedAt: codexTimestamp(started.turn.startedAt),
               waitForNativeStart: started.turn.startedAt === null,
