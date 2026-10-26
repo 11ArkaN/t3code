@@ -1734,6 +1734,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             modelSelection: CODEX_TEST_MODEL_SELECTION,
             hasT3Mcp: true,
           });
+          const { additionalContext: _context, ...paramsWithoutContext } = params;
           assert.include(
             params.additionalContext?.t3_code_orchestration_01?.value ?? "",
             "delegate_task",
@@ -1749,19 +1750,19 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 frame: { id: 3, method: "turn/start", params },
               },
               ...entries.slice(6),
+              {
+                type: "emit_inbound" as const,
+                label: "first turn completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                  },
+                },
+              },
               ...(explicit
                 ? [
-                    {
-                      type: "emit_inbound" as const,
-                      label: "first turn completed",
-                      frame: {
-                        method: "turn/completed",
-                        params: {
-                          threadId: nativeThreadId,
-                          turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
-                        },
-                      },
-                    },
                     {
                       type: "expect_outbound" as const,
                       label: "explicit compact",
@@ -1791,7 +1792,44 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                       },
                     },
                   ]
-                : []),
+                : [
+                    {
+                      type: "expect_outbound" as const,
+                      label: "next turn",
+                      frame: {
+                        id: 4,
+                        method: "turn/start",
+                        params: paramsWithoutContext,
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "next turn",
+                      frame: {
+                        id: 4,
+                        result: {
+                          turn: makeCodexReplayTurn({
+                            id: "automatic-compact-turn",
+                            status: "inProgress",
+                          }),
+                        },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "next turn started",
+                      frame: {
+                        method: "turn/started",
+                        params: {
+                          threadId: nativeThreadId,
+                          turn: makeCodexReplayTurn({
+                            id: "automatic-compact-turn",
+                            status: "inProgress",
+                          }),
+                        },
+                      },
+                    },
+                  ]),
               {
                 type: "emit_inbound",
                 label: "compacted",
@@ -1799,7 +1837,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                   method: "item/completed",
                   params: {
                     threadId: nativeThreadId,
-                    turnId: explicit ? "explicit-compact-turn" : nativeTurnId,
+                    turnId: explicit ? "explicit-compact-turn" : "automatic-compact-turn",
                     item: { type: "contextCompaction", id: "compact-context" },
                   },
                 },
@@ -1808,7 +1846,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 type: "expect_outbound",
                 label: "restore context",
                 frame: {
-                  id: explicit ? 5 : 4,
+                  id: 5,
                   method: "thread/inject_items",
                   params: {
                     threadId: nativeThreadId,
@@ -1823,7 +1861,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               {
                 type: "emit_inbound",
                 label: "restored",
-                frame: { id: explicit ? 5 : 4, result: {} },
+                frame: { id: 5, result: {} },
               },
               {
                 type: "emit_inbound",
@@ -1833,7 +1871,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                   params: {
                     threadId: nativeThreadId,
                     turn: makeCodexReplayTurn({
-                      id: explicit ? "explicit-compact-turn" : nativeTurnId,
+                      id: explicit ? "explicit-compact-turn" : "automatic-compact-turn",
                       status: "completed",
                     }),
                   },
@@ -1841,7 +1879,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               },
             ],
           });
-          const harness = yield* makeCodexReplayHarness(transcript);
+          const contextDigests: Array<string | undefined> = [];
+          const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+            Effect.sync(() => {
+              if (event.type === "provider_thread.updated")
+                contextDigests.push(
+                  event.providerThread.nativeMetadata?.codexAdditionalContextDigest,
+                );
+            }),
+          );
           yield* (yield* McpProviderSessions.McpProviderSessions).set({
             environmentId: EnvironmentId.make("test"),
             threadId: harness.threadId,
@@ -1862,6 +1908,27 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           );
           yield* harness.firstTerminal;
           assert.equal(harness.terminalEvents()[0]?.status, "completed");
+          if (!explicit) {
+            yield* harness.runtime.startTurn(
+              makeCodexTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now: yield* DateTime.now,
+                attemptId: RunAttemptId.make("automatic-compact"),
+                text: "work",
+              }),
+            );
+            yield* harness.awaitTerminal(2);
+          }
+          if (!explicit) {
+            assert.lengthOf(contextDigests, 3);
+            assert.isDefined(contextDigests[0]);
+            assert.isUndefined(
+              contextDigests[1],
+              "automatic compaction must persist invalidation before restoration",
+            );
+            assert.equal(contextDigests[2], contextDigests[0]);
+          }
           if (explicit) {
             const delivered = harness.events.findLast(
               (event) => event.type === "provider_thread.updated",

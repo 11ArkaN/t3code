@@ -1688,12 +1688,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         // resends additionalContext when it changes.
         const restoreAdditionalContext = Effect.fn("CodexAdapterV2.restoreAdditionalContext")(
           function* (threadId: string) {
+            yield* invalidateAdditionalContext(threadId);
             const context = (yield* Ref.get(additionalContextByThread)).get(threadId);
-            // Nothing to restore before this session's first turn, so the next turn must resend.
-            if (!context) {
-              yield* invalidateAdditionalContext(threadId);
-              return;
-            }
+            if (!context) return;
             yield* client.request("thread/inject_items", {
               threadId,
               items: Object.entries(context).map(([key, entry]) =>
