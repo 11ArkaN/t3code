@@ -636,16 +636,21 @@ function latestTerminalResultRun(
   projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs">,
   delegatedRun: OrchestrationV2Run | undefined,
 ): OrchestrationV2Run | undefined {
-  const monitorRunIds = new Set(
+  const notificationRunIds = new Set(
     projection.messages
-      .filter((message) => message.notification?.source.kind === "monitor")
+      .filter(
+        ({ notification }) =>
+          notification?.source.kind === "monitor" ||
+          // Question wakes report on a grandchild; they are not this task's result.
+          (notification?.source.kind === "delegated_task" && notification.outcome === "updated"),
+      )
       .map((message) => message.runId),
   );
   return projection.runs
     .filter(
       (run) =>
         ThreadManagementService.isTerminalRunStatus(run.status) &&
-        !monitorRunIds.has(run.id) &&
+        !notificationRunIds.has(run.id) &&
         run.status !== "rolled_back" &&
         (run.id === delegatedRun?.id || run.startedAt !== null),
     )
