@@ -30,10 +30,12 @@ import {
   RunId,
   ScheduledTaskId,
   ThreadId,
+  VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -625,7 +627,13 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
       const lockPath = `${repo}/.git/${deleted.refs[0]}.lock`;
       yield* fileSystem.writeFileString(lockPath, "");
       yield* worker.drain();
+      // Lock contention outlasting the worker's default attempt budget still leaves it retryable.
+      for (let attempt = 0; attempt < 6; attempt++) {
+        yield* TestClock.adjust("30 seconds");
+        yield* worker.drain();
+      }
       const failed = yield* cleanupEffect;
+      assert.isAbove(failed?.attemptCount ?? 0, 5);
       assert.equal(failed?.status, "pending");
       assert.isNotNull(failed?.lastError ?? null);
       assert.isNotNull(
@@ -649,6 +657,52 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
       assert.notIncludeMembers(remaining, deleted.refs);
       assert.includeMembers(remaining, archived.refs);
     }).pipe(Effect.provide(VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer)))),
+  );
+
+  it.effect("checkpoint cleanup skips missing directories but fails when detection fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const existing = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-checkpoint-detect-",
+      });
+      const cleanup = (cwds: ReadonlyArray<string>) =>
+        ResourceCleanupService.ResourceCleanupService.pipe(
+          Effect.flatMap((service) =>
+            service.cleanupCheckpoints({
+              threadId: ThreadId.make("checkpoint-detect-thread"),
+              cwds,
+              scopeIds: [],
+            }),
+          ),
+          Effect.provide(
+            Layer.fresh(ResourceCleanupService.layer).pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  Layer.mock(CheckpointStore.CheckpointStore)({
+                    isGitRepository: (cwd) =>
+                      Effect.fail(
+                        new VcsProcessTimeoutError({
+                          operation: "GitVcsDriver.isInsideWorkTree",
+                          command: "git",
+                          cwd,
+                          timeoutMs: 5_000,
+                        }),
+                      ),
+                  }),
+                  Layer.mock(PreviewManager.PreviewManager)({}),
+                  Layer.mock(TerminalManager.TerminalManager)({}),
+                  Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+                  layerServerConfig,
+                ),
+              ),
+            ),
+          ),
+        );
+
+      yield* cleanup([`${existing}/removed-worktree`]);
+      const exit = yield* Effect.exit(cleanup([existing]));
+      assert.isTrue(Exit.isFailure(exit), "a detection failure must stay retryable");
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("waits for an in-flight thread update before planning deletion", () =>

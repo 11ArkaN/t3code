@@ -72,10 +72,8 @@ export const layer = Layer.effect(
           ];
           for (const cwd of input.cwds) {
             // Removed worktrees are skipped; their refs live in the shared repository.
-            const isRepository = yield* checkpointStore
-              .isGitRepository(cwd)
-              .pipe(Effect.orElseSucceed(() => false));
-            if (!isRepository) continue;
+            if (!(yield* fileSystem.exists(cwd))) continue;
+            if (!(yield* checkpointStore.isGitRepository(cwd))) continue;
             yield* checkpointStore.deleteCheckpointRefs({ cwd, checkpointRefs: [], refNamespaces });
           }
         },
