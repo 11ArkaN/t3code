@@ -3,6 +3,8 @@ import Foundation
 struct T3TaskWidgetSnapshot: Codable, Hashable, Sendable {
     static let empty = T3TaskWidgetSnapshot(updatedAt: "", tasks: [])
 
+    // Older snapshots can contain subagents and cannot be filtered without lineage.
+    var version = 2
     var updatedAt: String
     var tasks: [T3RelayAgentActivityAggregateRow]
 }
@@ -13,9 +15,14 @@ enum T3TaskWidgetSnapshotStore {
     static let fileName = "task-widget-snapshot.json"
 
     static func load() -> T3TaskWidgetSnapshot {
-        guard let url = fileURL(),
-              let data = try? Data(contentsOf: url),
-              let snapshot = try? JSONDecoder().decode(T3TaskWidgetSnapshot.self, from: data)
+        guard let url = fileURL() else { return .empty }
+        return load(from: url)
+    }
+
+    static func load(from url: URL) -> T3TaskWidgetSnapshot {
+        guard let data = try? Data(contentsOf: url),
+              let snapshot = try? JSONDecoder().decode(T3TaskWidgetSnapshot.self, from: data),
+              snapshot.version == 2
         else {
             return .empty
         }

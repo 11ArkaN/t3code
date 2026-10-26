@@ -30,11 +30,40 @@ final class OrchestrationV2ThreadLifecycleTests: XCTestCase {
             }
         }
         let watched = try shell([
-            "latestRunId": .null, "activeProviderThreadId": .null, "activeRunId": .null, "status": .string("idle"),
+            "latestRunId": .null, "activeProviderThreadId": .null, "activeRunId": .null,
+            "activityRunStatus": .null, "status": .string("idle"),
             "pendingBackgroundTasks": .array([]), "pullRequests": .array([V2Fixture.watchedPullRequest()]),
         ])
         XCTAssertEqual(OrchestrationV2ThreadLifecycle(shell: watched).runtimeStatus, "idle")
-        XCTAssertEqual(OrchestrationV2Presentation.shellThread(watched).backgroundLiveness, .monitoring)
+        let presented = OrchestrationV2Presentation.shellThread(watched)
+        XCTAssertEqual(presented.backgroundLiveness, .monitoring)
+        XCTAssertEqual(NativeFeatureClient.resolveThreadState(
+            latestTurn: presented.latestTurn, session: presented.session,
+            hasApprovals: false, hasUserInput: false, backgroundLiveness: presented.backgroundLiveness,
+            v2Lifecycle: presented.v2Lifecycle
+        ), .monitoring)
+    }
+
+    func testBackgroundWorkPreservesForegroundExecutionRequestsAndFailures() throws {
+        for (status, expected) in [
+            ("starting", FeatureThreadState.queued), ("running", .working), ("failed", .failed),
+        ] {
+            let source = try shell([
+                "status": .string(status), "activityRunStatus": .string(status),
+                "pendingBackgroundTasks": .array([.object(["kind": .string("monitor")])]),
+            ])
+            let presented = OrchestrationV2Presentation.shellThread(source)
+            func state(approval: Bool = false, input: Bool = false) -> FeatureThreadState {
+                NativeFeatureClient.resolveThreadState(
+                    latestTurn: presented.latestTurn, session: presented.session,
+                    hasApprovals: approval, hasUserInput: input, backgroundLiveness: presented.backgroundLiveness,
+                    v2Lifecycle: presented.v2Lifecycle
+                )
+            }
+            XCTAssertEqual(state(), expected)
+            XCTAssertEqual(state(approval: true), .waitingForApproval)
+            XCTAssertEqual(state(input: true), .waitingForInput)
+        }
     }
 
     func testGoalSurvivesShellAndProviderUpdatesAndExplicitNullClearsIt() throws {

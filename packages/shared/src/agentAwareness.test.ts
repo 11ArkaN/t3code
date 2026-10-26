@@ -122,6 +122,35 @@ describe("projectThreadAwarenessV2", () => {
     ).toMatchObject({ phase: "waiting_for_input", headline: "Waiting for input" });
   });
 
+  it.each(["subagent", "monitor", "background_task", "command"] as const)(
+    "keeps an idle parent waiting on %s visible until its background work ends",
+    (kind) => {
+      const input = {
+        environmentId: "env-1" as EnvironmentId,
+        project,
+        thread: v2Thread({
+          status: "idle",
+          pendingBackgroundTasks: [{ taskId: "background", kind }],
+        }),
+      };
+      const state = projectThreadAwarenessV2(input);
+      if (kind === "command") expect(state).toBeNull();
+      else expect(state?.phase).toBe("running");
+      expect(
+        projectThreadAwarenessV2({
+          ...input,
+          thread: { ...input.thread, pendingBackgroundTasks: [] },
+        }),
+      ).toBeNull();
+      expect(
+        projectThreadAwarenessV2({
+          ...input,
+          thread: { ...input.thread, status: "failed" },
+        })?.phase,
+      ).toBe("failed");
+    },
+  );
+
   it("does not present authentication refreshes as user approvals", () => {
     expect(
       projectThreadAwarenessV2({

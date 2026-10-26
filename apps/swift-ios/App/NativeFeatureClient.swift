@@ -7612,8 +7612,14 @@ final class NativeFeatureClient: FeatureClient, FeatureDeviceManaging,
             case "preparing", "queued", "starting": return .queued
             case "running", "waiting": return .working
             case "failed": return .failed
-            case "completed": return .completed
-            default: return .idle
+            default:
+                // V2 parks parents at idle while background work holds completion.
+                if backgroundLiveness != nil {
+                    if session?.status == "starting" { return .queued }
+                    if session?.status == "running" { return .working }
+                    return backgroundLiveness == .monitoring ? .monitoring : .working
+                }
+                return v2Lifecycle.runtimeStatus == "completed" ? .completed : .idle
             }
         }
         if session?.status == "starting" { return .queued }

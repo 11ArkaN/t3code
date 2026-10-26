@@ -109,6 +109,7 @@ function resolveThreadAwarenessPhaseV2(
     case "failed":
       return "failed";
     case "idle":
+      return backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []) ? "running" : null;
     case "queued":
     case "interrupted":
     case "cancelled":

@@ -23,7 +23,7 @@ enum PlatformAgentAwarenessProjection {
             $0[$1.id] = $0[$1.id] ?? $1
         }
         let eligible = snapshot.threads.filter { thread in
-            guard !thread.isArchived else { return false }
+            guard !thread.isArchived, !thread.isSubagent else { return false }
             if isActive(thread.state) { return true }
             guard thread.state == .completed || thread.state == .failed else { return false }
             return now.timeIntervalSince(thread.updatedAt) < terminalVisibilityWindow
@@ -103,7 +103,7 @@ enum PlatformAgentAwarenessProjection {
     ) -> Date? {
         snapshot.threads.lazy
             .filter {
-                !$0.isArchived && ($0.state == .completed || $0.state == .failed)
+                !$0.isArchived && !$0.isSubagent && ($0.state == .completed || $0.state == .failed)
             }
             .map { $0.updatedAt.addingTimeInterval(terminalVisibilityWindow) }
             .filter { $0 > now }
@@ -182,6 +182,7 @@ final class PlatformAgentAwarenessCoordinator {
         Date
     ) async throws -> Void
     private let endLiveActivities: @MainActor () async -> Void
+    private let saveWidgetSnapshot: @MainActor (T3TaskWidgetSnapshot, Int) async -> Bool
 
     private struct Signature: Equatable {
         let activeCount: Int
@@ -202,6 +203,8 @@ final class PlatformAgentAwarenessCoordinator {
     private var terminalExpiryTask: Task<Void, Never>?
     private var lastSignature: Signature?
     private var inFlightSignature: Signature?
+    private var lastWidgetSignature: Signature?
+    private var inFlightWidgetSignature: Signature?
     private var synchronizationGeneration = 0
     private var widgetGeneration = 0
     private var terminalExpiryGeneration = 0
@@ -220,10 +223,14 @@ final class PlatformAgentAwarenessCoordinator {
         },
         endLiveActivities: @escaping @MainActor () async -> Void = {
             await PlatformAgentAwarenessCoordinator.endAllLiveActivities()
+        },
+        saveWidgetSnapshot: @escaping @MainActor (T3TaskWidgetSnapshot, Int) async -> Bool = {
+            await PlatformWidgetSnapshotWriter.shared.save($0, generation: $1)
         }
     ) {
         self.updateLiveActivity = updateLiveActivity
         self.endLiveActivities = endLiveActivities
+        self.saveWidgetSnapshot = saveWidgetSnapshot
     }
 
     func synchronize(snapshot: FeatureSnapshot, liveActivitiesEnabled: Bool) {
@@ -259,6 +266,11 @@ final class PlatformAgentAwarenessCoordinator {
             enabled: liveActivitiesEnabled,
             now: now
         )
+        // Widget persistence can fail independently of the Live Activity update.
+        scheduleWidgetUpdate(
+            T3TaskWidgetSnapshot(updatedAt: aggregate.updatedAt, tasks: aggregate.activities),
+            signature: signature
+        )
         if signature == lastSignature {
             if inFlightSignature != nil {
                 activityUpdateTask?.cancel()
@@ -269,12 +281,6 @@ final class PlatformAgentAwarenessCoordinator {
             return
         }
         guard signature != inFlightSignature else { return }
-
-        let widgetSnapshot = T3TaskWidgetSnapshot(
-            updatedAt: aggregate.updatedAt,
-            tasks: aggregate.activities
-        )
-        scheduleWidgetUpdate(widgetSnapshot)
 
         schedule(synchronization)
     }
@@ -329,18 +335,23 @@ final class PlatformAgentAwarenessCoordinator {
         }
     }
 
-    private func scheduleWidgetUpdate(_ snapshot: T3TaskWidgetSnapshot) {
+    private func scheduleWidgetUpdate(_ snapshot: T3TaskWidgetSnapshot, signature: Signature? = nil) {
+        if let signature,
+           signature == inFlightWidgetSignature
+            || (widgetUpdateTask == nil && signature == lastWidgetSignature) { return }
         widgetUpdateTask?.cancel()
         widgetGeneration &+= 1
         let generation = widgetGeneration
+        inFlightWidgetSignature = signature
         widgetUpdateTask = Task { @MainActor [weak self] in
-            let saved = await PlatformWidgetSnapshotWriter.shared.save(
-                snapshot,
-                generation: generation
-            )
-            guard let self, saved, widgetGeneration == generation else { return }
-            WidgetCenter.shared.reloadTimelines(ofKind: "T3RecentTasksWidget")
+            guard let self else { return }
+            let saved = await saveWidgetSnapshot(snapshot, generation)
+            guard widgetGeneration == generation else { return }
             widgetUpdateTask = nil
+            inFlightWidgetSignature = nil
+            guard saved else { return }
+            lastWidgetSignature = signature
+            WidgetCenter.shared.reloadTimelines(ofKind: "T3RecentTasksWidget")
         }
     }
 
