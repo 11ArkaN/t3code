@@ -24,6 +24,7 @@ vi.mock("@t3tools/client-runtime/state/review", async () => {
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => mocks.generate }));
 
 import { reviewEnvironment } from "~/state/review";
+import { BackgroundThreadContext } from "../chat/backgroundThread";
 
 import { useCommitDescriptionWarmup } from "./useCommitDescriptionWarmup";
 import { useCommitDescriptions, useCommitMenuSnapshot } from "./useCommitDescriptions";
@@ -164,6 +165,39 @@ function setup() {
     },
   };
 }
+
+it("keeps background chats out of preparation and the active cache owner", async () => {
+  using test = setup();
+  const background = (
+    <BackgroundThreadContext value>
+      <Warmup threadId={ThreadId.make("background-thread")} />
+    </BackgroundThreadContext>
+  );
+  await using screen = await render(test.wrap(background));
+  expect(mocks.branchCommits).not.toHaveBeenCalled();
+  expect(mocks.generate).not.toHaveBeenCalled();
+  await screen.rerender(
+    test.wrap(
+      <>
+        <Warmup />
+        <Probe />
+      </>,
+    ),
+  );
+  await screen.rerender(
+    test.wrap(
+      <>
+        <Warmup />
+        <Probe />
+        {background}
+      </>,
+    ),
+  );
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
+  await test.complete(0);
+  await expect.element(screen.getByLabelText("Summary count")).toHaveTextContent("10");
+  expect(mocks.generate).toHaveBeenCalledTimes(1);
+});
 
 it("prepares the first ten summaries before the menu opens and reuses them on reopening", async () => {
   using test = setup();

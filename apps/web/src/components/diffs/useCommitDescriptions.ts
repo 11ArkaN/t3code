@@ -77,6 +77,7 @@ export function useCommitDescriptions({
   const previous = useRef(atom);
   const shasKey = shas.join(",");
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Register mounted consumers of the shared cache.
   useLayoutEffect(() => {
     if (scope === null) return;
     const owners = registry.get(atom).owners;
@@ -87,6 +88,7 @@ export function useCommitDescriptions({
     };
   }, [atom, registry, scope]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Invalidate pending cache claims when the active scope changes.
   useLayoutEffect(() => {
     const old = prepare
       ? commitDescriptionsAtom(registry.get(activeCommitDescriptionScopeAtom))
@@ -103,6 +105,7 @@ export function useCommitDescriptions({
     );
   }, [atom, prepare, registry, scope]);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- Start provider requests for the visible commit window.
   useEffect(() => {
     if (
       !visible ||
