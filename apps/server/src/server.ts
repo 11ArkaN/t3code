@@ -292,7 +292,7 @@ const layerRelayClient = Layer.unwrap(
   }),
 );
 
-const layerHttpServer = Layer.unwrap(
+export const layerHttpServer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     return NodeHttpServer.layer(
