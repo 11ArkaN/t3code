@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum FeatureMicrophoneKind: String, CaseIterable, Codable {
     case wired, bluetooth, builtIn, carPlay
@@ -101,12 +101,11 @@ enum FeatureMicrophonePriority {
 
 // Microphone hardware and its order belong to this device, across all environments.
 @MainActor
-@Observable
-final class FeatureMicrophonePreferences {
+final class FeatureMicrophonePreferences: ObservableObject {
     static let shared = FeatureMicrophonePreferences()
     private static let key = "t3.microphonePriority"
     private let defaults: UserDefaults
-    private(set) var entries: [FeatureMicrophoneEntry]
+    @Published private(set) var entries: [FeatureMicrophoneEntry]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

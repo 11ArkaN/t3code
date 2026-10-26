@@ -34,7 +34,7 @@ public struct FeatureReviewView: View {
             } else if let review {
                 reviewList(review)
             } else {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     "Review unavailable",
                     systemImage: "doc.text.magnifyingglass",
                     description: Text(errorMessage ?? "Changes could not be loaded.")
@@ -55,7 +55,7 @@ public struct FeatureReviewView: View {
             }
         }
         .task { await load() }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: scenePhase) { _, phase in
             guard phase == .active, review != nil, !isLoading else { return }
             Task { await load() }
         }
@@ -120,7 +120,7 @@ public struct FeatureReviewView: View {
 
             Section("\(review.files.count) changed \(review.files.count == 1 ? "file" : "files")") {
                 if review.files.isEmpty {
-                    ContentUnavailableView(
+                    T3ContentUnavailableView(
                         "No changes",
                         systemImage: "checkmark.circle",
                         description: Text("This source has no changes.")
@@ -301,7 +301,7 @@ private struct FeatureDiffView: View {
                 ProgressView("Loading full diff…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let hydrationError = hydration.errorMessage, hydration.lines.isEmpty {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Couldn’t load this diff", systemImage: "exclamationmark.circle")
                 } description: {
                     Text(hydrationError)
@@ -310,7 +310,7 @@ private struct FeatureDiffView: View {
                         .buttonStyle(.borderedProminent)
                 }
             } else if hydration.lines.isEmpty {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     file.change == .binary ? "Binary file" : "Diff unavailable",
                     systemImage: file.change == .binary ? "doc.richtext" : "doc.text.magnifyingglass",
                     description: Text("No line-level preview is available.")

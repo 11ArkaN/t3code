@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 import XCTest
 @testable import T3Code
 
@@ -94,16 +94,13 @@ final class FeatureV2ItemDetailTests: XCTestCase {
         let context = FeatureV2ItemInspectionContext(threadID: "fork", client: client, state: state)
         let key = FeatureV2TimelineState.Key(threadID: context.threadID, source: item.source)
         let changes = AsyncStream<String>.makeStream()
-        withObservationTracking {
-            _ = state.expandedIDs
-        } onChange: {
+        let expansion = state.$expandedIDs.dropFirst().prefix(1).sink { _ in
             changes.continuation.yield("expansion")
         }
-        withObservationTracking {
-            _ = state.details[key]
-        } onChange: {
+        let details = state.$details.dropFirst().prefix(1).sink { _ in
             changes.continuation.yield("details")
         }
+        defer { expansion.cancel(); details.cancel() }
 
         await state.load(item, context: context)
         changes.continuation.finish()

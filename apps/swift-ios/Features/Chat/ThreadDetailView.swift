@@ -1,6 +1,8 @@
+import Combine
 import ImageIO
 import SwiftUI
 import UIKit
+
 
 public struct ThreadDetailView: View {
     @SwiftUI.Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -9,7 +11,7 @@ public struct ThreadDetailView: View {
     @SwiftUI.Environment(\.openURL) private var parentOpenURL
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
 
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let thread: FeatureThread
     let submitMessage: (FeatureMessageSubmission) async -> Bool
     let onNavigateBack: () -> Void
@@ -75,6 +77,7 @@ public struct ThreadDetailView: View {
     @State private var scriptLaunchError: String?
     @State private var remoteDeviceCount = 0
     @State private var browserObserver: FeatureServerBrowserModel?
+    @State private var browserCount = 0
     @State private var showsThreadQueue = false
     @State private var isUpdatingQueue = false
     @State private var queueActionError: String?
@@ -83,7 +86,7 @@ public struct ThreadDetailView: View {
     @State private var isUpdatingWorkflow = false
     @State private var workflowError: String?
     @State private var workflowTask: Task<Void, Never>?
-    @State private var v2TimelineState = FeatureV2TimelineState()
+    @StateObject private var v2TimelineState = FeatureV2TimelineState()
     @State private var visitCoordinator = FeatureThreadVisitCoordinator()
     // Plain state, not `FocusState`: the composer's UIKit text view owns
     // focus and mirrors it through this binding, because SwiftUI drops
@@ -284,7 +287,7 @@ public struct ThreadDetailView: View {
                         if let client = model.client as? any FeatureRemoteDeviceManaging {
                             FeatureRemoteDevicesView(threadID: thread.id, client: client)
                         } else {
-                            ContentUnavailableView("Devices unavailable", systemImage: "iphone")
+                            T3ContentUnavailableView("Devices unavailable", systemImage: "iphone")
                         }
                     case let .terminal(sessionID):
                         FeatureTerminalView(client: model.client, threadID: thread.id, initialTerminalID: sessionID) { record in
@@ -324,29 +327,29 @@ public struct ThreadDetailView: View {
 
     private var observedThreadContent: AnyView {
         let content = loadedThreadContent
-        .onChange(of: thread.id) { v2TimelineState.reset() }
-        .onChange(of: linkedPromptApplicationKey, initial: true) { _, _ in
+        .t3OnChange(of: thread.id) { v2TimelineState.reset() }
+        .t3OnChange(of: linkedPromptApplicationKey, initial: true) { _, _ in
             applyLinkedPromptIfPossible()
         }
         // A child observes the text so keystrokes do not re-run this body.
         .background(FeatureDraftTextObserver(text: $draft, onChange: scheduleDraftSave))
-        .onChange(of: selection) { scheduleDraftSave() }
-        .onChange(of: draftRuntimeMode) { scheduleDraftSave() }
-        .onChange(of: draftInteractionMode) { scheduleDraftSave() }
-        .onChange(of: selection) { usageLimitsReport = nil }
-        .onChange(of: currentThread.modelID) { usageLimitsReport = nil }
-        .onChange(of: currentThread.inboxFacts?.latestRunID) { usageLimitsReport = nil }
-        .onChange(of: model.recoveredRewindDrafts[thread.id]) { _, recovered in
+        .t3OnChange(of: selection) { scheduleDraftSave() }
+        .t3OnChange(of: draftRuntimeMode) { scheduleDraftSave() }
+        .t3OnChange(of: draftInteractionMode) { scheduleDraftSave() }
+        .t3OnChange(of: selection) { usageLimitsReport = nil }
+        .t3OnChange(of: currentThread.modelID) { usageLimitsReport = nil }
+        .t3OnChange(of: currentThread.inboxFacts?.latestRunID) { usageLimitsReport = nil }
+        .t3OnChange(of: model.recoveredRewindDrafts[thread.id]) { _, recovered in
             if recovered != nil { restoreRewindDraft() }
         }
-        .onChange(of: threadConnectionState) { _, state in
+        .t3OnChange(of: threadConnectionState) { _, state in
             if state == .connected,
                case .failed = model.detailLoadStates[thread.id],
                !isLoading {
                 reloadThread()
             }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: scenePhase) { _, phase in
             updateVisibleThread()
             if phase != .active {
                 persistDraftBeforeLeaving()
@@ -382,33 +385,33 @@ public struct ThreadDetailView: View {
         .task(id: didRestoreDraft) {
             await restoreQueuedEditIfNeeded()
         }
-        .onChange(of: detail?.execution) { _, execution in
+        .t3OnChange(of: detail?.execution) { _, execution in
             guard let edit = currentQueuedEdit, let execution,
                   !edit.isStillQueued(in: execution), !isUpdatingQueue, !isTransferringDraft,
                   refreshPresentation == nil else { return }
             recoverStartedQueueEdit()
         }
-        .onChange(of: refreshPresentation) { _, presentation in
+        .t3OnChange(of: refreshPresentation) { _, presentation in
             if presentation == nil { recoverStartedQueueEdit() }
         }
-        .onChange(of: isPreparingInput) { _, preparing in
+        .t3OnChange(of: isPreparingInput) { _, preparing in
             if !preparing {
                 Task { await restoreQueuedEditIfNeeded() }
                 recoverStartedQueueEdit()
             }
         }
-        .onChange(of: isTransferringDraft) { _, transferring in
+        .t3OnChange(of: isTransferringDraft) { _, transferring in
             if !transferring, !didRestoreQueuedEdit, queueActionError == nil {
                 Task { await restoreQueuedEditIfNeeded() }
             }
         }
-        .onChange(of: isRewinding) { _, rewinding in
+        .t3OnChange(of: isRewinding) { _, rewinding in
             if !rewinding { Task { await restoreQueuedEditIfNeeded() } }
         }
-        .onChange(of: isUpdatingQueue) { _, updating in
+        .t3OnChange(of: isUpdatingQueue) { _, updating in
             if !updating { Task { await restoreQueuedEditIfNeeded() } }
         }
-        .onChange(of: toolSurface) { _, surface in
+        .t3OnChange(of: toolSurface) { _, surface in
             onToolDestinationChange(surface?.destination)
         }
         .onAppear { updateVisibleThread() }
@@ -459,7 +462,10 @@ public struct ThreadDetailView: View {
             defer { observer.suspend() }
             await observer.watch()
         }
-        .onChange(of: browserObserver?.revealRequest) { _, request in
+        .onReceive(browserObserver?.$state.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) { state in
+            browserCount = state?.tabs.count ?? 0
+        }
+        .onReceive(browserObserver?.$revealRequest.eraseToAnyPublisher() ?? Empty().eraseToAnyPublisher()) { request in
             guard let request, isPresentedThread, scenePhase == .active else { return }
             if toolSurface == nil || request.force { presentTool(.browser(request.tabID)) }
             browserObserver?.consumeReveal()
@@ -481,7 +487,7 @@ public struct ThreadDetailView: View {
             } else if isLoading {
                 FeatureThreadOpeningView()
             } else {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Thread unavailable", systemImage: "exclamationmark.bubble")
                 } description: {
                     Text("The thread could not be loaded.")
@@ -651,7 +657,7 @@ public struct ThreadDetailView: View {
         }
         .environment(\.openURL, transcriptOpenURL)
         .environment(\.featureThreadPresentationDismissal, transcriptPresentationDismissal)
-        .onChange(of: rootNavigationDismissalID, initial: true) { _, _ in
+        .t3OnChange(of: rootNavigationDismissalID, initial: true) { _, _ in
             dismissPresentationsForRootNavigation()
         }
         .fullScreenCover(item: $linkedMediaPreview, onDismiss: threadPresentationDidDismiss) { preview in
@@ -1013,7 +1019,7 @@ public struct ThreadDetailView: View {
                     toolSurface = .terminal($0)
                 }
                 if supportsServerBrowser {
-                    Button("Browser (\(browserObserver?.count ?? 0))", systemImage: "globe") {
+                    Button("Browser (\(browserCount))", systemImage: "globe") {
                         presentTool(.browser(nil))
                     }
                 }
@@ -1311,7 +1317,7 @@ public struct ThreadDetailView: View {
         return Group {
             if detail.messages.isEmpty, !hasActiveWork {
                 if refreshPresentation == nil {
-                    ContentUnavailableView(
+                    T3ContentUnavailableView(
                         "Ready for a task",
                         systemImage: "sparkles",
                         description: Text("Tell the agent what you want to build.")
@@ -2634,7 +2640,7 @@ private struct FeatureDraftTextObserver: View {
     let onChange: () -> Void
 
     var body: some View {
-        Color.clear.onChange(of: text) { onChange() }
+        Color.clear.t3OnChange(of: text) { onChange() }
     }
 }
 
@@ -4277,10 +4283,10 @@ struct FeatureMessageView: View {
                 }
                 return .handled
             })
-            .onChange(of: previewedContext != nil) { _, presented in
+            .t3OnChange(of: previewedContext != nil) { _, presented in
                 if presented { presentationDismissal.onPresentationChange(presentationID, true) }
             }
-            .onChange(of: presentationDismissal.requestID) { _, id in
+            .t3OnChange(of: presentationDismissal.requestID) { _, id in
                 if id != nil {
                     if !contextAttachmentPresented { previewedContext = nil }
                     contextUnavailable = false
@@ -4623,10 +4629,10 @@ struct FeatureMessageAttachmentsView: View {
                     .id("\(context?.threadID ?? ""):attachment:\(attachment.id)")
                 }
             }
-            .onChange(of: previewedAttachment != nil) { _, presented in
+            .t3OnChange(of: previewedAttachment != nil) { _, presented in
                 if presented { presentationDismissal.onPresentationChange(presentationID, true) }
             }
-            .onChange(of: presentationDismissal.requestID) { _, id in
+            .t3OnChange(of: presentationDismissal.requestID) { _, id in
                 if id != nil { previewedAttachment = nil }
             }
             .fullScreenCover(item: $previewedAttachment, onDismiss: {

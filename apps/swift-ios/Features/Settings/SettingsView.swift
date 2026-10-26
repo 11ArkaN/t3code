@@ -6,7 +6,7 @@ enum FeatureSettingsDestination: Hashable {
 
 public struct SettingsView: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
-    @Bindable private var model: FeatureRootModel
+    @ObservedObject private var model: FeatureRootModel
     @State private var saveErrorMessage: String?
     @State private var isPresented = false
     @State private var path: [FeatureSettingsDestination] = []
@@ -75,7 +75,7 @@ public struct SettingsView: View {
             isPresented = false
             model.setConnectionManagementPresented(false)
         }
-        .presentationBackground(T3Colors.background)
+        .t3PresentationBackground(T3Colors.background)
         .presentationDragIndicator(.visible)
         .t3CodeSizing(steps: model.snapshot.settings.codeSize.steps)
     }
@@ -427,10 +427,10 @@ private struct SettingsAppearanceView: View {
 }
 
 private struct SettingsNotificationsView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     @Binding var notificationsEnabled: Bool
     @State private var desiredLiveActivities = false
-    private let delivery = PlatformCloudDeliveryCoordinator.shared
+    @ObservedObject private var delivery = PlatformCloudDeliveryCoordinator.shared
 
     private var candidates: [FeatureEnvironment] {
         model.snapshot.environments.filter { $0.isEnabled && $0.source == .direct }

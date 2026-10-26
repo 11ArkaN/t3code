@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GitHubSettingsView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let environmentID: String
     @State private var settings: ServerGitHubSettings?
     @State private var auth: SourceControlProviderAuth?

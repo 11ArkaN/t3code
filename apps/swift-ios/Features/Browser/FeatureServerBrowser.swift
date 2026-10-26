@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 enum FeatureServerBrowserUpdate: Sendable {
     case list(threadID: String, value: ServerBrowserList)
@@ -30,21 +30,20 @@ struct FeatureServerBrowserReveal: Identifiable, Equatable {
 
 /// One instance can observe count/reveal state in a thread without starting a
 /// browser stream. Only the visible viewer calls connect().
-@MainActor @Observable
-final class FeatureServerBrowserModel {
+@MainActor final class FeatureServerBrowserModel: ObservableObject {
     let threadID: String
-    private(set) var state: ServerBrowserTabs?
-    private(set) var selectedID: String?
-    private(set) var revealRequest: FeatureServerBrowserReveal?
-    private(set) var connection: FeatureServerBrowserConnection?
-    private(set) var stream = ServerBrowserStreamState()
-    private(set) var error: String?
-    private(set) var attempt = 0
-    @ObservationIgnored private let client: any FeatureServerBrowserManaging
-    @ObservationIgnored private var knownReveals: [String: String]?
-    @ObservationIgnored private var watchGeneration = 0
-    @ObservationIgnored private var accessGeneration = 0
-    @ObservationIgnored private var refusals = 0
+    @Published private(set) var state: ServerBrowserTabs?
+    @Published private(set) var selectedID: String?
+    @Published private(set) var revealRequest: FeatureServerBrowserReveal?
+    @Published private(set) var connection: FeatureServerBrowserConnection?
+    @Published private(set) var stream = ServerBrowserStreamState()
+    @Published private(set) var error: String?
+    @Published private(set) var attempt = 0
+    private let client: any FeatureServerBrowserManaging
+    private var knownReveals: [String: String]?
+    private var watchGeneration = 0
+    private var accessGeneration = 0
+    private var refusals = 0
 
     init(threadID: String, client: any FeatureServerBrowserManaging, initialTabID: String? = nil) {
         self.threadID = threadID

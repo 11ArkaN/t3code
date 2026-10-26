@@ -1,4 +1,4 @@
-import Observation
+import Combine
 import SwiftUI
 import UIKit
 
@@ -25,20 +25,19 @@ enum FeatureStorageMaintenanceError: LocalizedError {
 }
 
 @MainActor
-@Observable
-final class FeatureStorageMaintenanceModel {
+final class FeatureStorageMaintenanceModel: ObservableObject {
     let environmentID: String
     private let client: any FeatureStorageMaintenance
     private var generation = FeatureAsyncGeneration()
-    private(set) var availability: FeatureStorageMaintenanceAvailability?
-    private(set) var database: DatabaseStorageStatus?
-    private(set) var report: StorageCleanupReport?
-    private(set) var availabilityError: String?
-    private(set) var databaseError: String?
-    private(set) var reportError: String?
-    private(set) var runError: String?
-    private(set) var running = false
-    private(set) var reportLoaded = false
+    @Published private(set) var availability: FeatureStorageMaintenanceAvailability?
+    @Published private(set) var database: DatabaseStorageStatus?
+    @Published private(set) var report: StorageCleanupReport?
+    @Published private(set) var availabilityError: String?
+    @Published private(set) var databaseError: String?
+    @Published private(set) var reportError: String?
+    @Published private(set) var runError: String?
+    @Published private(set) var running = false
+    @Published private(set) var reportLoaded = false
 
     init(environmentID: String, client: any FeatureStorageMaintenance) {
         self.environmentID = environmentID
@@ -128,7 +127,7 @@ final class FeatureStorageMaintenanceModel {
 /// Mount inside the destination environment's Form, outside a settings-write disabled group.
 @MainActor
 struct FeatureStorageMaintenanceView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let environmentID: String
     var settings: ServerSettingsSnapshot? = nil
 
@@ -150,7 +149,7 @@ private struct FeatureStorageMaintenanceSections: View {
     let environmentLabel: String
     let settings: ServerSettingsSnapshot?
     let permissions: EnvironmentPermissionState?
-    @State private var model: FeatureStorageMaintenanceModel
+    @StateObject private var model: FeatureStorageMaintenanceModel
     @State private var refreshID = 0
     @AppStorage private var databaseNoticeDismissed: Bool
 
@@ -159,7 +158,7 @@ private struct FeatureStorageMaintenanceSections: View {
         self.environmentLabel = environmentLabel
         self.settings = settings
         self.permissions = permissions
-        _model = State(initialValue: .init(environmentID: environmentID, client: storage))
+        _model = StateObject(wrappedValue: .init(environmentID: environmentID, client: storage))
         _databaseNoticeDismissed = AppStorage(wrappedValue: false, "database-storage-notice-dismissed:\(environmentID)")
     }
 
@@ -186,8 +185,8 @@ private struct FeatureStorageMaintenanceSections: View {
         }
         .listRowBackground(Color.black)
         .task(id: refreshID) { await model.observe() }
-        .onChange(of: settings) { _, _ in if !model.running { refreshID += 1 } }
-        .onChange(of: permissions) { _, _ in if !model.running { refreshID += 1 } }
+        .t3OnChange(of: settings) { _, _ in if !model.running { refreshID += 1 } }
+        .t3OnChange(of: permissions) { _, _ in if !model.running { refreshID += 1 } }
     }
 
     @ViewBuilder

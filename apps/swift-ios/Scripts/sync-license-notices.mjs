@@ -16,7 +16,7 @@ const resolved = JSON.parse(
     "utf8",
   ),
 );
-const bundled = [
+let bundled = [
   {
     name: "GhosttyKit",
     version: "cf8edc23f3a6a87a96e41a90013e89e987d34980",
@@ -207,7 +207,7 @@ const swiftPackages = resolved.pins.map((pin) => ({
   name:
     { "clerk-ios": "Clerk", nuke: "Nuke", phonenumberkit: "PhoneNumberKit" }[pin.identity] ??
     pin.identity,
-  version: pin.state.version,
+  version: pin.state.version ?? pin.state.revision,
   revision: pin.state.revision,
   url:
     pin.location
@@ -226,10 +226,13 @@ const ghosttyRevision = ghosttyNotice.match(/Vendored revision: `([a-f0-9]+)`/)?
 if (bundled.find((source) => source.name === "GhosttyKit").version !== ghosttyRevision) {
   throw new Error("Review the native license sources after updating GhosttyKit.");
 }
-const phoneNumberVersion = resolved.pins.find((pin) => pin.identity === "phonenumberkit").state
-  .version;
-bundled.find((source) => source.name === "libphonenumber metadata").version =
-  "PhoneNumberKit " + phoneNumberVersion;
+const phoneNumberVersion = resolved.pins.find((pin) => pin.identity === "phonenumberkit")?.state.version;
+if (phoneNumberVersion) {
+  bundled.find((source) => source.name === "libphonenumber metadata").version =
+    "PhoneNumberKit " + phoneNumberVersion;
+} else {
+  bundled = bundled.filter((source) => source.name !== "libphonenumber metadata");
+}
 
 if (process.argv.includes("--check")) {
   const saved = JSON.parse(await NodeFSP.readFile(output, "utf8"));

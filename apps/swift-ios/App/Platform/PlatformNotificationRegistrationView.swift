@@ -6,8 +6,8 @@ import UserNotifications
 /// APNs or the account relay has accepted this installation.
 struct PlatformNotificationRegistrationView: View {
     let settings: FeatureSettings
-    private let notifications = PlatformNotificationService.shared
-    private let delivery = PlatformCloudDeliveryCoordinator.shared
+    @ObservedObject private var notifications = PlatformNotificationService.shared
+    @ObservedObject private var delivery = PlatformCloudDeliveryCoordinator.shared
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
     @State private var liveActivitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
 
@@ -48,7 +48,7 @@ struct PlatformNotificationRegistrationView: View {
         }
         .font(T3Typography.supporting)
         .task { await notifications.refreshPermissionStatus() }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: scenePhase) { _, phase in
             if phase == .active {
                 liveActivitiesAllowed = ActivityAuthorizationInfo().areActivitiesEnabled
                 Task { await notifications.refreshPermissionStatus() }

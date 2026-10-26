@@ -8,7 +8,7 @@ public struct FeatureFilesView: View {
     let initialLine: Int?
     let workspaceRoot: String?
 
-    @State private var browser = FeatureFileBrowserState()
+    @StateObject private var browser = FeatureFileBrowserState()
 
     public init(
         client: any FeatureClient,
@@ -27,7 +27,7 @@ public struct FeatureFilesView: View {
     public var body: some View {
         Group {
             if client.permissions(forThreadID: threadID)?.grants("filesystem:read") != true {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     "Files unavailable", systemImage: "folder.badge.questionmark",
                     description: Text("This connection needs the filesystem:read permission.")
                 )
@@ -64,14 +64,14 @@ public struct FeatureFilesView: View {
 
 private struct FeatureFileDirectoryView: View {
     let client: any FeatureClient
-    let browser: FeatureFileBrowserState
+    @ObservedObject var browser: FeatureFileBrowserState
     let threadID: String
     let path: String?
     let title: String
     let workspaceRoot: String?
 
     @State private var searchText = ""
-    @State private var search = FeatureFileSearchState()
+    @StateObject private var search = FeatureFileSearchState()
     @State private var includesHidden = false
 
     private var directory: FeatureFileBrowserState.Directory {
@@ -116,14 +116,14 @@ private struct FeatureFileDirectoryView: View {
                     .foregroundStyle(T3Colors.textSecondary)
                     .listRowBackground(Color.clear)
             } else if filteredEntries.isEmpty, errorMessage != nil {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     "Files unavailable",
                     systemImage: "folder.badge.questionmark"
                 )
                 .listRowBackground(Color.clear)
             }
             if !isLoading, errorMessage == nil, filteredEntries.isEmpty {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     isSearching ? "No matches" : "Empty folder",
                     systemImage: "folder",
                     description: Text(isSearching ? "Try another search." : "This folder has no visible files.")
@@ -344,7 +344,7 @@ private struct FeatureFilePreviewView: View {
                     .padding(12)
             }
             if !supportsPreview {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Preview not supported", systemImage: "doc.badge.ellipsis")
                 } description: {
                     Text("This file type cannot be previewed from the workspace.")
@@ -386,7 +386,7 @@ private struct FeatureFilePreviewView: View {
                     FeatureSourceTextView(lines: sourceLines, wrapsLines: wrapsLines, initialLine: initialLine)
                 }
             } else if !isLoading {
-                ContentUnavailableView("File unavailable", systemImage: "doc.badge.ellipsis")
+                T3ContentUnavailableView("File unavailable", systemImage: "doc.badge.ellipsis")
             } else {
                 Spacer()
             }
@@ -568,7 +568,7 @@ private struct FeatureSourceTextView: View {
                     .frame(minHeight: proxy.size.height, alignment: .topLeading)
                     .textSelection(.enabled)
                 }
-                .onChange(of: selectedLine, initial: true) { _, line in
+                .t3OnChange(of: selectedLine, initial: true) { _, line in
                     if let line { scroll.scrollTo(line, anchor: .top) }
                 }
             }

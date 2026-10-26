@@ -143,9 +143,9 @@ struct FeatureImageAttachmentPicker: View {
         } message: {
             Text(errorMessage ?? "")
         }
-        .onChange(of: draftOwnerID) { cancelSelection() }
-        .onChange(of: environmentID) { cancelSelection() }
-        .onChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
+        .t3OnChange(of: draftOwnerID) { cancelSelection() }
+        .t3OnChange(of: environmentID) { cancelSelection() }
+        .t3OnChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
             if requestID != nil { cancelSelection() }
         }
     }

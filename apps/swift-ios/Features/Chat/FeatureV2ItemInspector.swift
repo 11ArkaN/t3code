@@ -1,4 +1,4 @@
-import Observation
+import Combine
 import SwiftUI
 import UIKit
 
@@ -9,8 +9,7 @@ public protocol FeatureV2ItemInspecting: AnyObject {
 
 /// Owned by the thread view, so disclosure and fetched output survive cell reuse.
 @MainActor
-@Observable
-final class FeatureV2TimelineState {
+final class FeatureV2TimelineState: ObservableObject {
     struct Key: Hashable {
         var threadID: String
         var sourceThreadID: String
@@ -29,10 +28,10 @@ final class FeatureV2TimelineState {
         case missing
         case failed(String)
     }
-    var expandedIDs: Set<String> = []
-    private(set) var details: [Key: DetailState] = [:]
-    @ObservationIgnored private var tasks: [Key: Task<Void, Never>] = [:]
-    @ObservationIgnored private var recency: [Key] = []
+    @Published var expandedIDs: Set<String> = []
+    @Published private(set) var details: [Key: DetailState] = [:]
+    private var tasks: [Key: Task<Void, Never>] = [:]
+    private var recency: [Key] = []
 
     func reset() {
         for task in tasks.values { task.cancel() }
@@ -97,7 +96,7 @@ struct FeatureV2WorkLogView: View {
     let context: FeatureV2ItemInspectionContext
     let imageContext: MarkdownImageContext?
     let attachmentContext: FeatureAttachmentContext?
-    private let state: FeatureV2TimelineState
+    @ObservedObject private var state: FeatureV2TimelineState
 
     init(message: FeatureMessage, context: FeatureV2ItemInspectionContext,
          imageContext: MarkdownImageContext?, attachmentContext: FeatureAttachmentContext?) {
@@ -146,7 +145,7 @@ struct FeatureV2ItemInspector: View {
     let attachmentContext: FeatureAttachmentContext?
     let title: String?
     let linkedID: String?
-    private let state: FeatureV2TimelineState
+    @ObservedObject private var state: FeatureV2TimelineState
 
     init(item: FeatureV2WorkItem, context: FeatureV2ItemInspectionContext,
          imageContext: MarkdownImageContext?, attachmentContext: FeatureAttachmentContext?, title: String? = nil, linkedID: String? = nil) {
@@ -245,7 +244,7 @@ private struct FeatureV2ExpandedItem: View {
     let context: FeatureV2ItemInspectionContext
     let imageContext: MarkdownImageContext?
     let attachmentContext: FeatureAttachmentContext?
-    private let state: FeatureV2TimelineState
+    @ObservedObject private var state: FeatureV2TimelineState
     @State private var fullText: String?
     @State private var formatted: FeatureV2FormattedItem?
     @StateObject private var commandOutput = FeatureCommandOutputState()
@@ -344,10 +343,10 @@ private struct FeatureV2ExpandedItem: View {
             await state.load(item, context: context)
         }
         .onDisappear { commandOutput.reset() }
-        .onChange(of: fullText != nil) { _, presented in
+        .t3OnChange(of: fullText != nil) { _, presented in
             if presented { presentationDismissal.onPresentationChange(presentationID, true) }
         }
-        .onChange(of: presentationDismissal.requestID) { _, id in
+        .t3OnChange(of: presentationDismissal.requestID) { _, id in
             guard id != nil else { return }
             fullText = nil
             if !fullOutputDidAppear {
@@ -447,7 +446,7 @@ private struct FeatureV2HandoffEndpoints: View {
 struct FeatureV2TurnFoldButton: View {
     let id: String
     let label: String
-    let state: FeatureV2TimelineState
+    @ObservedObject var state: FeatureV2TimelineState
 
     var body: some View {
         Button { state.toggle(id) } label: {

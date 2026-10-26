@@ -42,7 +42,7 @@ struct FeatureAttachmentDocumentView: View {
                         FeatureAttachmentLinkPolicy.allowsExternal(url) ? .systemAction : .discarded
                     })
             } else if let errorMessage {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Source unavailable", systemImage: "doc.badge.ellipsis")
                 } description: { Text(errorMessage) } actions: {
                     Button("Try again") { revision += 1 }
@@ -234,7 +234,7 @@ struct FeatureBrowserPreviewView: View {
     var body: some View {
         Group {
             if let errorMessage {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Preview unavailable", systemImage: "doc.badge.ellipsis")
                 } description: { Text(errorMessage) } actions: {
                     Button("Try again") { revision += 1 }
@@ -257,8 +257,8 @@ struct FeatureBrowserPreviewView: View {
                 errorMessage = error.localizedDescription
             }
         }
-        .onChange(of: url) { _, _ in revision += 1 }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: url) { _, _ in revision += 1 }
+        .t3OnChange(of: scenePhase) { _, phase in
             if phase == .active, resolveURL != nil { revision += 1 }
         }
     }

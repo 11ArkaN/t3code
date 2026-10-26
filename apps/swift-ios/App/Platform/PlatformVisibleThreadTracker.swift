@@ -1,10 +1,9 @@
 import Foundation
-import Observation
+import Combine
 
 /// Scene navigation owns this state. Wire IDs are never compared across hosts.
 @MainActor
-@Observable
-final class PlatformVisibleThreadTracker {
+final class PlatformVisibleThreadTracker: ObservableObject {
     static let shared = PlatformVisibleThreadTracker()
 
     struct Thread: Equatable, Sendable {
@@ -12,7 +11,7 @@ final class PlatformVisibleThreadTracker {
         let wireID: String
     }
 
-    private(set) var visibleThread: Thread?
+    @Published private(set) var visibleThread: Thread?
 
     func setVisibleThread(environmentID: String, wireID: String) {
         visibleThread = Thread(environmentID: environmentID, wireID: wireID)

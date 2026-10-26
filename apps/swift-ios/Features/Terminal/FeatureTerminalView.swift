@@ -233,7 +233,7 @@ public struct FeatureTerminalView: View {
                     .tint(T3Colors.textPrimary)
                     .foregroundStyle(T3Colors.textPrimary)
             } else if let errorMessage, terminal == nil {
-                ContentUnavailableView(
+                T3ContentUnavailableView(
                     "Terminal unavailable",
                     systemImage: "terminal",
                     description: Text(errorMessage)
@@ -269,8 +269,8 @@ public struct FeatureTerminalView: View {
         }
         .onAppear { inputSession.attach(to: inputTarget) }
         .onDisappear { inputSession.detach() }
-        .onChange(of: canOperate) { _, _ in inputSession.updateTarget(inputTarget) }
-        .onChange(of: threadID) { _, _ in
+        .t3OnChange(of: canOperate) { _, _ in inputSession.updateTarget(inputTarget) }
+        .t3OnChange(of: threadID) { _, _ in
             updateTerminal(nil)
             sessions = []
             activeTerminalID = initialTerminalID ?? "default"
@@ -278,7 +278,7 @@ public struct FeatureTerminalView: View {
             errorMessage = nil
             scriptErrorMessage = nil
         }
-        .onChange(of: initialTerminalID) { _, terminalID in
+        .t3OnChange(of: initialTerminalID) { _, terminalID in
             if let terminalID { selectTerminal(terminalID) }
         }
         .task(id: threadID) {

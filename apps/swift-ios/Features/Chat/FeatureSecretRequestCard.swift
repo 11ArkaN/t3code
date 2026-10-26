@@ -115,8 +115,8 @@ struct FeatureSecretRequestCard: View {
         .font(T3Typography.supporting)
         .foregroundStyle(T3Colors.textPrimary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onChange(of: item.raw["secretStatus"]) { _, _ in controller.clear() }
-        .onChange(of: context?.canAnswer) { _, canAnswer in controller.updatePermission(canAnswer) }
+        .t3OnChange(of: item.raw["secretStatus"]) { _, _ in controller.clear() }
+        .t3OnChange(of: context?.canAnswer) { _, canAnswer in controller.updatePermission(canAnswer) }
         .onDisappear { controller.clear() }
     }
 }

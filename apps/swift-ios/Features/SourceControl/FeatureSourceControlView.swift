@@ -74,7 +74,7 @@ public struct FeatureSourceControlView: View {
                 } else if let status, status.isRepository {
                     statusList(status)
                 } else {
-                    ContentUnavailableView(
+                    T3ContentUnavailableView(
                         "Source control unavailable",
                         systemImage: "arrow.triangle.branch",
                         description: Text(
@@ -143,19 +143,19 @@ public struct FeatureSourceControlView: View {
         .navigationDestination(isPresented: $showsBranches) {
             FeatureGitBranchesView(client: client, threadID: threadID)
         }
-        .onChange(of: showsBranches) { _, visible in
+        .t3OnChange(of: showsBranches) { _, visible in
             if !visible { Task { await reload() } }
         }
-        .onChange(of: recovery.failure?.id) { _, failureID in
+        .t3OnChange(of: recovery.failure?.id) { _, failureID in
             guard failureID != nil else { return }
             recoveryFocus = .failure
         }
-        .onChange(of: recovery.recoveryAnnouncement) { _, _ in
+        .t3OnChange(of: recovery.recoveryAnnouncement) { _, _ in
             guard let announcement = recovery.takeRecoveryAnnouncement() else { return }
             recoveryFocus = .recoveredContent
-            AccessibilityNotification.Announcement(announcement).post()
+            UIAccessibility.post(notification: .announcement, argument: announcement)
         }
-        .onChange(of: status) { _, _ in
+        .t3OnChange(of: status) { _, _ in
             openCommitDestinationIfNeeded()
         }
         .task(id: initialDestination) {

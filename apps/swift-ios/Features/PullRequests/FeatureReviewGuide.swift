@@ -1,4 +1,4 @@
-import Observation
+import Combine
 import SwiftUI
 
 struct FeatureReviewGuideAccess: Equatable, Sendable {
@@ -64,17 +64,16 @@ enum FeatureReviewGuideTour {
 }
 
 @MainActor
-@Observable
-final class FeatureReviewGuideModel {
+final class FeatureReviewGuideModel: ObservableObject {
     private let client: any FeatureReviewGuideClient
     private let target: FeaturePullRequestTarget
     private var readGeneration = 0
-    var access: FeatureReviewGuideAccess?
-    var data: PullRequestReviewGuideResult?
-    var isStarting = false
-    var errorMessage: String?
-    var startError: String?
-    var observationID = 0
+    @Published var access: FeatureReviewGuideAccess?
+    @Published var data: PullRequestReviewGuideResult?
+    @Published var isStarting = false
+    @Published var errorMessage: String?
+    @Published var startError: String?
+    @Published var observationID = 0
 
     init(client: any FeatureReviewGuideClient, target: FeaturePullRequestTarget) {
         self.client = client
@@ -146,8 +145,6 @@ struct FeatureReviewGuideView: View {
     private let onFinish: ((String) -> Void)?
     private let boundSelection: Binding<FeatureReviewGuideStopSelection?>?
     @State private var model: FeatureReviewGuideModel?
-    @State private var localSelection: FeatureReviewGuideStopSelection?
-    @SwiftUI.Environment(\.scenePhase) private var scenePhase
 
     init(client: any FeatureClient, target: FeaturePullRequestTarget,
          selection: Binding<FeatureReviewGuideStopSelection?>? = nil,
@@ -163,6 +160,28 @@ struct FeatureReviewGuideView: View {
         })
     }
 
+    var body: some View {
+        if let model {
+            FeatureReviewGuideContent(
+                client: client, target: target, onOpenFile: onOpenFile,
+                onFinish: onFinish, boundSelection: boundSelection, model: model
+            )
+        } else {
+            Text("Review guides are not available on this client.")
+        }
+    }
+}
+
+private struct FeatureReviewGuideContent: View {
+    let client: any FeatureClient
+    let target: FeaturePullRequestTarget
+    let onOpenFile: (FeatureReviewGuideFileLocation) -> Void
+    let onFinish: ((String) -> Void)?
+    let boundSelection: Binding<FeatureReviewGuideStopSelection?>?
+    @ObservedObject var model: FeatureReviewGuideModel
+    @State private var localSelection: FeatureReviewGuideStopSelection?
+    @SwiftUI.Environment(\.scenePhase) private var scenePhase
+
     private var selection: FeatureReviewGuideStopSelection? {
         get {
             if let boundSelection { return boundSelection.wrappedValue }
@@ -177,26 +196,22 @@ struct FeatureReviewGuideView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if let model {
-                    if model.access?.enabled == false {
-                        Text("Review guides are disabled for this server.")
-                    } else {
-                        notice(model)
-                        if let guide = model.data?.guide {
-                            if let selection {
-                                if selection.matches(guide), guide.stops.indices.contains(selection.position) {
-                                    stop(guide, selection: selection, model: model)
-                                } else {
-                                    Text("This guide was rewritten. Return to the outline to start the new tour.")
-                                    Button("Back to outline") { self.selection = nil }
-                                }
+                if model.access?.enabled == false {
+                    Text("Review guides are disabled for this server.")
+                } else {
+                    notice(model)
+                    if let guide = model.data?.guide {
+                        if let selection {
+                            if selection.matches(guide), guide.stops.indices.contains(selection.position) {
+                                stop(guide, selection: selection, model: model)
                             } else {
-                                outline(guide, model: model)
+                                Text("This guide was rewritten. Return to the outline to start the new tour.")
+                                Button("Back to outline") { self.selection = nil }
                             }
+                        } else {
+                            outline(guide, model: model)
                         }
                     }
-                } else {
-                    Text("Review guides are not available on this client.")
                 }
             }
             .frame(maxWidth: 760, alignment: .leading)
@@ -206,11 +221,11 @@ struct FeatureReviewGuideView: View {
         .foregroundStyle(T3Colors.textPrimary)
         .background(T3Colors.background)
         .navigationTitle(selection.map { "Stop \($0.position + 1)" } ?? "Review guide")
-        .task(id: "\(scenePhase):\(model?.observationID ?? 0):\(model?.data?.isRunning == true)") {
+        .task(id: "\(scenePhase):\(model.observationID):\(model.data?.isRunning == true)") {
             guard scenePhase == .active else { return }
-            await model?.observe()
+            await model.observe()
         }
-        .refreshable { await model?.refresh() }
+        .refreshable { await model.refresh() }
     }
 
     @ViewBuilder

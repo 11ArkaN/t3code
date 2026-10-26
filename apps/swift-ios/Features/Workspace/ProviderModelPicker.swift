@@ -120,7 +120,7 @@ public struct ProviderModelPicker: View {
                 if presentationDismissal.requestID != nil { isPresented = false }
             }
         }
-        .onChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
+        .t3OnChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
             guard requestID != nil else { return }
             isPresented = false
             // A request can cancel the sheet before SwiftUI creates its content.
@@ -128,10 +128,10 @@ public struct ProviderModelPicker: View {
             if !sheetContentAppeared { onPresentationChange?(false) }
         }
         .onAppear(perform: materializeSelection)
-        .onChange(of: providers) {
+        .t3OnChange(of: providers) {
             if !preservesSelectionDuringRefresh { materializeSelection() }
         }
-        .onChange(of: selection) { materializeSelection() }
+        .t3OnChange(of: selection) { materializeSelection() }
     }
 
     private var selectedOption: DailyUXModelOption? {
@@ -291,7 +291,7 @@ private struct ModelPickerSheet: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if availableModelCount == 0 {
-                    ContentUnavailableView(
+                    T3ContentUnavailableView(
                         emptyStateTitle,
                         systemImage: emptyStateSymbol,
                         description: Text(emptyStateMessage)
@@ -345,21 +345,25 @@ private struct ModelPickerSheet: View {
                     Button("Apply", systemImage: "checkmark") { applySelection() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
+                        .t3CircleButtonBorderShape()
                         .fontWeight(.semibold)
                         .disabled(!hasDraftChanges || !ProjectProviderModelPolicy.canSelect(draftSelection, in: providers))
                         .accessibilityIdentifier("model-picker-apply")
                 }
             }
-            .navigationDestination(item: $configuring) { option in
-                ModelConfigurationView(
-                    option: option,
-                    currentSelection: pickerSelection
-                ) { configuredSelection in
-                    draftSelection = configuredSelection
-                    rememberDraft(configuredSelection)
-                    hasEditedDraft = configuredSelection != committedSelection
-                    configuring = nil
+            // `navigationDestination(item:)` needs iOS 17; the `isPresented:` form
+            // covers every supported OS with one code path.
+            .navigationDestination(isPresented: configuringPresented) {
+                if let option = configuring {
+                    ModelConfigurationView(
+                        option: option,
+                        currentSelection: pickerSelection
+                    ) { configuredSelection in
+                        draftSelection = configuredSelection
+                        rememberDraft(configuredSelection)
+                        hasEditedDraft = configuredSelection != committedSelection
+                        configuring = nil
+                    }
                 }
             }
             .t3NavigationChrome()
@@ -379,15 +383,15 @@ private struct ModelPickerSheet: View {
             reconcileDraftSelectionWithCurrentState()
             revealSelectedLegacyModel()
         }
-        .onChange(of: selection) {
+        .t3OnChange(of: selection) {
             reconcileDraftSelectionWithCurrentState()
             revealSelectedLegacyModel()
         }
-        .onChange(of: threadSelection) {
+        .t3OnChange(of: threadSelection) {
             reconcileDraftSelectionWithCurrentState()
             revealSelectedLegacyModel()
         }
-        .onChange(of: providers) {
+        .t3OnChange(of: providers) {
             reconcileDraftSelectionWithCurrentState()
             revealSelectedLegacyModel()
         }
@@ -406,6 +410,13 @@ private struct ModelPickerSheet: View {
             }
             isRefreshing = false
         }
+    }
+
+    private var configuringPresented: Binding<Bool> {
+        Binding(
+            get: { configuring != nil },
+            set: { if !$0 { configuring = nil } }
+        )
     }
 
     private var modelList: some View {
@@ -521,7 +532,7 @@ private struct ModelPickerSheet: View {
             }
 
             if catalog.all.isEmpty && !hasUpdateRequiredModels {
-                ContentUnavailableView.search(text: query)
+                T3ContentUnavailableView.search(text: query)
                     .listRowBackground(Color.clear)
             }
 

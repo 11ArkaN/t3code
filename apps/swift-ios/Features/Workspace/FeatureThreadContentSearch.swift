@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 public struct FeatureThreadContentMatch: Equatable, Sendable {
     public let environmentID: String
@@ -66,13 +66,12 @@ struct FeatureThreadSearchRequest: Equatable, Sendable {
 
 /// The task belongs to the caller. Generation and request checks also cover
 /// transports that finish after cancellation or after a query changes away and back.
-@MainActor @Observable
-final class FeatureThreadContentSearch {
-    private(set) var isSearching = false
+@MainActor final class FeatureThreadContentSearch: ObservableObject {
+    @Published private(set) var isSearching = false
     private var request: FeatureThreadSearchRequest?
     private var generation: UInt64 = 0
     private var results: [FeatureThreadContentMatch] = []
-    @ObservationIgnored private let debounce: @MainActor () async throws -> Void
+    private let debounce: @MainActor () async throws -> Void
 
     init(debounce: @escaping @MainActor () async throws -> Void = {
         try await Task.sleep(for: .milliseconds(250))

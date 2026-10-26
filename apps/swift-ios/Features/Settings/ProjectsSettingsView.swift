@@ -30,7 +30,7 @@ struct BranchNamingTextSetting: View {
             .autocorrectionDisabled()
             .accessibilityLabel(title)
             .onAppear { draft = value }
-            .onChange(of: value) { _, updated in draft = updated }
+            .t3OnChange(of: value) { _, updated in draft = updated }
         if trimmed != value {
             Button("Save \(title.lowercased())") { save(trimmed) }
         }
@@ -66,7 +66,7 @@ struct ResponseStreamingPicker: View {
 
 struct ProjectPreferencesSheet: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let projectID: String
 
     var body: some View {
@@ -80,12 +80,12 @@ struct ProjectPreferencesSheet: View {
         }
         .onAppear { model.setConnectionManagementPresented(true) }
         .onDisappear { model.setConnectionManagementPresented(false) }
-        .presentationBackground(T3Colors.background)
+        .t3PresentationBackground(T3Colors.background)
     }
 }
 
 struct ProjectsSettingsView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
 
     var body: some View {
         List {
@@ -114,7 +114,7 @@ struct ProjectsSettingsView: View {
 }
 
 struct ProjectPreferencesView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let projectID: String
     @State private var preferences: FeatureProjectPreferences?
     @State private var busy = false

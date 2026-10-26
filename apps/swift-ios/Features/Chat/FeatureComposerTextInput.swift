@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
-import Observation
 
 /// The composer's text entry is a UIKit text view because SwiftUI's text
 /// inputs expose no paste hook on iOS: the long-press Paste menu can never
@@ -849,7 +848,7 @@ struct FeatureComposerTextSelectionRequest: Equatable {
 }
 
 /// Selection changes come from `updateUIView` and UIKit delegate callbacks.
-/// Keeping this value outside Observation avoids synchronous SwiftUI state
+/// Keeping this value outside observation avoids synchronous SwiftUI state
 /// writes while the representable is updating.
 @MainActor
 final class FeatureComposerTextObservation {

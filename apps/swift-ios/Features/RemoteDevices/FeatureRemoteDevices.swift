@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 /// Android serials repeat across hosts and environments. Keep all three parts.
 struct FeatureRemoteDeviceID: Hashable, Sendable {
@@ -52,25 +52,24 @@ struct FeatureRemoteDeviceConnection: Identifiable, Equatable {
     let access: RemoteDeviceHubAccess
 }
 
-@MainActor @Observable
-final class FeatureRemoteDevicesModel {
-    private(set) var snapshot: FeatureRemoteDeviceSnapshot?
-    private(set) var connection: FeatureRemoteDeviceConnection?
-    private(set) var error: String?
-    private(set) var streamError: String?
-    private(set) var inputConnected = false
-    private(set) var streaming = false
-    private(set) var shuttingDown = false
-    private(set) var refreshing = false
-    private(set) var unsupported = false
-    var controlsVisible = true
-    var selectedID: FeatureRemoteDeviceID?
-    private(set) var attempt = 0
-    @ObservationIgnored private var accessGeneration = 0
-    @ObservationIgnored private var watchGeneration = 0
-    @ObservationIgnored private var recoveredProcess = false
-    @ObservationIgnored private var refreshedAuthorization = false
-    @ObservationIgnored private let client: any FeatureRemoteDeviceManaging
+@MainActor final class FeatureRemoteDevicesModel: ObservableObject {
+    @Published private(set) var snapshot: FeatureRemoteDeviceSnapshot?
+    @Published private(set) var connection: FeatureRemoteDeviceConnection?
+    @Published private(set) var error: String?
+    @Published private(set) var streamError: String?
+    @Published private(set) var inputConnected = false
+    @Published private(set) var streaming = false
+    @Published private(set) var shuttingDown = false
+    @Published private(set) var refreshing = false
+    @Published private(set) var unsupported = false
+    @Published var controlsVisible = true
+    @Published var selectedID: FeatureRemoteDeviceID?
+    @Published private(set) var attempt = 0
+    private var accessGeneration = 0
+    private var watchGeneration = 0
+    private var recoveredProcess = false
+    private var refreshedAuthorization = false
+    private let client: any FeatureRemoteDeviceManaging
     let threadID: String
 
     init(threadID: String, client: any FeatureRemoteDeviceManaging) {

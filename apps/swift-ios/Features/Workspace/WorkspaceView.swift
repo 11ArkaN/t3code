@@ -26,8 +26,9 @@ public struct WorkspaceView: View {
     @SwiftUI.Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @SwiftUI.Environment(\.accessibilityReduceMotion) private var reduceMotion
     @SwiftUI.Environment(\.openURL) private var openURL
+    @SwiftUI.Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     private let navigationRequest: FeatureWorkspaceNavigationRequest?
     private let onNavigationRequestConsumed: @MainActor (UUID) -> Void
     private let submitNewTask: (NewTaskRequest) async -> FeatureThread?
@@ -42,8 +43,8 @@ public struct WorkspaceView: View {
     @State private var selectedProjectID: String?
     @State private var searchText = ""
     @State private var isSearching = false
-    @State private var contentSearch = FeatureThreadContentSearch()
-    @State private var paletteSearch = FeatureThreadContentSearch()
+    @StateObject private var contentSearch = FeatureThreadContentSearch()
+    @StateObject private var paletteSearch = FeatureThreadContentSearch()
     @State private var paletteQuery = ""
     @State private var keyboardDispatcher = FeatureKeyboardDispatcher()
     @State private var columnVisibility = NavigationSplitViewVisibility.automatic
@@ -88,7 +89,7 @@ public struct WorkspaceView: View {
     @State private var customSnoozeSelection: FeatureCustomSnoozeSelection?
     @State private var renameTitle = ""
     @State private var sidebarBoundaryNow = Date.now
-    @State private var preferredCompactColumn = NavigationSplitViewColumn.sidebar
+    @State private var prefersCompactDetail = false
     @State private var homePresentationCache = HomePresentationCache()
     @FocusState private var isSearchFocused: Bool
 
@@ -107,15 +108,37 @@ public struct WorkspaceView: View {
     }
 
     public var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredCompactColumn) {
-            sidebar
-                .navigationSplitViewColumnWidth(
-                    min: T3Metrics.minimumSidebarWidth,
-                    ideal: T3Metrics.sidebarWidth,
-                    max: T3Metrics.maximumSidebarWidth
-                )
-        } detail: {
-            detail
+        Group {
+            if #available(iOS 17.0, *) {
+                NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: preferredCompactColumn) {
+                    sidebar
+                        .navigationSplitViewColumnWidth(
+                            min: T3Metrics.minimumSidebarWidth,
+                            ideal: T3Metrics.sidebarWidth,
+                            max: T3Metrics.maximumSidebarWidth
+                        )
+                } detail: {
+                    detail
+                }
+            } else if horizontalSizeClass == .compact {
+                NavigationStack(path: compactNavigationPath) {
+                    sidebar
+                        .navigationDestination(for: String.self) { id in
+                            threadDetail(id)
+                        }
+                }
+            } else {
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    sidebar
+                        .navigationSplitViewColumnWidth(
+                            min: T3Metrics.minimumSidebarWidth,
+                            ideal: T3Metrics.sidebarWidth,
+                            max: T3Metrics.maximumSidebarWidth
+                        )
+                } detail: {
+                    detail
+                }
+            }
         }
         .navigationSplitViewStyle(.balanced)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -250,25 +273,22 @@ public struct WorkspaceView: View {
         } message: { _ in
             Text("This message has not been sent. Its saved text and files will be removed.")
         }
-        .onChange(of: selectedThreadIsAvailable) { _, isAvailable in
+        .t3OnChange(of: selectedThreadIsAvailable) { _, isAvailable in
             if !isAvailable {
                 closeSelectedThread()
                 if let id = rootNavigationDismissalID { finishThreadNavigationDismissal(id) }
             }
         }
-        .onChange(of: selectedThreadID) { _, newValue in
-            preferredCompactColumn = newValue == nil ? .sidebar : .detail
-        }
-        .onChange(of: selectedProjectIsAvailable) { _, isAvailable in
+        .t3OnChange(of: selectedProjectIsAvailable) { _, isAvailable in
             if !isAvailable { selectedProjectID = nil }
         }
-        .onChange(of: navigationRequest?.id, initial: true) { _, _ in
+        .t3OnChange(of: navigationRequest?.id, initial: true) { _, _ in
             consumeNavigationRequest()
         }
         // A request that arrives before its thread or project exists in the
         // snapshot stays pending; retry it as data lands so cold-start deep
         // links are not silently stranded.
-        .onChange(of: model.homePresentationRevision) { _, _ in
+        .t3OnChange(of: model.homePresentationRevision) { _, _ in
             if navigationRequest != nil { consumeNavigationRequest() }
         }
         .task(id: nextSidebarBoundary) {
@@ -318,7 +338,7 @@ public struct WorkspaceView: View {
         }
         .background(T3Colors.background)
         .toolbar(.hidden, for: .navigationBar)
-        .onChange(of: selectedProjectID) {
+        .t3OnChange(of: selectedProjectID) {
             settledLimit = 10
         }
     }
@@ -812,7 +832,7 @@ public struct WorkspaceView: View {
         case .focusSearch:
             isSearching = true
             columnVisibility = .all
-            preferredCompactColumn = .sidebar
+            prefersCompactDetail = false
             isSearchFocused = true
         case .back:
             if isSearching {
@@ -822,7 +842,7 @@ public struct WorkspaceView: View {
             } else { closeSelectedThread() }
         case .toggleSidebar:
             columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-            preferredCompactColumn = preferredCompactColumn == .sidebar ? .detail : .sidebar
+            prefersCompactDetail.toggle()
         case let .threadJump(number):
             guard renderedThreads.indices.contains(number - 1) else { return }
             openThread(renderedThreads[number - 1].id)
@@ -877,6 +897,38 @@ public struct WorkspaceView: View {
         return model.snapshot.threads.contains { $0.id == selectedThreadID }
     }
 
+    private var compactNavigationPath: Binding<[String]> {
+        Binding(
+            get: {
+                guard let rootID = threadSelection.rootID else { return [] }
+                return [rootID] + threadSelection.navigationPath
+            },
+            set: { path in
+                let previousID = selectedThreadID
+                if path.isEmpty {
+                    threadSelection.close()
+                } else {
+                    threadSelection.pop(to: Array(path.dropFirst()), availableIDs: availableThreadIDs)
+                }
+                if selectedThreadID != previousID {
+                    requestedThreadDestination = nil
+                    requestedThreadDestinationID = nil
+                    activeToolDestination = nil
+                }
+            }
+        )
+    }
+
+    // Stored as a Bool because `NavigationSplitViewColumn` is an iOS 17 type and
+    // cannot appear in this view's stored state while iOS 16 is supported.
+    @available(iOS 17.0, *)
+    private var preferredCompactColumn: Binding<NavigationSplitViewColumn> {
+        Binding(
+            get: { prefersCompactDetail ? .detail : .sidebar },
+            set: { prefersCompactDetail = $0 == .detail }
+        )
+    }
+
     private var selectedThreadID: String? { threadSelection.selectedID }
 
     private var availableThreadIDs: Set<String> { Set(model.snapshot.threads.map(\.id)) }
@@ -893,7 +945,7 @@ public struct WorkspaceView: View {
         requestedThreadDestinationID = nil
         activeToolDestination = nil
         threadSelection.open(id)
-        preferredCompactColumn = .detail
+        prefersCompactDetail = true
     }
 
     private func closeSelectedThread() {
@@ -901,7 +953,7 @@ public struct WorkspaceView: View {
         requestedThreadDestinationID = nil
         activeToolDestination = nil
         threadSelection.back(availableIDs: availableThreadIDs)
-        preferredCompactColumn = selectedThreadID == nil ? .sidebar : .detail
+        prefersCompactDetail = selectedThreadID != nil
     }
 
     private func openRelatedThread(_ id: String) {
@@ -910,7 +962,7 @@ public struct WorkspaceView: View {
         requestedThreadDestinationID = nil
         activeToolDestination = nil
         threadSelection.push(id)
-        preferredCompactColumn = .detail
+        prefersCompactDetail = true
     }
 
     @MainActor

@@ -5,8 +5,8 @@ import UIKit
 struct SettingsMicrophoneView: View {
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
     @SwiftUI.Environment(\.openURL) private var openURL
-    @State private var preferences = FeatureMicrophonePreferences.shared
-    @State private var permission = AVAudioApplication.shared.recordPermission
+    @ObservedObject private var preferences = FeatureMicrophonePreferences.shared
+    @State private var permission = AVAudioSession.sharedInstance().recordPermission
     @State private var isRequestingPermission = false
 
     var body: some View {
@@ -80,13 +80,13 @@ struct SettingsMicrophoneView: View {
         .t3NavigationChrome()
         .toolbar { EditButton() }
         .onAppear { refreshPermission() }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: scenePhase) { _, phase in
             if phase == .active { refreshPermission() }
         }
     }
 
     private func refreshPermission() {
-        permission = AVAudioApplication.shared.recordPermission
+        permission = AVAudioSession.sharedInstance().recordPermission
     }
 
     @MainActor
@@ -94,7 +94,7 @@ struct SettingsMicrophoneView: View {
         guard !isRequestingPermission else { return }
         isRequestingPermission = true
         _ = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
+            AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }

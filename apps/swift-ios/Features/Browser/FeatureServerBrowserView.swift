@@ -18,14 +18,14 @@ struct FeatureServerBrowserView: View {
 private struct ServerBrowserViewer: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
-    @State private var model: FeatureServerBrowserModel
+    @StateObject private var model: FeatureServerBrowserModel
     @State private var controller = ServerBrowserStreamController()
     @State private var address: String?
     @State private var prompt = ""
     @State private var watchAttempt = 0
 
     init(threadID: String, client: any FeatureServerBrowserManaging, initialTabID: String?) {
-        _model = State(initialValue: .init(threadID: threadID, client: client, initialTabID: initialTabID))
+        _model = StateObject(wrappedValue: .init(threadID: threadID, client: client, initialTabID: initialTabID))
     }
 
     private struct StreamIdentity: Hashable {
@@ -63,7 +63,7 @@ private struct ServerBrowserViewer: View {
                             Button("Dismiss") { send(.dialog(accept: false, text: "")) }
                             Button("Accept") { send(.dialog(accept: true, text: prompt)) }
                         }.disabled(!model.stream.ready)
-                    }.padding().onChange(of: dialog) { _, next in prompt = next.defaultValue }
+                    }.padding().t3OnChange(of: dialog) { _, next in prompt = next.defaultValue }
                         .onAppear { prompt = dialog.defaultValue }
                 }
             }
@@ -108,12 +108,12 @@ private struct ServerBrowserViewer: View {
         }
         .task(id: "\(active)-\(watchAttempt)") { if active { await model.watch() } }
         .task(id: identity) { if active { await model.connect() } }
-        .onChange(of: active) { _, active in if !active { controller.stop(); model.suspend() } }
-        .onChange(of: model.count) { _, count in if model.loaded && count == 0 { dismiss() } }
-        .onChange(of: model.loaded) { _, loaded in if loaded && model.count == 0 { dismiss() } }
-        .onChange(of: model.selectedID) { _, _ in address = nil }
-        .onChange(of: model.stream.error) { _, error in if error != nil { controller.stop() } }
-        .onChange(of: model.stream.gone) { _, gone in if gone { watchAttempt += 1 } }
+        .t3OnChange(of: active) { _, active in if !active { controller.stop(); model.suspend() } }
+        .t3OnChange(of: model.count) { _, count in if model.loaded && count == 0 { dismiss() } }
+        .t3OnChange(of: model.loaded) { _, loaded in if loaded && model.count == 0 { dismiss() } }
+        .t3OnChange(of: model.selectedID) { _, _ in address = nil }
+        .t3OnChange(of: model.stream.error) { _, error in if error != nil { controller.stop() } }
+        .t3OnChange(of: model.stream.gone) { _, gone in if gone { watchAttempt += 1 } }
         .onDisappear { controller.stop(); model.suspend() }
     }
 

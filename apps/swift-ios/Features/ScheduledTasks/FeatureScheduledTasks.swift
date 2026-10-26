@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 /// Task IDs are local to an environment, including on hosts copied from the same database.
 public struct FeatureScheduledTaskTarget: Hashable, Sendable, Identifiable {
@@ -55,18 +55,17 @@ public enum FeatureScheduledTaskError: LocalizedError, Equatable {
 
 /// One list owns one environment. Replacing the view cannot redirect an in-flight action.
 @MainActor
-@Observable
-final class FeatureScheduledTaskListModel {
+final class FeatureScheduledTaskListModel: ObservableObject {
     let environmentID: String
     private let client: any FeatureScheduledTaskManaging
     private var streamGeneration = UUID()
     private var snapshotRevision = 0
-    private(set) var tasks: [ScheduledTask]?
-    private(set) var pendingIDs: Set<String> = []
-    private(set) var receivesLiveUpdates = true
-    private(set) var isUnsupported = false
-    private(set) var loadError: String?
-    var actionError: String?
+    @Published private(set) var tasks: [ScheduledTask]?
+    @Published private(set) var pendingIDs: Set<String> = []
+    @Published private(set) var receivesLiveUpdates = true
+    @Published private(set) var isUnsupported = false
+    @Published private(set) var loadError: String?
+    @Published var actionError: String?
 
     init(environmentID: String, client: any FeatureScheduledTaskManaging) {
         self.environmentID = environmentID

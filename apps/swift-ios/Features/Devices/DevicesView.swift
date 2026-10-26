@@ -1,17 +1,16 @@
-import Observation
+import Combine
 import SwiftUI
 
 /// Device access state. One access change runs at a time, and reloads that
 /// overlap it are discarded, so a slow read cannot restore a removed device or
 /// replace newer feedback.
 @MainActor
-@Observable
-final class DevicesModel {
-    private(set) var sessions: [FeatureDeviceSession] = []
-    private(set) var isLoading = true
-    private(set) var isRevoking = false
-    private(set) var errorMessage: String?
-    var revokeTarget: FeatureDeviceSession?
+final class DevicesModel: ObservableObject {
+    @Published private(set) var sessions: [FeatureDeviceSession] = []
+    @Published private(set) var isLoading = true
+    @Published private(set) var isRevoking = false
+    @Published private(set) var errorMessage: String?
+    @Published var revokeTarget: FeatureDeviceSession?
 
     let manager: any FeatureDeviceManaging
     private var loadGeneration: UInt64 = 0
@@ -81,11 +80,11 @@ final class DevicesModel {
 }
 
 public struct DevicesView: View {
-    @State private var model: DevicesModel
+    @StateObject private var model: DevicesModel
     @State private var showingRevokeOthers = false
 
     public init(manager: any FeatureDeviceManaging) {
-        _model = State(initialValue: DevicesModel(manager: manager))
+        _model = StateObject(wrappedValue: DevicesModel(manager: manager))
     }
 
     public var body: some View {
@@ -95,7 +94,7 @@ public struct DevicesView: View {
                     .font(T3Typography.supporting)
                     .foregroundStyle(T3Colors.textTertiary)
             } else if let errorMessage = model.errorMessage, model.sessions.isEmpty {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Couldn’t load devices", systemImage: "exclamationmark.circle")
                 } description: {
                     Text(errorMessage)
@@ -106,7 +105,7 @@ public struct DevicesView: View {
                     .buttonStyle(.borderedProminent)
                 }
             } else if model.sessions.isEmpty {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("No devices found", systemImage: "laptopcomputer.and.iphone")
                 } description: {
                     Text("Device sessions will appear here when this server supports access management.")

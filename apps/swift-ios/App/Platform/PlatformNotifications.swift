@@ -1,6 +1,6 @@
 @preconcurrency import UserNotifications
 import UIKit
-import Observation
+import Combine
 
 extension Notification.Name {
     static let platformRouteReceived = Notification.Name("T3PlatformRouteReceived")
@@ -89,8 +89,7 @@ final class PlatformPersistedDeviceTokenSink: PlatformDeviceTokenSink {
 }
 
 @MainActor
-@Observable
-final class PlatformNotificationService: NSObject, UNUserNotificationCenterDelegate {
+final class PlatformNotificationService: NSObject, UNUserNotificationCenterDelegate, ObservableObject {
     static let shared = PlatformNotificationService()
 
     private let center: UNUserNotificationCenter
@@ -99,10 +98,10 @@ final class PlatformNotificationService: NSObject, UNUserNotificationCenterDeleg
     private let authorizationRequest: @MainActor () async -> Bool
     private let updateRemoteRegistration: @MainActor (Bool) -> Void
     private var preferenceRevision: UInt64 = 0
-    private(set) var enabled = false
-    private(set) var remoteRegistrationError: String?
-    private(set) var hasRemoteToken = false
-    private(set) var permissionStatus: UNAuthorizationStatus = .notDetermined
+    @Published private(set) var enabled = false
+    @Published private(set) var remoteRegistrationError: String?
+    @Published private(set) var hasRemoteToken = false
+    @Published private(set) var permissionStatus: UNAuthorizationStatus = .notDetermined
 
     init(
         center: UNUserNotificationCenter = .current(),

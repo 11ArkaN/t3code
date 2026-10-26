@@ -3,10 +3,10 @@ import UIKit
 
 struct ScheduledTaskEditorView: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
-    @Bindable var root: FeatureRootModel
+    @ObservedObject var root: FeatureRootModel
     let environmentID: String
     let initialDraft: FeatureScheduledTaskDraft
-    @Bindable var listModel: FeatureScheduledTaskListModel
+    @ObservedObject var listModel: FeatureScheduledTaskListModel
     let client: any FeatureScheduledTaskManaging
     @State private var draft: FeatureScheduledTaskDraft
     @State private var saving = false
@@ -69,7 +69,7 @@ struct ScheduledTaskEditorView: View {
                 guard let cloudClient = root.client as? any FeatureCloudPreferencesManaging else { return }
                 cloudState = try? await cloudClient.cloudLinkState(environmentID: environmentID)
             }
-            .onChange(of: draft.scheduleMode) {
+            .t3OnChange(of: draft.scheduleMode) {
                 if draft.scheduleMode == .webhook, draft.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     draft.prompt = "Handle this webhook:\n{{body}}"
                 }
@@ -80,7 +80,7 @@ struct ScheduledTaskEditorView: View {
                     Task { await listModel.rotateWebhookToken(task) }
                 }
             } message: { Text("The current URL will stop working. Update the sender with the new URL.") }
-            .onChange(of: draft.projectID) {
+            .t3OnChange(of: draft.projectID) {
                 guard initialDraft.original == nil else { return }
                 draft.selection = DailyUXCreationContext.selection(
                     carrying: modelSelectionIsExplicit ? draft.selection : nil, to: selectedProject, in: root.snapshot
@@ -95,7 +95,7 @@ struct ScheduledTaskEditorView: View {
                 Button("OK") { saveError = nil }
             } message: { Text(saveError ?? "") }
         }
-        .presentationBackground(Color.black)
+        .t3PresentationBackground(Color.black)
         .interactiveDismissDisabled(saving || draft != initialDraft)
     }
 

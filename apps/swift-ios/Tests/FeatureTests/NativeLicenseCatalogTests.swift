@@ -7,7 +7,7 @@ struct NativeLicenseCatalogTests {
         let licenses = try NativeLicenseCatalog.load()
         let names = Set(licenses.map(\.name))
         #expect(names.isSuperset(of: [
-            "Clerk", "Nuke", "PhoneNumberKit", "GhosttyKit", "FreeType",
+            "Clerk", "GhosttyKit", "FreeType",
             "libintl", "JetBrains Mono", "Symbols Nerd Font", "simdutf",
         ]))
         #expect(names.count == licenses.count)

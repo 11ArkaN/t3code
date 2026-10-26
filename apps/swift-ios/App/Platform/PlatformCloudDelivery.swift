@@ -1,7 +1,7 @@
 import ActivityKit
 import CryptoKit
 import Foundation
-import Observation
+import Combine
 import Security
 import UIKit
 
@@ -88,14 +88,13 @@ enum PlatformCloudDeliveryRegistrationFactory {
 /// only travel over DPoP-authenticated relay requests; local success caches store
 /// SHA-256 fingerprints rather than reusable push credentials.
 @MainActor
-@Observable
-final class PlatformCloudDeliveryCoordinator {
+final class PlatformCloudDeliveryCoordinator: ObservableObject {
     static let shared = PlatformCloudDeliveryCoordinator()
 
-    private(set) var registrationStatus: PlatformCloudRegistrationStatus = .idle
-    private(set) var isSettingUpLiveActivities = false
-    private(set) var liveActivitySetupStatus: PlatformCloudRegistrationStatus?
-    var selectedLiveActivityEnvironmentIDs: Set<String> = []
+    @Published private(set) var registrationStatus: PlatformCloudRegistrationStatus = .idle
+    @Published private(set) var isSettingUpLiveActivities = false
+    @Published private(set) var liveActivitySetupStatus: PlatformCloudRegistrationStatus?
+    @Published var selectedLiveActivityEnvironmentIDs: Set<String> = []
 
     private let defaults: UserDefaults
     private let tokenSink: PlatformPersistedDeviceTokenSink
@@ -103,17 +102,17 @@ final class PlatformCloudDeliveryCoordinator {
     private let systemVersion: OperatingSystemVersion
     private let liveActivitiesAllowed: @MainActor () -> Bool
 
-    @ObservationIgnored private weak var controller: (any PlatformCloudDeliveryRegistering)?
-    @ObservationIgnored private var settings: FeatureSettings?
-    @ObservationIgnored private var needsRegistration = false
-    @ObservationIgnored private var registrationTask: Task<Void, Never>?
-    @ObservationIgnored private var observerTasks: [Task<Void, Never>] = []
-    @ObservationIgnored private var pushToStartTask: Task<Void, Never>?
-    @ObservationIgnored private var activityUpdatesTask: Task<Void, Never>?
-    @ObservationIgnored private var activityTokenTasks: [String: Task<Void, Never>] = [:]
-    @ObservationIgnored private var pendingActivityTokens: [String: String] = [:]
-    @ObservationIgnored private var retryTask: Task<Void, Never>?
-    @ObservationIgnored private var observedAccountID: String?
+    private weak var controller: (any PlatformCloudDeliveryRegistering)?
+    private var settings: FeatureSettings?
+    private var needsRegistration = false
+    private var registrationTask: Task<Void, Never>?
+    private var observerTasks: [Task<Void, Never>] = []
+    private var pushToStartTask: Task<Void, Never>?
+    private var activityUpdatesTask: Task<Void, Never>?
+    private var activityTokenTasks: [String: Task<Void, Never>] = [:]
+    private var pendingActivityTokens: [String: String] = [:]
+    private var retryTask: Task<Void, Never>?
+    private var observedAccountID: String?
 
     private let deviceFingerprintKey = "swift-ios.cloud-delivery-device.v1"
     private let deviceRegisteredAtKey = "swift-ios.cloud-delivery-device-date.v1"

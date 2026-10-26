@@ -39,7 +39,7 @@ enum EnvironmentReleaseIndex {
 }
 
 struct EnvironmentUpdatesView: View {
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     let environmentID: String
     @State private var descriptor: EnvironmentDescriptor?
     @State private var targetVersion: String?

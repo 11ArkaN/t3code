@@ -1,10 +1,27 @@
+import Combine
 import Foundation
-import Observation
 import SwiftUI
 import Testing
 import UIKit
 import XCTest
 @testable import T3Code
+
+@MainActor
+private func waitForChange<P: Publisher>(
+    _ publisher: P,
+    while operation: () -> Void
+) async where P.Output: Equatable, P.Failure == Never {
+    var cancellable: AnyCancellable?
+    await withCheckedContinuation { continuation in
+        cancellable = publisher
+            .removeDuplicates()
+            .dropFirst()
+            .first()
+            .sink { _ in continuation.resume() }
+        operation()
+    }
+    withExtendedLifetime(cancellable) {}
+}
 
 @MainActor
 @Suite("Feature root model")
@@ -509,20 +526,14 @@ struct FeatureRootModelTests {
         let client = FeatureClientStub()
         let model = testRootModel(client: client)
         let run = Task { await model.start() }
-        await withCheckedContinuation { continuation in
-            withObservationTracking {
-                _ = model.threadSyncStates["thread"]
-            } onChange: {
-                continuation.resume()
-            }
+        await waitForChange(model.$threadSyncStates) {
             client.emit(.threadSync(id: "thread", state: .catchingUp))
         }
         let changes = AsyncStream<Void>.makeStream()
-        withObservationTracking {
-            _ = model.threadSyncStates["thread"]
-        } onChange: {
+        let observation = model.$threadSyncStates.dropFirst().sink { _ in
             changes.continuation.yield()
         }
+        defer { observation.cancel() }
         client.emit(.threadSync(id: "thread", state: .catchingUp))
         client.finishEvents()
         await run.value
@@ -1414,12 +1425,11 @@ struct FeatureRootModelTests {
             var acknowledged = try #require(model.snapshot.threads.first)
             acknowledged.title = "Accepted on the server"
             acknowledged.state = .working
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.snapshot.threads.first(where: { $0.id == acknowledged.id })?.state
-                } onChange: {
-                    continuation.resume()
+            await waitForChange(
+                model.$snapshot.map { snapshot in
+                    snapshot.threads.first(where: { $0.id == acknowledged.id })?.state
                 }
+            ) {
                 client.emit(.thread(acknowledged))
             }
         }
@@ -2854,12 +2864,7 @@ struct FeatureRootModelTests {
         client.beforeSettlementReturn = {
             thread.settlementFacts?.sessionStatus = "running"
             thread.settlementFacts?.hasPendingApprovals = true
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.snapshot.threads.first?.settlementFacts?.sessionStatus
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$snapshot.map { $0.threads.first?.settlementFacts?.sessionStatus }) {
                 client.emit(.thread(thread))
             }
         }
@@ -2971,12 +2976,7 @@ struct FeatureRootModelTests {
         let model = testRootModel(client: client)
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[thread.id]
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[thread.id] }) {
                 client.emit(.detail(live))
             }
         }
@@ -3119,12 +3119,7 @@ struct FeatureRootModelTests {
         let model = testRootModel(client: client)
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.detailRevisions[thread.id]
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$detailRevisions.map { $0[thread.id] }) {
                 client.emit(.threadRemoved(id: thread.id))
             }
         }
@@ -3162,20 +3157,10 @@ struct FeatureRootModelTests {
         client.threadDetail = refreshed
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[thread.id]?.thread
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[thread.id]?.thread }) {
                 client.emit(.thread(intermediateThread))
             }
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[thread.id]?.thread
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[thread.id]?.thread }) {
                 client.emit(.thread(thread))
             }
         }
@@ -3203,12 +3188,7 @@ struct FeatureRootModelTests {
         let run = Task { await model.start() }
         client.createdThread = created
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[original.id]?.thread
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[original.id]?.thread }) {
                 client.emit(.thread(live))
             }
             _ = await model.createThread(projectID: original.projectID, title: nil, selection: nil)
@@ -3235,12 +3215,7 @@ struct FeatureRootModelTests {
         client.threadDetail = FeatureThreadDetail(thread: refreshed)
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.snapshot.connection
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$snapshot.map(\.connection)) {
                 client.emit(.thread(original))
                 client.emit(.connection(.init(state: .connected)))
             }
@@ -3292,12 +3267,7 @@ struct FeatureRootModelTests {
         let model = testRootModel(client: client)
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.detailRevisions[thread.id]
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$detailRevisions.map { $0[thread.id] }) {
                 client.emit(.snapshot(FeatureSnapshot()))
             }
         }
@@ -3335,20 +3305,10 @@ struct FeatureRootModelTests {
         client.threadDetail = refreshed
         let run = Task { await model.start() }
         client.beforeLoadThreadReturn = {
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[thread.id]?.thread
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[thread.id]?.thread }) {
                 client.emit(.snapshot(FeatureSnapshot(threads: [intermediateThread])))
             }
-            await withCheckedContinuation { continuation in
-                withObservationTracking {
-                    _ = model.details[thread.id]?.thread
-                } onChange: {
-                    continuation.resume()
-                }
+            await waitForChange(model.$details.map { $0[thread.id]?.thread }) {
                 client.emit(.snapshot(FeatureSnapshot(threads: [thread])))
             }
         }
@@ -3643,9 +3603,8 @@ struct FeatureRootModelTests {
 }
 
 @MainActor
-@Observable
-private final class ThreadImageCoverPresentation {
-    var isPresented = false
+private final class ThreadImageCoverPresentation: ObservableObject {
+    @Published var isPresented = false
     var onDismiss: (() -> Void)?
     let appeared = XCTestExpectation(description: "Full-screen attachment flow appeared")
     let dismissed = XCTestExpectation(description: "Full-screen attachment flow dismissed")
@@ -3653,7 +3612,7 @@ private final class ThreadImageCoverPresentation {
 
 private struct ThreadImageTestHost: View {
     let detail: ThreadDetailView
-    @Bindable var presentation: ThreadImageCoverPresentation
+    @ObservedObject var presentation: ThreadImageCoverPresentation
 
     var body: some View {
         detail.fullScreenCover(isPresented: $presentation.isPresented, onDismiss: {

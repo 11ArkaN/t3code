@@ -161,10 +161,10 @@ private struct FeatureToolOutputImageView: View {
             }
         }
         .task(id: generation) { await loader.load(resolve: resolve) }
-        .onChange(of: preview) { _, presented in
+        .t3OnChange(of: preview) { _, presented in
             if presented { presentationDismissal.onPresentationChange(presentationID, true) }
         }
-        .onChange(of: presentationDismissal.requestID) { _, id in if id != nil { preview = false } }
+        .t3OnChange(of: presentationDismissal.requestID) { _, id in if id != nil { preview = false } }
         .sheet(isPresented: $preview, onDismiss: { presentationDismissal.onPresentationChange(presentationID, false) }) {
             if let url = loader.url {
                 NavigationStack {

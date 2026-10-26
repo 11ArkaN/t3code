@@ -53,10 +53,10 @@ private struct FeatureEmbeddedContentRow: View {
         .padding(.vertical, 4)
         .background { GeometryReader { geometry in
             Color.clear.onAppear { width = geometry.size.width }
-                .onChange(of: geometry.size.width) { _, value in width = value }
+                .t3OnChange(of: geometry.size.width) { _, value in width = value }
         } }
         .task { controller.context = context; controller.appear() }
-        .onChange(of: context.canEnterFullscreen) { _, allowed in
+        .t3OnChange(of: context.canEnterFullscreen) { _, allowed in
             controller.context = context
             if !allowed, controller.fullscreen { Task { await controller.changeMode(fullscreen: false) } }
         }

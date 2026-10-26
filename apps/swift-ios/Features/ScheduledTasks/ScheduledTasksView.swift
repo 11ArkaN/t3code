@@ -1,7 +1,7 @@
 import SwiftUI
 
 public struct ScheduledTasksView: View {
-    @Bindable private var root: FeatureRootModel
+    @ObservedObject private var root: FeatureRootModel
     @State private var environmentID = ""
 
     public init(model: FeatureRootModel) { root = model }
@@ -24,11 +24,11 @@ public struct ScheduledTasksView: View {
                     ScheduledTasksEnvironmentView(root: root, environment: environment, client: client)
                         .id(environment.id)
                 } else {
-                    ContentUnavailableView("No environments", systemImage: "server.rack",
+                    T3ContentUnavailableView("No environments", systemImage: "server.rack",
                         description: Text("Enable an environment in Settings to manage scheduled tasks."))
                 }
             } else {
-                ContentUnavailableView("Scheduled tasks unavailable", systemImage: "calendar.badge.clock")
+                T3ContentUnavailableView("Scheduled tasks unavailable", systemImage: "calendar.badge.clock")
             }
         }
         .background(Color.black)
@@ -51,10 +51,10 @@ private struct ScheduledTaskEditorRoute: Identifiable {
 
 private struct ScheduledTasksEnvironmentView: View {
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
-    @Bindable var root: FeatureRootModel
+    @ObservedObject var root: FeatureRootModel
     let environment: FeatureEnvironment
     let client: any FeatureScheduledTaskManaging
-    @State private var model: FeatureScheduledTaskListModel
+    @StateObject private var model: FeatureScheduledTaskListModel
     @State private var projectFilter = ""
     @State private var editor: ScheduledTaskEditorRoute?
     @State private var deleting: ScheduledTask?
@@ -70,7 +70,7 @@ private struct ScheduledTasksEnvironmentView: View {
         self.root = root
         self.environment = environment
         self.client = client
-        _model = State(initialValue: FeatureScheduledTaskListModel(environmentID: environment.id, client: client))
+        _model = StateObject(wrappedValue: FeatureScheduledTaskListModel(environmentID: environment.id, client: client))
     }
 
     var body: some View {
@@ -110,7 +110,7 @@ private struct ScheduledTasksEnvironmentView: View {
             .padding(.vertical, 12)
         }
         .refreshable { await model.refresh() }
-        .onChange(of: projects.map { $0.wireID ?? $0.id }) {
+        .t3OnChange(of: projects.map { $0.wireID ?? $0.id }) {
             if !projects.contains(where: { ($0.wireID ?? $0.id) == projectFilter }) { projectFilter = "" }
         }
         .toolbar {

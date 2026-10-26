@@ -3,13 +3,13 @@ import SwiftUI
 struct FeatureRemoteDevicesView: View {
     @SwiftUI.Environment(\.dismiss) private var dismiss
     @SwiftUI.Environment(\.scenePhase) private var scenePhase
-    @State private var model: FeatureRemoteDevicesModel
+    @StateObject private var model: FeatureRemoteDevicesModel
     @State private var controller = RemoteDeviceStreamController()
     @State private var watchAttempt = 0
     @State private var showsToolVersions = false
 
     init(threadID: String, client: any FeatureRemoteDeviceManaging) {
-        _model = State(initialValue: FeatureRemoteDevicesModel(threadID: threadID, client: client))
+        _model = StateObject(wrappedValue: FeatureRemoteDevicesModel(threadID: threadID, client: client))
     }
 
     private struct StreamIdentity: Hashable {
@@ -56,16 +56,16 @@ struct FeatureRemoteDevicesView: View {
         .task(id: streamIdentity) {
             if isForeground { await model.connect() }
         }
-        .onChange(of: isForeground) { _, foreground in
+        .t3OnChange(of: isForeground) { _, foreground in
             if !foreground {
                 controller.stop()
                 model.suspend()
             }
         }
-        .onChange(of: model.snapshot?.previews.isEmpty) { wasEmpty, empty in
+        .t3OnChange(of: model.snapshot?.previews.isEmpty) { wasEmpty, empty in
             if wasEmpty == false && empty == true { dismiss() }
         }
-        .onChange(of: model.streamError) { _, error in
+        .t3OnChange(of: model.streamError) { _, error in
             if error != nil { controller.stop() }
         }
         .onDisappear {

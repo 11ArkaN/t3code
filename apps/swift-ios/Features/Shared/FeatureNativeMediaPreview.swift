@@ -243,7 +243,7 @@ struct FeatureNativeMediaPreviewView: View {
             } else if let fileURL = loader.fileURL {
                 preview(fileURL)
             } else if let errorMessage = loader.errorMessage {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label("Preview unavailable", systemImage: "doc.badge.ellipsis")
                 } description: { Text(errorMessage) } actions: {
                     Button("Try again") {
@@ -327,7 +327,7 @@ struct FeatureNativeMediaPreviewView: View {
             if let image = UIImage(contentsOfFile: url.path) {
                 FeatureNativeZoomableImageView(image: image)
             } else {
-                ContentUnavailableView("Image unavailable", systemImage: "photo.badge.exclamationmark")
+                T3ContentUnavailableView("Image unavailable", systemImage: "photo.badge.exclamationmark")
             }
         case .video, .audio:
             FeatureVideoPlayerView(url: url, isAudio: contentKind == .audio)
@@ -362,7 +362,7 @@ struct FeatureVideoPlayerView: View {
     var body: some View {
         Group {
             if playback.failed {
-                ContentUnavailableView {
+                T3ContentUnavailableView {
                     Label(isAudio ? "Audio unavailable" : "Video unavailable", systemImage: isAudio ? "speaker.slash" : "video.slash")
                 } description: { Text(playback.errorMessage ?? "The media could not load.") } actions: {
                     Button("Try again") { revision += 1 }
@@ -377,8 +377,8 @@ struct FeatureVideoPlayerView: View {
             }
         }
         .task(id: revision) { await playback.load(url, resolveURL: resolveURL) }
-        .onChange(of: url) { _, _ in revision += 1 }
-        .onChange(of: scenePhase) { _, phase in
+        .t3OnChange(of: url) { _, _ in revision += 1 }
+        .t3OnChange(of: scenePhase) { _, phase in
             if phase == .active { revision += 1 } else { playback.stop() }
         }
         .onDisappear { playback.stop() }

@@ -1,5 +1,5 @@
 import SwiftUI
-import Observation
+import Combine
 
 @MainActor
 public protocol FeatureCloudPreferencesManaging: AnyObject {
@@ -8,14 +8,13 @@ public protocol FeatureCloudPreferencesManaging: AnyObject {
 }
 
 @MainActor
-@Observable
-final class FeatureCloudWebhookPreferencesModel {
+final class FeatureCloudWebhookPreferencesModel: ObservableObject {
     let environmentID: String
     private let client: any FeatureCloudPreferencesManaging
     private var revision = 0
-    private(set) var state: EnvironmentCloudLinkState?
-    private(set) var saving = false
-    private(set) var error: String?
+    @Published private(set) var state: EnvironmentCloudLinkState?
+    @Published private(set) var saving = false
+    @Published private(set) var error: String?
 
     init(environmentID: String, client: any FeatureCloudPreferencesManaging) {
         self.environmentID = environmentID
@@ -52,7 +51,7 @@ final class FeatureCloudWebhookPreferencesModel {
 
 /// Mount inside the destination environment's Settings form.
 public struct CloudWebhookPreferencesView: View {
-    @Bindable private var root: FeatureRootModel
+    @ObservedObject private var root: FeatureRootModel
     private let environmentID: String
 
     public init(model: FeatureRootModel, environmentID: String) {
@@ -69,14 +68,14 @@ public struct CloudWebhookPreferencesView: View {
 }
 
 private struct CloudWebhookPreferencesSection: View {
-    @Bindable var root: FeatureRootModel
+    @ObservedObject var root: FeatureRootModel
     let environmentID: String
-    @State private var model: FeatureCloudWebhookPreferencesModel
+    @StateObject private var model: FeatureCloudWebhookPreferencesModel
 
     init(root: FeatureRootModel, environmentID: String, client: any FeatureCloudPreferencesManaging) {
         self.root = root
         self.environmentID = environmentID
-        _model = State(initialValue: .init(environmentID: environmentID, client: client))
+        _model = StateObject(wrappedValue: .init(environmentID: environmentID, client: client))
     }
 
     var body: some View {

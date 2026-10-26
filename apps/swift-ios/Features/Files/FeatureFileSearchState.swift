@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 public struct FeatureFileSearchResult: Sendable, Equatable {
     public var entries: [FeatureFileEntry]
@@ -20,8 +20,7 @@ public protocol FeatureWorkspaceSearching: AnyObject {
 extension NativeFeatureClient: FeatureWorkspaceSearching {}
 
 @MainActor
-@Observable
-final class FeatureFileSearchState {
+final class FeatureFileSearchState: ObservableObject {
     struct Request: Hashable {
         let threadID: String
         let workspaceRoot: String?
@@ -35,10 +34,10 @@ final class FeatureFileSearchState {
     }
 
     static let limit = 200
-    private(set) var request: Request?
-    private(set) var result: FeatureFileSearchResult?
-    private(set) var errorMessage: String?
-    private(set) var isLoading = false
+    @Published private(set) var request: Request?
+    @Published private(set) var result: FeatureFileSearchResult?
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var isLoading = false
     private var generation = 0
 
     func search(

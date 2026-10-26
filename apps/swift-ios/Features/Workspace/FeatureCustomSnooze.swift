@@ -108,16 +108,16 @@ struct FeatureCustomSnoozeSheet: View {
                     Button("Snooze", systemImage: "checkmark") { submit() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderedProminent)
-                        .buttonBorderShape(.circle)
+                        .t3CircleButtonBorderShape()
                 }
             }
         }
         .preferredColorScheme(.dark)
         .presentationDragIndicator(.visible)
-        .onChange(of: mode) { error = nil }
-        .onChange(of: date) { error = nil }
-        .onChange(of: amount) { error = nil }
-        .onChange(of: unit) { error = nil }
+        .t3OnChange(of: mode) { error = nil }
+        .t3OnChange(of: date) { error = nil }
+        .t3OnChange(of: amount) { error = nil }
+        .t3OnChange(of: unit) { error = nil }
     }
 
     private func submit() {

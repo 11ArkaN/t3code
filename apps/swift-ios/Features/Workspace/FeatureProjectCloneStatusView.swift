@@ -3,7 +3,7 @@ import SwiftUI
 /// Also used outside Add Project so a reopened draft retains clone controls.
 struct FeatureProjectCloneStatusView: View {
     let clone: FeatureManagedProjectClone
-    @Bindable var controller: FeatureProjectCloneController
+    @ObservedObject var controller: FeatureProjectCloneController
     let client: any FeatureManagedProjectCloning
     var onRemoved: @MainActor () -> Void = {}
     @State private var confirmsRemoval = false

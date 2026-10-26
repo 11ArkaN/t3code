@@ -1,5 +1,5 @@
 import Foundation
-import Observation
+import Combine
 
 /// A clone's wire ID is only unique inside its owning environment.
 struct FeatureManagedProjectClone: Identifiable, Equatable, Sendable {
@@ -65,13 +65,12 @@ enum FeatureProjectCloneState: Equatable {
 
 /// Own in a draft or project list and call `observe` from an environment-keyed task.
 /// Only the project opened from a managed clone waits for the first list.
-@MainActor @Observable
-final class FeatureProjectCloneController {
-    private(set) var environmentID: String?
-    private(set) var clones: [FeatureManagedProjectClone] = []
-    private(set) var isPending = true
-    private(set) var errorMessage: String?
-    private(set) var pendingActionID: String?
+@MainActor final class FeatureProjectCloneController: ObservableObject {
+    @Published private(set) var environmentID: String?
+    @Published private(set) var clones: [FeatureManagedProjectClone] = []
+    @Published private(set) var isPending = true
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var pendingActionID: String?
     private var observationID = UUID()
 
     func state(for project: FeatureProject, awaitingClone: FeatureProjectCloneIdentity? = nil) -> FeatureProjectCloneState {

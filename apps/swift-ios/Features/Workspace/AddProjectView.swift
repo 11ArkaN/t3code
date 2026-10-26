@@ -25,7 +25,7 @@ public struct AddProjectView: View {
     }
 
     @SwiftUI.Environment(\.dismiss) private var dismiss
-    @Bindable var model: FeatureRootModel
+    @ObservedObject var model: FeatureRootModel
     private let onNewProjectCreated: @MainActor (String, FeatureProjectCloneIdentity?) -> Void
 
     @State private var selectedEnvironmentID: String?
@@ -41,7 +41,7 @@ public struct AddProjectView: View {
     @State private var didEditDestination = false
     @State private var pendingCloneRegistration: PendingCloneRegistration?
     @State private var pendingManagedClone: FeaturePendingManagedProjectClone?
-    @State private var cloneController = FeatureProjectCloneController()
+    @StateObject private var cloneController = FeatureProjectCloneController()
     @State private var cloneSubscriptionRevision = 0
 
     @State private var browsePath = "~/"
@@ -117,7 +117,7 @@ public struct AddProjectView: View {
                     }
                     .scrollDismissesKeyboard(.interactively)
                 } else {
-                    ContentUnavailableView(
+                    T3ContentUnavailableView(
                         "Environment unavailable",
                         systemImage: "server.rack",
                         description: Text("Reconnect a T3 environment before adding a project.")
@@ -135,10 +135,10 @@ public struct AddProjectView: View {
             }
         }
         .onAppear(perform: selectEnvironmentIfNeeded)
-        .onChange(of: model.snapshot.environments) {
+        .t3OnChange(of: model.snapshot.environments) {
             selectEnvironmentIfNeeded()
         }
-        .onChange(of: source) {
+        .t3OnChange(of: source) {
             resolvedRepository = nil
             pendingCloneRegistration = nil
             pendingManagedClone = nil
@@ -146,7 +146,7 @@ public struct AddProjectView: View {
             updateSuggestedDestination()
             errorMessage = nil
         }
-        .onChange(of: repositoryInput) {
+        .t3OnChange(of: repositoryInput) {
             resolvedRepository = nil
             pendingCloneRegistration = nil
             pendingManagedClone = nil

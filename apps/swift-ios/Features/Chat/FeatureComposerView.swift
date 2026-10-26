@@ -101,7 +101,7 @@ struct FeatureComposerView: View {
     @State private var contextImportID: UUID?
     @State private var textRevision: UInt64 = 0
     @State private var textObservation = FeatureComposerTextObservation()
-    @State private var voiceInputController = FeatureVoiceInputController()
+    @StateObject private var voiceInputController = FeatureVoiceInputController()
     @Binding private var text: String
     @Binding private var selection: FeatureSelection?
     @Binding private var attachments: [FeatureDraftAttachment]
@@ -113,7 +113,7 @@ struct FeatureComposerView: View {
     private let draftStorageKey: String?
     private let environmentIsConnected: Bool
     private let contextAttachmentResolver: (any FeatureContextAttachmentResolving)?
-    private let attachmentUploads: FeatureAttachmentUploadCoordinator
+    @ObservedObject private var attachmentUploads: FeatureAttachmentUploadCoordinator
     private let attachmentPreferences: FeatureEnvironmentPreferences
     private let onRefreshModels: (() async throws -> Void)?
     private let draftSaveError: String?
@@ -301,7 +301,7 @@ struct FeatureComposerView: View {
                 )
                 .ignoresSafeArea()
             }
-            .onChange(of: focused) {
+            .t3OnChange(of: focused) {
                 if focused {
                     commandMenuDismissed = false
                     onCommandMenuUse()
@@ -331,27 +331,27 @@ struct FeatureComposerView: View {
                 pastedTextGeneration = UUID()
                 contextImportTask?.cancel()
             }
-            .onChange(of: text) { previous, _ in
+            .t3OnChange(of: text) { previous, _ in
                 commandMenuDismissed = false
                 textRevision &+= 1
                 synchronizeVoiceDraft(ownerChanged: false)
                 removeUnlinkedContextAttachments(previousText: previous)
             }
-            .onChange(of: attachments) { previous, _ in
+            .t3OnChange(of: attachments) { previous, _ in
                 removeDeletedAttachmentReferences(previousAttachments: previous)
             }
-            .onChange(of: draftOwnerID) {
+            .t3OnChange(of: draftOwnerID) {
                 synchronizeVoiceDraft(ownerChanged: true)
                 pastedTextTask?.cancel()
                 pastedTextGeneration = UUID()
                 contextImportTask?.cancel()
             }
-            .onChange(of: environmentID) {
+            .t3OnChange(of: environmentID) {
                 contextImportTask?.cancel()
                 pastedTextTask?.cancel()
                 pastedTextGeneration = UUID()
             }
-            .onChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
+            .t3OnChange(of: presentationDismissal.requestID, initial: true) { _, requestID in
                 guard requestID != nil else { return }
                 modelPickerFocusTask?.cancel()
                 restoresFocusAfterModelPickerDismissal = false
@@ -361,10 +361,10 @@ struct FeatureComposerView: View {
                 imageIntakeErrorMessage = nil
                 pastedTextErrorMessage = nil
             }
-            .onChange(of: voiceInputController.pendingCommit?.id) {
+            .t3OnChange(of: voiceInputController.pendingCommit?.id) {
                 applyPendingVoiceCommit()
             }
-            .onChange(of: scenePhase) { _, phase in
+            .t3OnChange(of: scenePhase) { _, phase in
                 if phase == .background {
                     voiceInputController.appMovedToBackground()
                 }
@@ -446,7 +446,7 @@ struct FeatureComposerView: View {
                 .stroke(T3Colors.inputBorder, lineWidth: 1)
         }
         .clipShape(composerShape)
-        .onChange(of: attachmentPreparation.isPreparing || isAttachmentFlowActive || voiceInputController.isBusy || contextImportID != nil, initial: true) { _, busy in
+        .t3OnChange(of: attachmentPreparation.isPreparing || isAttachmentFlowActive || voiceInputController.isBusy || contextImportID != nil, initial: true) { _, busy in
             onInputPreparationChange?(busy)
         }
         .modifier(
@@ -848,7 +848,7 @@ struct FeatureComposerView: View {
                 selection = control.selection(choosing: choiceID, in: descriptorID)
                 isTraitsPickerPresented = false
             }
-            .presentationCompactAdaptation(.popover)
+            .t3PopoverCompactAdaptation()
             .onAppear {
                 presentationDismissal.onPresentationChange(traitsPresentationID, true)
                 if presentationDismissal.requestID != nil { isTraitsPickerPresented = false }
