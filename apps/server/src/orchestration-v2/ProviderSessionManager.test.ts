@@ -329,6 +329,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
       readonly initialProviderItemIdentityVersion?: 2;
     }) => Effect.Effect<void>;
     readonly hasStaleCredentials?: Effect.Effect<boolean>;
+    readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
     readonly beforeResume?: Effect.Effect<void>;
     readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
     readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
@@ -426,6 +427,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
           ...(options.hasStaleCredentials === undefined
             ? {}
             : { hasStaleCredentials: options.hasStaleCredentials }),
+          ...(options.mcpApps === undefined ? {} : { mcpApps: options.mcpApps }),
           ensureThread: () => unimplemented("ensureThread unused in test"),
           resumeThread: (threadInput) =>
             Ref.update(state, (current) => ({
@@ -488,6 +490,7 @@ function layerTest(input: {
     readonly paused: Deferred.Deferred<void>;
   };
   readonly hasStaleCredentials?: Effect.Effect<boolean>;
+  readonly mcpApps?: ProviderAdapter.ProviderAdapterV2McpApps;
   readonly beforeResume?: Effect.Effect<void>;
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
@@ -518,6 +521,7 @@ function layerTest(input: {
         ? {}
         : { hasStaleCredentials: input.hasStaleCredentials }),
       ...(input.beforeResume === undefined ? {} : { beforeResume: input.beforeResume }),
+      ...(input.mcpApps === undefined ? {} : { mcpApps: input.mcpApps }),
       ...(input.capabilities === undefined ? {} : { capabilities: input.capabilities }),
       ...(input.mcpConfigs === undefined ? {} : { mcpConfigs: input.mcpConfigs }),
       ...(input.beforeOpen === undefined ? {} : { beforeOpen: input.beforeOpen }),
@@ -3570,6 +3574,8 @@ it.effect.each(["startTurn", "compactThread"] as const)(
       const state = yield* Ref.make(emptyState);
       const stale = yield* Ref.make(false);
       const background = yield* Ref.make(false);
+      const toolEntered = yield* Deferred.make<void>();
+      const toolContinue = yield* Deferred.make<void>();
       const resumeEntered = yield* Deferred.make<void>();
       const resumeContinue = yield* Deferred.make<void>();
       const pauseResume = yield* Ref.make(false);
@@ -3665,8 +3671,18 @@ it.effect.each(["startTurn", "compactThread"] as const)(
         yield* Ref.set(background, true);
         assert.strictEqual(yield* open(b), first);
         yield* Ref.set(background, false);
+        const toolInput = { providerThread, server: "app", tool: "save", arguments: {} };
+        const appCall = yield* first.mcpApps!.callTool(toolInput).pipe(Effect.forkChild);
+        yield* Deferred.await(toolEntered);
+        assert.strictEqual(yield* open(b), first);
+        yield* Deferred.succeed(toolContinue, undefined);
+        assert.deepEqual(yield* Fiber.join(appCall), { content: [] });
         const recovered = yield* open(b);
         assert.notStrictEqual(recovered, first);
+        assert.equal(
+          (yield* first.mcpApps!.callTool(toolInput).pipe(Effect.result))._tag,
+          "Failure",
+        );
         first = recovered;
         yield* Ref.set(stale, true);
         yield* Ref.set(pauseResume, true);
@@ -3722,6 +3738,15 @@ it.effect.each(["startTurn", "compactThread"] as const)(
             idleTimeoutMs: 60_000,
             beforeOpen: () => Ref.set(stale, false),
             hasStaleCredentials: Ref.get(stale),
+            mcpApps: {
+              listTools: () => Effect.succeed([]),
+              readResource: () => Effect.succeed({ contents: [] }),
+              callTool: () =>
+                Deferred.succeed(toolEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(toolContinue)),
+                  Effect.as({ content: [] }),
+                ),
+            },
             hasPendingBackgroundWork: Ref.getAndSet(pauseProbe, false).pipe(
               Effect.flatMap((pause) =>
                 pause

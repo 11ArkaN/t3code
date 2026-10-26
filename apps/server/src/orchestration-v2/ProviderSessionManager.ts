@@ -1930,8 +1930,17 @@ export const layerWithOptions = (
                         });
                   }).pipe(Effect.andThen(scheduleIdleReleaseInternal(providerSessionId))),
               );
+        const mcpApps = exposed.mcpApps;
         return {
           ...exposed,
+          ...(mcpApps === undefined
+            ? {}
+            : {
+                mcpApps: {
+                  ...mcpApps,
+                  callTool: (input) => withRuntimeUse(mcpApps.callTool(input)),
+                },
+              }),
           ensureThread: (input) => withRuntimeUse(exposed.ensureThread(input)),
           resumeThread: (input) => withRuntimeUse(exposed.resumeThread(input)),
           forkThread: (input) => withRuntimeUse(exposed.forkThread(input)),
