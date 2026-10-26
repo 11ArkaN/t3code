@@ -808,6 +808,49 @@ describe("buildThreadListV2ListItems", () => {
     expect(threadJumpTarget(items, "thread.jump.2")?.id).toBe("settled");
     expect(threadJumpTarget(items, "thread.jump.3")).toBeNull();
   });
+  it("marks cached rows from an offline environment while another stays connected", () => {
+    const offlineEnvironmentId = EnvironmentId.make("environment-offline");
+    const mixedLayout = buildThreadListV2Items({
+      threads: [
+        makeThread({ id: ThreadId.make("online"), title: "online" }),
+        makeThreadShellFixture({
+          environmentId: offlineEnvironmentId,
+          id: ThreadId.make("cached"),
+          title: "cached",
+        }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const connected = buildThreadListV2ListItems({
+      items: mixedLayout.items,
+      pendingTasks: [],
+      offlineEnvironmentIds: new Set(),
+    } as Parameters<typeof buildThreadListV2ListItems>[0]);
+    const disconnected = buildThreadListV2ListItems({
+      items: mixedLayout.items,
+      pendingTasks: [],
+      offlineEnvironmentIds: new Set([offlineEnvironmentId]),
+    } as Parameters<typeof buildThreadListV2ListItems>[0]);
+    const environmentOffline = (items: ThreadListV2ListItem[]) =>
+      Object.fromEntries(
+        items.flatMap((item) =>
+          item.type === "v2-thread"
+            ? [[item.item.thread.id, (item as { environmentOffline?: boolean }).environmentOffline]]
+            : [],
+        ),
+      );
+
+    expect(environmentOffline(disconnected)).toEqual({ online: false, cached: true });
+    const cachedKey = `v2-thread:${offlineEnvironmentId}:cached`;
+    expect(
+      threadListV2ListItemsAreEqual(
+        connected.find((item) => item.key === cachedKey)!,
+        disconnected.find((item) => item.key === cachedKey)!,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("pending mobile thread moves", () => {
