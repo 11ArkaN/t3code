@@ -301,9 +301,9 @@ describe("showContextMenuFallback", () => {
     const selectionPromise = showContextMenuFallback([{ id: "rename", label: "Rename" }]);
     const renameButton = findButton("Rename");
 
-    renameButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    renameButton?.dispatchEvent(new FakeDomEvent("click", { bubbles: true }));
     enablePointerSelection?.(0);
-    renameButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    renameButton?.dispatchEvent(new FakeDomEvent("click", { bubbles: true }));
 
     await expect(selectionPromise).resolves.toBe("rename");
   });
@@ -414,6 +414,34 @@ describe("showContextMenuFallback", () => {
     await expect(selectionPromise).resolves.toBeNull();
     expect(findButton("Copy")).toBeUndefined();
     expect(fakeDocument().activeElement).toBe(invoker);
+  });
+
+  it("closes on Tab and lets the browser continue from the invoker", async () => {
+    const invoker = mountInvoker();
+    const selectionPromise = showContextMenuFallback([{ id: "rename", label: "Rename" }]);
+
+    expect(pressKey("Tab").defaultPrevented).toBe(false);
+    await expect(selectionPromise).resolves.toBeNull();
+    expect(fakeDocument().activeElement).toBe(invoker);
+  });
+
+  it("keeps keyboard focus when hover events arrive without pointer movement", () => {
+    mountInvoker();
+    void showContextMenuFallback(
+      [
+        { id: "rename", label: "Rename" },
+        { id: "archive", label: "Archive" },
+      ],
+      { x: 10, y: 10 },
+    );
+    const rename = findButton("Rename");
+
+    pressKey("ArrowDown");
+    rename?.dispatchEvent(new FakeDomEvent("mousemove", { clientX: 10, clientY: 10 }));
+    expect(focusedLabel()).toBe("Archive");
+
+    rename?.dispatchEvent(new FakeDomEvent("mousemove", { clientX: 12, clientY: 10 }));
+    expect(focusedLabel()).toBe("Rename");
   });
 
   it("restores focus to the original invoker after an open menu is replaced", async () => {
