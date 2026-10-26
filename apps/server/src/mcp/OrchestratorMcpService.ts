@@ -634,7 +634,7 @@ function pageIncludesTerminalTaskResult(input: {
 }
 
 function latestTerminalResultRun(
-  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs">,
+  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs" | "subagents">,
   delegatedRun: OrchestrationV2Run | undefined,
 ): OrchestrationV2Run | undefined {
   const notificationRunIds = new Set([

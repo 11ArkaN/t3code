@@ -225,6 +225,9 @@ export function delegatedQuestionRunIds(projection: {
   readonly messages: ReadonlyArray<
     Pick<OrchestrationV2ConversationMessage, "runId" | "notification">
   >;
+  readonly subagents: ReadonlyArray<
+    Pick<OrchestrationV2ThreadProjection["subagents"][number], "completionDelivery">
+  >;
 }) {
   const questionRuns = new Set(
     projection.messages.flatMap(({ runId, notification }) =>
@@ -249,6 +252,23 @@ export function delegatedQuestionRunIds(projection: {
       if (questionRuns.has(continuationId)) continue;
       questionRuns.add(continuationId);
       pending.push(continuationId);
+    }
+  }
+  // A question turn can finish the task when it observes a child result.
+  const observed = new Set(
+    projection.subagents.flatMap((task) =>
+      task.completionDelivery?.observedByRunId == null
+        ? []
+        : [task.completionDelivery.observedByRunId],
+    ),
+  );
+  const resultRuns = [...observed];
+  for (const runId of resultRuns) {
+    questionRuns.delete(runId);
+    for (const continuationId of continuations.get(runId) ?? []) {
+      if (observed.has(continuationId)) continue;
+      observed.add(continuationId);
+      resultRuns.push(continuationId);
     }
   }
   return questionRuns;

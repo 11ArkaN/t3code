@@ -263,13 +263,31 @@ it("waits for nested work and retains the report across monitor acknowledgements
   assert.equal(progress.resultRun?.id, report.id);
 });
 
-it.each([0, 2])(
-  "retains the task result after a question wake with %s restart continuations",
-  (restarts) => {
+it.each([
+  [0, false],
+  [2, false],
+  [0, true],
+  [2, true],
+] as const)(
+  "selects the task result after a question wake with %s restarts (observed result: %s)",
+  (restarts, observed) => {
     const { projection, run } = taskFixture();
     const wake = { ...run, id: RunId.make("question-wake"), ordinal: 2 };
+    const expectedRunId = observed
+      ? restarts === 0
+        ? wake.id
+        : RunId.make(`question-restart:${restarts - 1}`)
+      : run.id;
     const progress = delegatedTaskProgress({
       ...projection,
+      subagents: observed
+        ? [
+            {
+              status: "completed",
+              completionDelivery: { state: "acknowledged", observedByRunId: wake.id },
+            },
+          ]
+        : [],
       runs: [
         run,
         wake,
@@ -297,7 +315,7 @@ it.each([0, 2])(
       ],
     });
     assert.equal(progress.state, "result_available");
-    assert.equal(progress.resultRun?.id, run.id);
+    assert.equal(progress.resultRun?.id, expectedRunId);
   },
 );
 

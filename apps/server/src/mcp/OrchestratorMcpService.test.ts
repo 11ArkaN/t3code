@@ -401,9 +401,14 @@ describe("OrchestratorMcpService", () => {
     }),
   );
 
-  it.effect.each([0, 2])(
-    "keeps a question wake with %s restarts from replacing the child's latest result",
-    (restarts) =>
+  it.effect.each([
+    { restarts: 0, observed: false },
+    { restarts: 2, observed: false },
+    { restarts: 0, observed: true },
+    { restarts: 2, observed: true },
+  ])(
+    "selects the task result for question wake $restarts restarts, observed $observed",
+    ({ restarts, observed }) =>
       Effect.gen(function* () {
         const parentThreadId = ThreadId.make("thread:mcp-stale-question-parent");
         const childThreadId = ThreadId.make("thread:mcp-stale-question-child");
@@ -411,6 +416,11 @@ describe("OrchestratorMcpService", () => {
         const taskId = NodeId.make("node:mcp-stale-question-task");
         const resultRunId = RunId.make("run:mcp-stale-question-result");
         const wakeRunId = RunId.make("run:mcp-stale-question-wake");
+        const expectedRunId = observed
+          ? restarts === 0
+            ? wakeRunId
+            : RunId.make(`run:mcp-question-restart:${restarts - 1}`)
+          : resultRunId;
         const completedAt = DateTime.makeUnsafe("2026-10-26T03:06:53.000Z");
         const wakeCompletedAt = DateTime.makeUnsafe("2026-10-26T03:07:09.000Z");
         const parentProjection = {
@@ -488,14 +498,21 @@ describe("OrchestratorMcpService", () => {
             },
             {
               id: MessageId.make("message:mcp-stale-question-answer"),
-              runId: wakeRunId,
+              runId: observed ? expectedRunId : wakeRunId,
               role: "assistant",
               text: "Answered the delayed question.",
               createdAt: wakeCompletedAt,
               updatedAt: wakeCompletedAt,
             },
           ],
-          subagents: [],
+          subagents: observed
+            ? [
+                {
+                  status: "completed",
+                  completionDelivery: { state: "acknowledged", observedByRunId: wakeRunId },
+                },
+              ]
+            : [],
           providerThreads: [],
           runtimeRequests: [],
           nodes: [],
@@ -536,8 +553,11 @@ describe("OrchestratorMcpService", () => {
           return yield* service.taskStatus(scope, taskId);
         }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
         assert.equal(result.summary, "Opened the fix PR.");
-        assert.equal(result.latestTerminalRunId, resultRunId);
-        assert.isNull(result.latestTerminalSummary);
+        assert.equal(result.latestTerminalRunId, expectedRunId);
+        assert.equal(
+          result.latestTerminalSummary,
+          observed ? "Answered the delayed question." : null,
+        );
       }),
   );
 
