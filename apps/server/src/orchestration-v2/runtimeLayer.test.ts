@@ -640,6 +640,20 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
         (yield* orchestrator.getThreadProjection(deleted.threadId)).thread.deletedAt,
       );
       assert.include(yield* listRefs, deleted.refs[0]);
+      // Queued last, so the failing cleanup does not hold the thread's other cleanup behind it.
+      assert.deepEqual(
+        Object.fromEntries(
+          (yield* outbox.listByCommandId(deleteCommandId))
+            .filter((effect) => effect.request.type.endsWith(".cleanup"))
+            .map((effect) => [effect.request.type, effect.status]),
+        ),
+        {
+          "scheduled-tasks.cleanup": "succeeded",
+          "terminal.cleanup": "succeeded",
+          "preview.cleanup": "succeeded",
+          "checkpoint.cleanup": "pending",
+        },
+      );
 
       // The retry is claimed by a process that dies before finishing it.
       yield* fileSystem.remove(lockPath);

@@ -216,28 +216,6 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       },
     });
   }
-  // The project root covers V1 turn refs and refs shared by worktrees that are gone by cleanup time.
-  const checkpointCwds = Array.from(
-    new Set(
-      [
-        projection.thread.worktreePath,
-        input.projectWorkspaceRoot,
-        ...projection.checkpointScopes.map((scope) => scope.cwd),
-      ].filter((cwd) => cwd !== null),
-    ),
-  );
-  if (checkpointCwds.length > 0) {
-    effects.push({
-      id: `effect:${command.commandId}:checkpoint.cleanup`,
-      commandId: command.commandId,
-      threadId: command.threadId,
-      request: {
-        type: "checkpoint.cleanup",
-        cwds: checkpointCwds,
-        scopeIds: projection.checkpointScopes.map((scope) => scope.id),
-      },
-    });
-  }
   effects.push({
     id: `effect:${command.commandId}:scheduled-tasks.cleanup`,
     commandId: command.commandId,
@@ -263,6 +241,29 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       commandId: command.commandId,
       threadId: command.threadId,
       request: { type: "attachment.cleanup", attachmentIds },
+    });
+  }
+  // Last: it retries until it succeeds, and per-thread ordering would hold everything queued after it.
+  // The project root covers V1 turn refs and refs shared by worktrees that are gone by cleanup time.
+  const checkpointCwds = Array.from(
+    new Set(
+      [
+        projection.thread.worktreePath,
+        input.projectWorkspaceRoot,
+        ...projection.checkpointScopes.map((scope) => scope.cwd),
+      ].filter((cwd) => cwd !== null),
+    ),
+  );
+  if (checkpointCwds.length > 0) {
+    effects.push({
+      id: `effect:${command.commandId}:checkpoint.cleanup`,
+      commandId: command.commandId,
+      threadId: command.threadId,
+      request: {
+        type: "checkpoint.cleanup",
+        cwds: checkpointCwds,
+        scopeIds: projection.checkpointScopes.map((scope) => scope.id),
+      },
     });
   }
   return { events, effects };

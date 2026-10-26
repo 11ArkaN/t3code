@@ -415,6 +415,7 @@ const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_RECOVERY_MAX_CANDIDATES = 64;
 const CHECKPOINT_RECOVERY_TIMEOUT = "5 seconds";
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
+const CHECKPOINT_REF_DELETE_BATCH = 1_000;
 // Plain path segments only, so a namespace can never act as a for-each-ref glob or broader prefix.
 const CHECKPOINT_REF_NAMESPACE = /^refs\/t3\/(?:[A-Za-z0-9_-]+\/)+$/;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
@@ -1378,23 +1379,35 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
             detail: `Refusing to delete refs below ${invalid}.`,
           });
         }
-        const listed =
-          namespaces.length === 0
-            ? []
-            : (yield* execute({
-                operation,
-                cwd: input.cwd,
-                args: ["for-each-ref", "--format=%(refname)", ...namespaces],
-              })).stdout.split("\n");
-        const refs = new Set([...input.checkpointRefs, ...listed].filter((ref) => ref !== ""));
-        if (refs.size === 0) return;
-        // One transaction: a locked ref fails the whole deletion instead of being skipped.
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["update-ref", "--stdin"],
-          stdin: Array.from(refs, (ref) => `delete ${ref}\n`).join(""),
-        });
+        // One transaction per batch: a locked ref fails the deletion instead of being skipped.
+        const deleteRefs = (refs: ReadonlyArray<string>) =>
+          execute({
+            operation,
+            cwd: input.cwd,
+            args: ["update-ref", "--stdin"],
+            stdin: refs.map((ref) => `delete ${ref}\n`).join(""),
+          });
+        if (input.checkpointRefs.length > 0) yield* deleteRefs(input.checkpointRefs);
+        if (namespaces.length === 0) return;
+        // Bounded batches until none remain; an over-cap listing fails rather than yielding partial refs.
+        while (true) {
+          const listed = (yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: [
+              "for-each-ref",
+              `--count=${CHECKPOINT_REF_DELETE_BATCH}`,
+              "--format=%(refname)",
+              ...namespaces,
+            ],
+            outputMode: "error",
+          })).stdout
+            .split("\n")
+            .filter((ref) => ref !== "");
+          if (listed.length === 0) return;
+          yield* deleteRefs(listed);
+          if (listed.length < CHECKPOINT_REF_DELETE_BATCH) return;
+        }
       },
     ),
   };
