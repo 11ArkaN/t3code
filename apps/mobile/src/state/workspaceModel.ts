@@ -1,4 +1,7 @@
-import { type EnvironmentShellSummary } from "@t3tools/client-runtime/state/shell";
+import {
+  type EnvironmentShellState,
+  type EnvironmentShellSummary,
+} from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 
 import {
@@ -58,6 +61,19 @@ function overallConnectionState(
     return "offline";
   }
   return "available";
+}
+
+/** Rows stay cached until the environment is connected and its shell has synced. */
+export function isEnvironmentOffline(input: {
+  readonly networkStatus: NetworkStatus;
+  readonly connectionState: EnvironmentConnectionPhase;
+  readonly shellStatus: EnvironmentShellState["status"];
+}): boolean {
+  return (
+    input.networkStatus === "offline" ||
+    input.connectionState !== "connected" ||
+    input.shellStatus !== "live"
+  );
 }
 
 export function projectWorkspaceConnectionState(input: {

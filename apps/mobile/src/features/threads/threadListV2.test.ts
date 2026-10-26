@@ -827,18 +827,16 @@ describe("buildThreadListV2ListItems", () => {
       items: mixedLayout.items,
       pendingTasks: [],
       offlineEnvironmentIds: new Set(),
-    } as Parameters<typeof buildThreadListV2ListItems>[0]);
+    });
     const disconnected = buildThreadListV2ListItems({
       items: mixedLayout.items,
       pendingTasks: [],
       offlineEnvironmentIds: new Set([offlineEnvironmentId]),
-    } as Parameters<typeof buildThreadListV2ListItems>[0]);
+    });
     const environmentOffline = (items: ThreadListV2ListItem[]) =>
       Object.fromEntries(
         items.flatMap((item) =>
-          item.type === "v2-thread"
-            ? [[item.item.thread.id, (item as { environmentOffline?: boolean }).environmentOffline]]
-            : [],
+          item.type === "v2-thread" ? [[item.item.thread.id, item.environmentOffline]] : [],
         ),
       );
 

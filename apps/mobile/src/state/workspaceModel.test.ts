@@ -7,7 +7,11 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
-import { projectWorkspaceEnvironment, projectWorkspaceState } from "./workspaceModel";
+import {
+  isEnvironmentOffline,
+  projectWorkspaceEnvironment,
+  projectWorkspaceState,
+} from "./workspaceModel";
 import type { EnvironmentPresentation } from "./environments";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
@@ -93,5 +97,18 @@ describe("mobile workspace projection", () => {
     expect(state.hasSyncingConnectedEnvironment).toBe(false);
     expect(state.hasReadyEnvironment).toBe(false);
     expect(state.connectionState).toBe("reconnecting");
+  });
+
+  it("treats an environment as offline until it is connected with a live shell", () => {
+    const offline = (
+      connectionState: EnvironmentPresentation["connection"]["phase"],
+      shellStatus: "empty" | "synchronizing" | "live",
+      networkStatus: "online" | "offline" = "online",
+    ) => isEnvironmentOffline({ networkStatus, connectionState, shellStatus });
+
+    expect(offline("reconnecting", "synchronizing")).toBe(true);
+    expect(offline("connected", "synchronizing")).toBe(true);
+    expect(offline("connected", "live")).toBe(false);
+    expect(offline("connected", "live", "offline")).toBe(true);
   });
 });

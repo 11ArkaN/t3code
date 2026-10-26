@@ -301,6 +301,8 @@ export interface ThreadListV2ThreadListItem {
   readonly showTrailingDivider: boolean;
   /** Include queued state in item equality; outbox writes do not update thread shells. */
   readonly hasQueuedMessages: boolean;
+  /** Its environment is not live, so the row shows cached state. */
+  readonly environmentOffline: boolean;
   readonly canMoveUp: boolean;
   readonly canMoveDown: boolean;
 }
@@ -377,6 +379,7 @@ export function threadListV2ListItemsAreEqual(
         previous.snoozePresetMinute === item.snoozePresetMinute &&
         previous.showTrailingDivider === item.showTrailingDivider &&
         previous.hasQueuedMessages === item.hasQueuedMessages &&
+        previous.environmentOffline === item.environmentOffline &&
         previous.canMoveUp === item.canMoveUp &&
         previous.canMoveDown === item.canMoveDown
       );
@@ -447,6 +450,7 @@ export function buildThreadListV2ListItems(input: {
   readonly snoozeLabelNow?: string;
   readonly snoozeEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly queuedThreadKeys?: ReadonlySet<string>;
+  readonly offlineEnvironmentIds?: ReadonlySet<EnvironmentId>;
   readonly moveAvailability?: ReadonlyMap<string, ThreadMoveAvailability>;
   readonly shelfPreferencesLoading?: boolean;
 }): ThreadListV2ListItem[] {
@@ -478,6 +482,7 @@ export function buildThreadListV2ListItems(input: {
       showTrailingDivider: false,
       hasQueuedMessages:
         queuedThreadKeys?.has(`${item.thread.environmentId}:${item.thread.id}`) === true,
+      environmentOffline: input.offlineEnvironmentIds?.has(item.thread.environmentId) === true,
       canMoveUp: move?.canMoveUp === true,
       canMoveDown: move?.canMoveDown === true,
     };

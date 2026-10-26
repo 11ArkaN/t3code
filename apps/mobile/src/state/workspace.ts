@@ -1,9 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useMemo } from "react";
 import { Atom } from "effect/reactivity";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 import { environmentShell, environmentShellSummaryAtom } from "./shell";
-import { projectWorkspaceState } from "./workspaceModel";
+import { isEnvironmentOffline, projectWorkspaceState } from "./workspaceModel";
 import { environmentCatalog } from "../connection/catalog";
 import { environmentPresentations } from "./presentation";
 import { createWorkspaceConnectionAtoms } from "./workspace-connection-atoms";
@@ -23,6 +24,28 @@ const hasSyncingConnectedEnvironmentAtom = Atom.make((get) =>
       get(environmentShell.stateValueAtom(environment.environmentId)).status === "synchronizing",
   ),
 ).pipe(Atom.withLabel("mobile:has-syncing-connected-environment"));
+
+let lastOfflineEnvironmentIds: ReadonlySet<EnvironmentId> = new Set();
+
+export const offlineEnvironmentIdsAtom = Atom.make((get) => {
+  const networkStatus = get(environmentCatalog.networkStatusValueAtom);
+  const ids = get(workspaceConnections.environmentsAtom).flatMap((environment) =>
+    isEnvironmentOffline({
+      networkStatus,
+      connectionState: environment.connectionState,
+      shellStatus: get(environmentShell.stateValueAtom(environment.environmentId)).status,
+    })
+      ? [environment.environmentId]
+      : [],
+  );
+  if (
+    ids.length !== lastOfflineEnvironmentIds.size ||
+    ids.some((id) => !lastOfflineEnvironmentIds.has(id))
+  ) {
+    lastOfflineEnvironmentIds = new Set(ids);
+  }
+  return lastOfflineEnvironmentIds;
+}).pipe(Atom.withLabel("mobile:offline-environment-ids"));
 
 export function useWorkspaceEnvironments() {
   return useAtomValue(workspaceConnections.environmentsAtom);
