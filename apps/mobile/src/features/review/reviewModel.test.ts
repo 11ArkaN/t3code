@@ -52,7 +52,6 @@ it("omits commit sources from mobile review sections", () => {
     checkpoints: [],
     gitSections,
     turnDiffById: {},
-    loadingTurnIds: {},
     loadingGitSections: false,
   });
   expect(items.map((item) => item.id)).toEqual(["git:branch-range"]);
