@@ -56,9 +56,10 @@ describe("agentActivityWidgetTimeline", () => {
     await publishAgentActivityWidget({ kind: "signed-out" }, null);
     expect(nativeWidget.updateTimeline).toHaveBeenLastCalledWith([
       expect.objectContaining({
-        props: expect.objectContaining({ accountId: null, activities: [] }),
+        props: expect.objectContaining({ activities: [] }),
       }),
     ]);
+    expect(nativeWidget.updateTimeline.mock.lastCall?.[0][0].props).not.toHaveProperty("accountId");
   });
 
   it("keeps sign-out last when an earlier cached timeline read is delayed", async () => {

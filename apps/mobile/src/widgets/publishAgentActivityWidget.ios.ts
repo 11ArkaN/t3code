@@ -23,7 +23,10 @@ export function publishAgentActivityWidget(
     widget.updateTimeline(
       agentActivityWidgetTimeline(source, Date.now()).map((entry) => ({
         ...entry,
-        props: { ...entry.props, accountId: source.kind === "snapshot" ? accountId : null },
+        props: {
+          ...entry.props,
+          ...(source.kind === "snapshot" && accountId ? { accountId } : {}),
+        },
       })),
     );
   });
