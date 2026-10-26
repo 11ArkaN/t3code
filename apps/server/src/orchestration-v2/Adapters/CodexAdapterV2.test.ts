@@ -1817,6 +1817,210 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  // regression: #25191 a restarted app-server re-appends unchanged context after thread/resume
+  it.effect("does not resend unchanged T3 context after an app-server restart", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const nativeThreadId = "restart-context-thread";
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        const withT3Mcp = (threadId: ThreadId) =>
+          mcpSessions.set({
+            environmentId: EnvironmentId.make("test"),
+            threadId,
+            providerSessionId: "restart-context-session",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            endpoint: "http://127.0.0.1:43123/mcp",
+            authorizationHeader: "Bearer test",
+            browserToolsAvailable: true,
+          });
+        const contextParams = (
+          text: string,
+          appContext?: ProviderAdapter.ProviderAdapterV2TurnInput["appContext"],
+        ) =>
+          CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId,
+            codexInput: [{ type: "text", text }],
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            hasT3Mcp: true,
+            ...(appContext === undefined ? {} : { appContext }),
+          });
+        const completed = (id: number, nativeTurnId: string, method: string, params: unknown) =>
+          [
+            { type: "expect_outbound", label: method, frame: { id, method, params } },
+            {
+              type: "emit_inbound",
+              label: method,
+              frame: {
+                id,
+                result: { turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }) },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: `${nativeTurnId} completed`,
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ] satisfies Array<CodexReplay.CodexAppServerReplayEntry>;
+        const preamble = codexReplayPreamble({
+          nativeThreadId,
+          nativeTurnId: "unused-turn",
+          prompt: "unused-prompt",
+        }).slice(0, 5);
+        const firstParams = yield* contextParams("before restart");
+
+        const beforeRestart = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "restart-context-before",
+            entries: [...preamble, ...completed(3, "turn-before", "turn/start", firstParams)],
+          }),
+        );
+        yield* withT3Mcp(beforeRestart.threadId);
+        yield* beforeRestart.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: beforeRestart.threadId,
+            providerThread: beforeRestart.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-context-before"),
+            text: "before restart",
+          }),
+        );
+        yield* beforeRestart.firstTerminal;
+        const persistedProviderThread =
+          beforeRestart.events.findLast((event) => event.type === "provider_thread.updated")
+            ?.providerThread ?? beforeRestart.providerThread;
+
+        const unchangedParams = yield* contextParams("after restart");
+        const { additionalContext: _unchanged, ...unchangedWithoutContext } = unchangedParams;
+        const appContext = [{ key: "mcp_app_todos_item-1", text: "Filtered to overdue" }];
+        const changedParams = yield* contextParams("changed context", appContext);
+        const afterRestart = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: "restart-context-after",
+            entries: [
+              ...preamble,
+              {
+                type: "expect_outbound",
+                label: "thread/resume",
+                frame: {
+                  id: 3,
+                  method: "thread/resume",
+                  params: {
+                    threadId: nativeThreadId,
+                    excludeTurns: true,
+                    config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread/resume",
+                frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+              },
+              {
+                type: "expect_outbound",
+                label: "unchanged context turn",
+                frame: { id: 4, method: "turn/start", params: unchangedWithoutContext },
+              },
+              {
+                type: "emit_inbound",
+                label: "unchanged context turn",
+                frame: {
+                  id: 4,
+                  result: { turn: makeCodexReplayTurn({ id: "turn-after", status: "inProgress" }) },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "compacted",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: "turn-after",
+                    item: { type: "contextCompaction", id: "compact-after-restart" },
+                  },
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "restore context",
+                frame: {
+                  id: 5,
+                  method: "thread/inject_items",
+                  params: {
+                    threadId: nativeThreadId,
+                    items: Object.entries(unchangedParams.additionalContext ?? {}).map(
+                      ([key, entry]) => ({
+                        type: "message",
+                        role: "developer",
+                        content: [{ type: "input_text", text: `<${key}>${entry.value}</${key}>` }],
+                      }),
+                    ),
+                  },
+                },
+              },
+              { type: "emit_inbound", label: "restored", frame: { id: 5, result: {} } },
+              {
+                type: "emit_inbound",
+                label: "turn-after completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: "turn-after", status: "completed" }),
+                  },
+                },
+              },
+              ...completed(6, "turn-changed", "turn/start", changedParams),
+            ],
+          }),
+        );
+        yield* withT3Mcp(afterRestart.threadId);
+        const resumed = yield* afterRestart.runtime.resumeThread({
+          providerThread: persistedProviderThread,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        yield* afterRestart.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: afterRestart.threadId,
+            providerThread: resumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-context-unchanged"),
+            text: "after restart",
+          }),
+        );
+        yield* afterRestart.awaitTerminal(1);
+        yield* afterRestart.runtime.startTurn({
+          ...makeCodexTestTurnInput({
+            threadId: afterRestart.threadId,
+            providerThread: resumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("restart-context-changed"),
+            text: "changed context",
+          }),
+          appContext,
+        });
+        yield* afterRestart.awaitTerminal(2);
+        assert.deepEqual(
+          afterRestart.terminalEvents().map((event) => event.status),
+          ["completed", "completed"],
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("compacts Codex with the native RPC and completes the compaction turn", () =>
     Effect.scoped(
       Effect.gen(function* () {
