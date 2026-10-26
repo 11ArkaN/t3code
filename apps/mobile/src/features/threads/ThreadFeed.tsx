@@ -221,6 +221,7 @@ import {
   isCompactionCommandFeedEntry,
   type ThreadFeedRow,
 } from "./pending-thread-feed";
+import { useThreadQueueWorkflow } from "./ThreadQueueControl";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { resolveThreadFeedFixedItemSize } from "./thread-feed-item-size";
 import { htmlRenderFrameHeight } from "@t3tools/shared/htmlRender";
@@ -1697,7 +1698,11 @@ function renderFeedEntry(
                 </Text>
               ) : null}
               <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
-                {entry.pendingMessage && !entry.acknowledged ? "Pending" : timestampLabel}
+                {entry.queued
+                  ? "Queued"
+                  : entry.pendingMessage && !entry.acknowledged
+                    ? "Pending"
+                    : timestampLabel}
               </Text>
               {props.onEditPendingMessage !== null &&
               entry.pendingMessage &&
@@ -2074,6 +2079,10 @@ function useThreadFeedPresentation(
   expandedWorkGroups: Record<string, boolean>,
 ) {
   const [feedCache] = useState(createThreadFeedCache);
+  const queueWorkflow = useThreadQueueWorkflow({
+    environmentId: props.environmentId,
+    threadId: props.threadId,
+  });
   return appendPendingThreadMessages(
     deriveThreadFeedPresentation(
       props.feed,
@@ -2090,6 +2099,7 @@ function useThreadFeedPresentation(
     ),
     props.feed,
     props.queuedMessages,
+    queueWorkflow?.queuedRuns,
   );
 }
 

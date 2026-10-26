@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
+import type { QueuedThreadRun } from "@t3tools/client-runtime/state/thread-workflows";
 import {
   CommandId,
   ComposerContextId,
   EnvironmentId,
   MessageId,
   ProjectId,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { DateTime } from "effect";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 import { appendPendingThreadMessages, isCompactionCommandFeedEntry } from "./pending-thread-feed";
 
@@ -19,6 +22,21 @@ const pending = (id: string): QueuedThreadMessage => ({
   attachments: [],
   createdAt: "2026-09-06T10:00:00.000Z",
 });
+
+const serverQueued = (id: string, overrides?: Partial<QueuedThreadRun>): QueuedThreadRun => ({
+  run: {
+    id: RunId.make(`run-${id}`),
+    status: "queued",
+    requestedAt: DateTime.makeUnsafe("2026-09-06T10:05:00.000Z"),
+  } as QueuedThreadRun["run"],
+  text: id,
+  attachments: [],
+  messageId: MessageId.make(id),
+  ...overrides,
+});
+
+const feedIds = (entries: ReadonlyArray<{ readonly id: string }>) =>
+  entries.map((entry) => entry.id);
 
 describe("pending timeline messages", () => {
   it.each([false, true])(
@@ -108,5 +126,108 @@ describe("pending timeline messages", () => {
     const delivered = { ...optimistic, pendingMessage: undefined };
     expect(appendPendingThreadMessages([delivered], [delivered], [queued])).toEqual([delivered]);
     expect(appendPendingThreadMessages([], [delivered], [queued])).toEqual([]);
+  });
+
+  it("keeps an accepted follow-up in the feed while the server queues it", () => {
+    const local = pending("follow-up");
+    const outbox = appendPendingThreadMessages([], [], [local], []);
+    expect(outbox[0]?.pendingMessage).toEqual(local);
+    expect(outbox[0]?.queued).toBeUndefined();
+
+    const queued = appendPendingThreadMessages([], [], [], [serverQueued("follow-up")]);
+    expect(feedIds(queued)).toEqual(["follow-up"]);
+    expect(queued[0]?.queued).toBe(true);
+    expect(queued[0]?.pendingMessage).toBeUndefined();
+    expect(queued[0]?.createdAt).toBe("2026-09-06T10:05:00.000Z");
+    if (queued[0]?.type !== "message") throw new Error("Expected a queued message");
+    expect(queued[0].message).toMatchObject({ role: "user", text: "follow-up", runId: null });
+
+    const started = { ...queued[0], queued: undefined };
+    expect(appendPendingThreadMessages([started], [started], [], [])).toEqual([started]);
+  });
+
+  it("prefers the outbox copy while both hold the message", () => {
+    const local = pending("both");
+    const entries = appendPendingThreadMessages([], [], [local], [serverQueued("both")]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.pendingMessage).toEqual(local);
+    expect(entries[0]?.queued).toBeUndefined();
+  });
+
+  it("does not repeat a queued message the feed already shows, even collapsed", () => {
+    const shown = appendPendingThreadMessages([], [], [], [serverQueued("shown")])[0]!;
+    const delivered = { ...shown, queued: undefined };
+    expect(
+      appendPendingThreadMessages([delivered], [delivered], [], [serverQueued("shown")]),
+    ).toEqual([delivered]);
+    expect(appendPendingThreadMessages([], [delivered], [], [serverQueued("shown")])).toEqual([]);
+  });
+
+  it("follows server queue order and drops cancelled runs", () => {
+    const activity = {
+      type: "thinking",
+      runId: null,
+      id: "thinking",
+      createdAt: "2026-09-06T11:00:00.000Z",
+    } as const;
+    const first = serverQueued("first");
+    const second = serverQueued("second");
+    const third = serverQueued("third");
+    expect(
+      feedIds(appendPendingThreadMessages([activity], [], [], [first, second, third])),
+    ).toEqual(["thinking", "first", "second", "third"]);
+    expect(
+      feedIds(appendPendingThreadMessages([activity], [], [], [third, first, second])),
+    ).toEqual(["thinking", "third", "first", "second"]);
+    expect(feedIds(appendPendingThreadMessages([activity], [], [], [third, second]))).toEqual([
+      "thinking",
+      "third",
+      "second",
+    ]);
+    expect(
+      feedIds(appendPendingThreadMessages([activity], [], [pending("unsent")], [first])),
+    ).toEqual(["thinking", "first", "unsent"]);
+  });
+
+  it("keeps a queued message's attachments and context", () => {
+    const context = {
+      version: 1 as const,
+      records: [
+        {
+          version: 1 as const,
+          kind: "mention" as const,
+          contextId: ComposerContextId.make("file"),
+          label: "Checkout.tsx",
+          path: "src/Checkout.tsx",
+        },
+      ],
+    };
+    const attachment = {
+      type: "image" as const,
+      id: "attachment-1",
+      name: "photo.png",
+      mimeType: "image/png",
+      sizeBytes: 3,
+    };
+    const entry = appendPendingThreadMessages(
+      [],
+      [],
+      [],
+      [serverQueued("rich", { attachments: [attachment], context })],
+    )[0];
+    if (entry?.type !== "message") throw new Error("Expected a queued message");
+    expect(entry.message.attachments).toEqual([attachment]);
+    expect(entry.message.context).toEqual(context);
+  });
+
+  it("shows a queued compact command as its text until the run starts", () => {
+    const entry = appendPendingThreadMessages(
+      [],
+      [],
+      [],
+      [serverQueued("compact", { text: "/compact" })],
+    )[0]!;
+    expect(isCompactionCommandFeedEntry(entry)).toBe(false);
+    expect(isCompactionCommandFeedEntry({ ...entry, queued: undefined })).toBe(true);
   });
 });
