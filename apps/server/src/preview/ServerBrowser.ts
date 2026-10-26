@@ -1413,6 +1413,9 @@ const make = Effect.gen(function* () {
     return `${target.protocol ?? "http"}://localhost:${target.port}${path.startsWith("/") || path === "" ? path : `/${path}`}`;
   };
 
+  const cannotShowMessage = (url: string) =>
+    `${url} is a file this browser cannot show, so it was downloaded instead. preview_status lists it under downloads.`;
+
   const navigate = async (
     tab: ServerTab,
     url: string,
@@ -1437,7 +1440,7 @@ const make = Effect.gen(function* () {
       if (message.includes("Download is starting")) {
         throw new ServerBrowserPage.ServerBrowserOperationError(
           "PreviewAutomationExecutionError",
-          `${url} is a file this browser cannot show, so it was downloaded instead. preview_status lists it under downloads.`,
+          cannotShowMessage(url),
         );
       }
       if (/ERR_[A-Z_]+/.test(message)) {
@@ -1957,6 +1960,16 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
+        if (tab.page.url() === "about:blank") {
+          const { sessions } = await runPromise(manager.list({ threadId: tab.threadId }));
+          const navStatus = sessions.find((session) => session.tabId === tab.tabId)?.navStatus;
+          if (navStatus?._tag === "LoadFailed" && navStatus.download !== undefined) {
+            throw new ServerBrowserPage.ServerBrowserOperationError(
+              "PreviewAutomationExecutionError",
+              cannotShowMessage(navStatus.url),
+            );
+          }
+        }
         return withScreencastsPaused(tab, () =>
           ServerBrowserPage.snapshot({
             ...tab,

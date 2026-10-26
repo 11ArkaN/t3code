@@ -925,7 +925,7 @@ it.live(
           operation: "snapshot",
           input: {},
         });
-        expect(snapshot.url).toBe("http://localhost:5173");
+        expect(snapshot.url).toBe("http://localhost:5173/");
       }),
     ).pipe(Effect.provide(layer)),
 );
