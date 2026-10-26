@@ -255,20 +255,25 @@ it.each([
   expect(serializeEditorDoc(editor.state.doc).value).toBe(expected);
 });
 
-// regression: #25180 a multiline paste into a code span serialized as a span the parser cannot rebuild
-it("rebuilds a multiline paste into a code span unchanged", async () => {
-  await using screen = await mountEditor("`xy`");
-  const { editor } = screen;
-  await act(async () => {
-    editor.commands.setTextSelection(2);
-    const clipboardData = new DataTransfer();
-    clipboardData.setData("text/plain", " _a_\nb");
-    editor.view.dom.dispatchEvent(new ClipboardEvent("paste", { clipboardData, cancelable: true }));
-  });
-  const { value } = serializeEditorDoc(editor.state.doc);
-  await using rebuilt = await mountEditor(value);
-  expect(serializeEditorDoc(rebuilt.editor.state.doc).value).toBe(value);
-});
+// regression: #25180 a multiline or backtick paste into a code span serialized as a span the parser cannot rebuild
+it.each([" _a_\nb", "`__z__`"])(
+  "rebuilds a paste of %j into a code span unchanged",
+  async (pasted) => {
+    await using screen = await mountEditor("`xy`");
+    const { editor } = screen;
+    await act(async () => {
+      editor.commands.setTextSelection(2);
+      const clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", pasted);
+      editor.view.dom.dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData, cancelable: true }),
+      );
+    });
+    const { value } = serializeEditorDoc(editor.state.doc);
+    await using rebuilt = await mountEditor(value);
+    expect(serializeEditorDoc(rebuilt.editor.state.doc).value).toBe(value);
+  },
+);
 
 it("keeps the caret inside unknown dollar text across rich and plain remounts", async () => {
   const value = "echo $HOME now";
