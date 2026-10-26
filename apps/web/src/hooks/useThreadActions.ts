@@ -872,16 +872,22 @@ export function useThreadActions() {
     return result;
   };
 
-  const runUndoPlan = (target: ScopedThreadRef, plan: ThreadUndo.ThreadUndoPlan) =>
-    ThreadUndo.executeThreadUndo(
+  const runUndoPlan = (target: ScopedThreadRef, plan: ThreadUndo.ThreadUndoPlan) => {
+    let cancelledQueued = false;
+    return ThreadUndo.executeThreadUndo(
       plan,
       async (step) => {
         switch (step.action) {
-          case "unsettle":
-            return unsettleThread(target);
+          case "unsettle": {
+            const result = await unsettleThread(target);
+            cancelledQueued =
+              result._tag === "Success" && ThreadUndo.cancelledPendingSync(result.value);
+            return result;
+          }
           case "unsnooze":
             return unsnoozeThread(target);
           case "pin":
+            if (cancelledQueued) return AsyncResult.success(undefined);
             return pinThread(
               target,
               step.orderKey === undefined ? {} : { orderKey: step.orderKey },
@@ -893,9 +899,9 @@ export function useThreadActions() {
             });
         }
       },
-      // Cancelling a settle still waiting to sync leaves nothing on the server to restore.
-      (result) => result._tag === "Success" && !ThreadUndo.cancelledPendingSync(result.value),
+      (result) => result._tag === "Success",
     );
+  };
 
   const confirmAndDeleteThread = async (target: ScopedThreadRef) => {
     const permissionFailure = threadOperationFailure(target);

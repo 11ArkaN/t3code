@@ -400,7 +400,7 @@ describe("thread action undo", () => {
 
   // Whether the queued settle reached the server is known only when Undo runs.
   it.each([
-    ["cancels it before it syncs", { sequence: 0, cancelledPendingSync: true }, []],
+    ["cancels it before it syncs", { sequence: 0, cancelledPendingSync: true }, ["snooze"]],
     ["finds it delivered", { sequence: 3 }, ["pin", "snooze"]],
   ])("restores a queued settle only as far as needed when Undo %s", async (_, undone, restored) => {
     state.successValues.set("settle", { sequence: 1, pendingSync: true });

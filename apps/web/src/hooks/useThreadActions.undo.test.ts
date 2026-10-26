@@ -259,7 +259,7 @@ describe("settle and snooze Undo", () => {
         input: { threadId: target.threadId, reason: "user" },
       });
       expect(commands.pin).toHaveBeenCalledTimes(restorations);
-      expect(commands.snooze).toHaveBeenCalledTimes(restorations);
+      expect(commands.snooze).toHaveBeenCalledOnce();
       if (restorations > 0) {
         expect(commands.snooze).toHaveBeenCalledWith({
           environmentId: target.environmentId,

@@ -40,7 +40,7 @@ type Command<I, E> = AtomCommand<
 >;
 
 type StoreOperation =
-  | { readonly _tag: "load" }
+  | { readonly _tag: "load" | "refresh" }
   | {
       readonly _tag: "put";
       readonly entry: Omit<PendingThreadTriage, "commandId">;
@@ -125,6 +125,8 @@ export function createThreadTriageOutbox<R, E>(input: {
     ) {
       const outbox = yield* ThreadTriageOutboxStore;
       switch (operation._tag) {
+        case "refresh":
+          return yield* outbox.load;
         case "load":
           outbox.subscribeCleared((environmentId) => clearLocal(registry, environmentId));
           return yield* outbox.load.pipe(
@@ -364,6 +366,50 @@ export function createThreadTriageOutbox<R, E>(input: {
     }
   };
 
+  const reconnectAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => {
+      if (
+        input.shellStatusAtom === undefined ||
+        get(input.shellStatusAtom(environmentId)) !== "live"
+      )
+        return;
+      const registry = get.registry;
+      const lifetime = registry.get(registryLifetimeAtom);
+      const generation = generations.get(environmentId) ?? 0;
+      void store.run(registry, { _tag: "refresh" }).then((result) => {
+        if (
+          lifetime.ended ||
+          (generations.get(environmentId) ?? 0) !== generation ||
+          !AsyncResult.isSuccess(result)
+        )
+          return;
+        // A reconnect also discovers actions queued by a tab that has since closed.
+        setLocal(registry, (entries) => {
+          const next = [
+            ...entries.filter(
+              (entry) => entry.environmentId !== environmentId || claimed.has(keyOf(entry)),
+            ),
+            ...result.value.entries
+              .filter(
+                (entry) => entry.environmentId === environmentId && !claimed.has(keyOf(entry)),
+              )
+              .map(
+                (entry) =>
+                  entries.find(
+                    (current) =>
+                      sameThreadTriage(current, entry) && current.commandId === entry.commandId,
+                  ) ?? entry,
+              ),
+          ];
+          return next.length === entries.length &&
+            next.every((entry, index) => entry === entries[index])
+            ? entries
+            : next;
+        });
+      });
+    }),
+  );
+
   const replayAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
       const status = input.shellStatusAtom ? get(input.shellStatusAtom(environmentId)) : "empty";
@@ -374,6 +420,7 @@ export function createThreadTriageOutbox<R, E>(input: {
 
   const snapshotAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => {
+      get.mount(reconnectAtom(environmentId));
       get.mount(replayAtom(environmentId));
       // Loads the cached config before an offline action needs to read it.
       if (input.serverConfigAtom) get.mount(input.serverConfigAtom(environmentId));
@@ -424,7 +471,17 @@ export function createThreadTriageOutbox<R, E>(input: {
         const superseded = pendingFor(registry, key);
         try {
           // Started before any await so the optimistic change shows in the same frame.
-          const result = await command.run(registry, target);
+          const result = await command.run(
+            registry,
+            snapshot !== null &&
+              input.shellStatusAtom !== undefined &&
+              registry.get(input.shellStatusAtom(environmentId)) !== "live"
+              ? {
+                  ...target,
+                  input: { ...target.input, snapshotSequence: snapshot.snapshotSequence },
+                }
+              : target,
+          );
           if (AsyncResult.isSuccess(result)) {
             // The server now has a newer action, which the change it replaced would only fight.
             // A change queued after this one started stays, and one a replay holds is left to it.
@@ -454,6 +511,14 @@ export function createThreadTriageOutbox<R, E>(input: {
           }
           await ensureLoaded(registry);
           if (snapshot == null || thread === undefined || !current()) return result;
+          const queuedAction = action(target.input);
+          const now = DateTime.nowUnsafe();
+          if (
+            (queuedAction.type === "settle"
+              ? input.applySettle(thread, now)
+              : input.applySnooze(thread, queuedAction.snoozedUntil, now)) === thread
+          )
+            return result;
           // The put replaces any earlier entry for the thread, so a failed save keeps it.
           const queued = await store.run(registry, {
             _tag: "put",
@@ -505,7 +570,16 @@ export function createThreadTriageOutbox<R, E>(input: {
           claimed.has(claimKey)
         ) {
           // A claimed entry may already be on its way; the server undoes it after it lands.
-          return command.run(registry, target);
+          const result = await command.run(registry, target);
+          if (
+            AsyncResult.isSuccess(result) &&
+            pending !== undefined &&
+            pending.action.type === cancels &&
+            pendingFor(registry, pending) === pending
+          ) {
+            await forget(registry, pending);
+          }
+          return result;
         }
         const lifetime = registry.get(registryLifetimeAtom);
         claimed.add(claimKey);

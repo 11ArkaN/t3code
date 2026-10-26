@@ -281,7 +281,7 @@ export function useThreadListActions(): {
       action,
       claim,
       undo: async () => {
-        // Cancelling a settle still waiting to sync leaves nothing on the server to restore.
+        // A local cancellation keeps pin placement, but may have replaced a queued snooze.
         let cancelledQueued = false;
         try {
           await ThreadUndo.executeThreadUndo(
@@ -297,7 +297,7 @@ export function useThreadListActions(): {
                 case "unsnooze":
                   return unsnoozeThread(thread);
                 case "pin":
-                  return pinThread(thread, step.orderKey);
+                  return cancelledQueued || pinThread(thread, step.orderKey);
                 case "snooze": {
                   const failureTitle =
                     action === "Unpinned" ? "Could not undo unpin" : "Could not undo settle";
@@ -318,7 +318,7 @@ export function useThreadListActions(): {
                 }
               }
             },
-            (result) => result && !cancelledQueued,
+            (result) => result,
           );
         } catch (error) {
           Dialog.alert(

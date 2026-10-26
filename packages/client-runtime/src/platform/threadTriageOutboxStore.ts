@@ -160,17 +160,34 @@ export function makeThreadTriageOutboxStore(storage: {
   return {
     load: lock.withPermits(1)(load),
     put: (entry, stillCurrent) =>
-      update((document) => {
-        if (stillCurrent?.() === false) return null;
-        const replaced = document.entries.find((current) => sameThreadTriage(current, entry));
-        return {
-          ...document,
-          entries: [
-            ...document.entries.filter((current) => current !== replaced),
-            // The replaced change may have reached the server, so the server must undo this one.
-            replaced?.attempted === true ? { ...entry, attempted: true as const } : entry,
-          ],
-        };
+      Effect.suspend(() => {
+        let blocked = false;
+        return update((document) => {
+          if (stillCurrent?.() === false) return null;
+          const replaced = document.entries.find((current) => sameThreadTriage(current, entry));
+          if (replaced?.action.type === "settle" && entry.action.type === "snooze") {
+            blocked = true;
+            return null;
+          }
+          return {
+            ...document,
+            entries: [
+              ...document.entries.filter((current) => current !== replaced),
+              // The replaced change may have reached the server, so the server must undo this one.
+              replaced?.attempted === true ? { ...entry, attempted: true as const } : entry,
+            ],
+          };
+        }).pipe(
+          Effect.flatMap(() =>
+            blocked
+              ? Effect.fail(
+                  new ThreadTriageOutboxStorageError({
+                    cause: new Error("Undo the pending settle before snoozing while offline."),
+                  }),
+                )
+              : Effect.void,
+          ),
+        );
       }),
     remove: (entry) =>
       updateEntries((entries) =>

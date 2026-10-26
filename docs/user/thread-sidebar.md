@@ -146,7 +146,8 @@ runs a command, such as a dev server, stays open.
 You can settle or snooze a thread while its environment is offline. The thread
 shows **Waiting to sync** on mobile or **Pending** on web and desktop, and the change
 is sent when the environment reconnects. If the thread changed there in the meantime,
-that environment's state wins and your change is dropped.
+that environment's state wins and your change is dropped. Undo a pending settle
+before snoozing the same thread while offline.
 On the web, offline changes require a browser with Web Locks support and an HTTPS
 or localhost connection.
 
