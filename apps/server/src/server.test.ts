@@ -1,9 +1,10 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { HttpServer } from "effect/http";
+import { HttpServer, HttpServerError } from "effect/http";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 
@@ -73,6 +74,9 @@ it.live("an explicit wildcard host still fails when its port is taken", () =>
         Effect.exit,
       );
       assert.isTrue(Exit.isFailure(exit));
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+      assert.instanceOf(error, HttpServerError.ServeError);
+      assert.propertyVal(error.cause, "code", "EADDRINUSE");
     }),
   ),
 );

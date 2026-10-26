@@ -336,18 +336,19 @@ export const layerHttpServer = Layer.unwrap(
         Layer.unwrap(
           isAddressInUse(error.cause)
             ? Effect.succeed(
-                Layer.mergeAll(
-                  listen("127.0.0.1"),
+                Layer.merge(
+                  listen("127.0.0.1").pipe(
+                    Layer.tap(() =>
+                      Effect.logWarning(
+                        `Port ${config.port} is taken on another interface; listening on 127.0.0.1 only.`,
+                      ),
+                    ),
+                  ),
                   Layer.succeed(ServerConfig.ServerConfig, {
                     ...config,
                     host: "127.0.0.1",
                     privateNetworkOnly: undefined,
                   }),
-                  Layer.effectDiscard(
-                    Effect.logWarning(
-                      `Port ${config.port} is taken on another interface; listening on 127.0.0.1 only.`,
-                    ),
-                  ),
                 ),
               )
             : Effect.fail(error),
