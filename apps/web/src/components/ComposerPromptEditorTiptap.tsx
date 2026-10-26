@@ -1369,9 +1369,10 @@ function ComposerPromptEditorTiptapInner(
           event.preventDefault();
           // Paste verbatim inside fences and code spans; markdown parsing would split blocks and create unsupported chips.
           const { storedMarks, selection } = view.state;
-          const inCodeSpan = (storedMarks ?? selection.$from.marks()).some(
-            (mark) => mark.type.name === "code",
-          );
+          // Code spans cannot hold a newline, so multiline pastes take the Markdown path and split the span.
+          const inCodeSpan =
+            !pastedText.includes("\n") &&
+            (storedMarks ?? selection.$from.marks()).some((mark) => mark.type.name === "code");
           if (isInCodeBlock(view) || inCodeSpan) {
             const { from, to } = view.state.selection;
             view.dispatch(
