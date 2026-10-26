@@ -155,12 +155,25 @@ export const makeAgentAwarenessPublishWorker = Effect.fnUntraced(function* <R>(
   return { enqueue, drain: worker.drain };
 });
 
+const NOTIFYING_AWARENESS_PHASES: ReadonlySet<RelayAgentActivityState["phase"]> = new Set([
+  "waiting_for_approval",
+  "waiting_for_input",
+  "completed",
+  "failed",
+]);
+
 function agentAwarenessPublishIdentity(state: RelayAgentActivityState | null): string {
   if (state === null) {
     return "null";
   }
   const { updatedAt: _updatedAt, ...meaningfulState } = state;
-  return JSON.stringify(meaningfulState);
+  // Title edits on a phase that already notifies must not republish. The relay
+  // treats a fresh updatedAt as a new terminal or attention alert.
+  if (!NOTIFYING_AWARENESS_PHASES.has(state.phase)) {
+    return JSON.stringify(meaningfulState);
+  }
+  const { threadTitle: _threadTitle, ...activityState } = meaningfulState;
+  return JSON.stringify(activityState);
 }
 
 function resolveAgentActivityPublishingStartupState(input: {

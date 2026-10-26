@@ -6,6 +6,7 @@ import {
   MessageId,
   NodeId,
   type OrchestrationV2DomainEvent,
+  RuntimeRequestId,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   ProjectId,
@@ -335,7 +336,7 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
-  it.effect("deduplicates state and republishes title changes", () =>
+  it.effect("republishes in-progress titles and skips title edits that would re-alert", () =>
     Effect.gen(function* () {
       const { relay, currentShell, publications } = yield* makeTestRelay();
       yield* relay.publishThread(THREAD_ID);
@@ -345,10 +346,91 @@ describe("AgentAwarenessRelay", () => {
       );
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, 1);
-      yield* Ref.set(currentShell, shell({ title: "Renamed thread" }));
+
+      yield* Ref.set(
+        currentShell,
+        shell({
+          title: "Working title",
+          updatedAt: DateTime.makeUnsafe("2026-09-04T13:00:00Z"),
+        }),
+      );
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, 2);
-      assert.equal(publications[1]?.state?.threadTitle, "Renamed thread");
+      assert.equal(publications[1]?.state?.threadTitle, "Working title");
+      assert.equal(publications[1]?.state?.phase, "running");
+
+      yield* Ref.set(
+        currentShell,
+        shell({
+          title: "Working title",
+          status: "completed",
+          updatedAt: DateTime.makeUnsafe("2026-09-04T13:01:00Z"),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 3);
+      assert.equal(publications[2]?.state?.phase, "completed");
+      assert.equal(publications[2]?.state?.threadTitle, "Working title");
+
+      yield* Ref.set(
+        currentShell,
+        shell({
+          title: "Renamed thread",
+          status: "completed",
+          updatedAt: DateTime.makeUnsafe("2026-09-04T13:02:00Z"),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 3);
+    }),
+  );
+
+  it.effect("skips a title edit while a thread is already waiting for attention", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      const waiting = shell({
+        title: "Needs approval",
+        pendingRuntimeRequest: {
+          id: RuntimeRequestId.make("request-1"),
+          kind: "command",
+          createdAt: DateTime.makeUnsafe("2026-09-04T13:01:00Z"),
+        },
+      });
+      yield* Ref.set(currentShell, waiting);
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 1);
+      assert.equal(publications[0]?.state?.phase, "waiting_for_approval");
+      assert.equal(publications[0]?.state?.threadTitle, "Needs approval");
+
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...waiting,
+          title: "Renamed while waiting",
+          updatedAt: DateTime.makeUnsafe("2026-09-04T13:02:00Z"),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 1);
+
+      yield* Ref.set(
+        currentShell,
+        shell({
+          ...waiting,
+          title: "Renamed while waiting",
+          status: "failed",
+          pendingRuntimeRequest: null,
+          updatedAt: DateTime.makeUnsafe("2026-09-04T13:03:00Z"),
+        }),
+      );
+      yield* relay.publishThread(THREAD_ID);
+      assert.equal(publications.length, 2);
+      assert.equal(publications[1]?.state?.phase, "failed");
+      assert.equal(publications[1]?.state?.threadTitle, "Renamed while waiting");
     }),
   );
 
