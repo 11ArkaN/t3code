@@ -622,6 +622,31 @@ describe("resolveThreadStatusPill", () => {
     ).toBeNull();
   });
 
+  it("clears a presented failure with no completion time when the visit matches the shell update", () => {
+    const updatedAt = DateTime.makeUnsafe("2026-03-09T10:05:00.000Z");
+    const thread = presentThreadShell(localEnvironmentId, {
+      ...makeThreadFixture().source,
+      latestRunId: RunId.make("run-failed-open"),
+      status: "failed",
+      latestRunCompletedAt: null,
+      updatedAt,
+      lastVisitedAt: updatedAt,
+    });
+    const visited = { ...thread, lastVisitedAt: thread.runtime?.updatedAt };
+    expect(thread.latestRun?.completedAt).toBeNull();
+    expect(thread.runtime?.status).toBe("failed");
+    expect(hasUnseenFailure(visited)).toBe(false);
+    expect(hasUnseenCompletion(visited)).toBe(false);
+    expect(
+      resolveSidebarV2TopStatus({
+        status: resolveSidebarThreadStatus(thread),
+        isUnread: false,
+        isUnseenFailure: hasUnseenFailure(visited),
+        isWoke: false,
+      }),
+    ).toBeNull();
+  });
+
   it("keeps an unopened failure unseen even when it has no completion time", () => {
     expect(
       hasUnseenFailure({
