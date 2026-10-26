@@ -1398,7 +1398,6 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
                 parentItemId: null,
                 ordinal: 1,
                 type: "assistant_message",
-                driver,
                 status: "running",
                 title: "Assistant",
                 messageId,
