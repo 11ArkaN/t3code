@@ -155,13 +155,21 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         index: number,
         retained: (node: HTMLElement) => boolean,
       ) => {
-        for (let cursor = index - 1; cursor >= 0; cursor--) {
-          const node = order[cursor]!;
-          const delta = movedDelta.get(node);
-          if (delta !== undefined) return delta;
-          if (retained(node)) return remainingOffset(node);
-        }
-        return undefined;
+        const neighbourDelta = (step: number) => {
+          for (let cursor = index + step; cursor >= 0 && cursor < order.length; cursor += step) {
+            const node = order[cursor]!;
+            const delta = movedDelta.get(node);
+            if (delta !== undefined) return delta;
+            if (retained(node)) return remainingOffset(node);
+          }
+          return undefined;
+        };
+        const before = neighbourDelta(-1);
+        const after = neighbourDelta(1);
+        // Ride the stiller side so a run never slides across a stationary neighbour.
+        return before === undefined || after === undefined || Math.abs(before) <= Math.abs(after)
+          ? before
+          : after;
       };
       if (!shouldAnimate) clearFades();
       else {
