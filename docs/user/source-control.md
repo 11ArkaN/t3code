@@ -151,13 +151,13 @@ staged changes still staged. The agent continues there from its next message. Ag
 the same with the `t3_worktree_move_to_local` tool.
 
 The project folder needs no uncommitted changes of its own, and no other thread can be working
-in it. The move also stops when another thread shares the worktree, when a worktree file would
-replace one already in the project folder, or when a submodule has uncommitted work. If any step
-fails, both folders go back to how they were.
+in it. The move also stops when another thread shares the worktree, when a file would land on one
+already in the project folder, when a submodule has uncommitted work, or when files are hidden from
+git with assume-unchanged or skip-worktree. If a step fails, both folders go back to how they were;
+anything you edited in the project folder during the move is left alone.
 
-The worktree folder is deleted by default, along with its ignored files such as
-`node_modules` or `.env`. Clear **Delete the worktree folder** to keep it on a detached HEAD
-with its own copy of the changes.
+The move never deletes the worktree folder. It stays on a detached HEAD with its own copy of the
+changes; delete it yourself once you no longer need it.
 
 ## Create a pull request
 
