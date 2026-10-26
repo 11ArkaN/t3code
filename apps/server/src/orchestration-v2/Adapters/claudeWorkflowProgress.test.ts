@@ -148,7 +148,14 @@ describe("mergeClaudeWorkflowProgress", () => {
     const second = mergeClaudeWorkflowProgress({
       previous: first,
       message: snapshotFrame([
-        { type: "workflow_agent", index: 1, label: "alpha:one", state: "start", attempt: 2 },
+        {
+          type: "workflow_agent",
+          index: 1,
+          label: "alpha:one",
+          state: "start",
+          attempt: 2,
+          startedAt: 3000,
+        },
       ]),
     });
     expect(second?.agents).toEqual([
@@ -157,6 +164,7 @@ describe("mergeClaudeWorkflowProgress", () => {
         label: "alpha:one",
         state: "running",
         attempt: 2,
+        startedAt: 3000,
         phaseIndex: 1,
         phaseTitle: "Alpha",
       },
@@ -186,12 +194,14 @@ describe("mergeClaudeWorkflowProgress", () => {
   ])("keeps member state when the same attempt regresses from %s to %s", (state, staleState) => {
     const first = mergeClaudeWorkflowProgress({
       previous: undefined,
-      message: snapshotFrame([agent({ state, attempt: 2, resultPreview: "Current result" })]),
+      message: snapshotFrame([
+        agent({ state, attempt: 2, startedAt: 1010, resultPreview: "Current result" }),
+      ]),
     });
     const second = mergeClaudeWorkflowProgress({
       previous: first,
       message: snapshotFrame([
-        agent({ state: staleState, attempt: 2, resultPreview: "Old result" }),
+        agent({ state: staleState, attempt: 2, startedAt: 1010, resultPreview: "Old result" }),
       ]),
     });
     expect(second?.agents).toEqual(first?.agents);
