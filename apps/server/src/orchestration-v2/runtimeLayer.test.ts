@@ -5321,10 +5321,14 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         beforeRunId: runIdFor(before, "completion-1"),
       });
 
+      yield* queueCompletion(3);
+
       const after = yield* orchestrator.getThreadProjection(threadId);
       assert.deepEqual(
         queuedRunsInDeliveryOrder(after).map((run) => run.id),
-        ["correction", "completion-1", "completion-2"].map((key) => runIdFor(after, key)),
+        ["correction", "completion-1", "completion-2", "completion-3"].map((key) =>
+          runIdFor(after, key),
+        ),
       );
     }),
   );

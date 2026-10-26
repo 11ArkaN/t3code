@@ -146,11 +146,7 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
-import {
-  isAutomaticCompletionRun,
-  nextAutomaticCompletionQueuePosition,
-  queuedRunsInDeliveryOrder,
-} from "./QueuedRunOrder.ts";
+import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import {
   endOrphanedNativeSubagent,
@@ -5618,14 +5614,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         queuePosition:
           goalStopRunId !== undefined
             ? 1
-            : delegatedCompletion !== undefined
-              ? nextAutomaticCompletionQueuePosition(projection)
-              : Math.max(
-                  0,
-                  ...projection.runs
-                    .filter((candidate) => candidate.status === "queued")
-                    .map((candidate) => candidate.queuePosition ?? candidate.ordinal),
-                ) + 1,
+            : Math.max(
+                0,
+                ...projection.runs
+                  .filter((candidate) => candidate.status === "queued")
+                  .map((candidate) => candidate.queuePosition ?? candidate.ordinal),
+              ) + 1,
         requestedAt: now,
         startedAt: null,
         completedAt: null,
@@ -8376,7 +8370,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         nodeId: queuedRootNode.id,
         providerInstanceId: queuedRun.providerInstanceId,
         occurredAt: now,
-        payload: { ...queuedRun, queuePosition: 1 },
+        payload: { ...queuedRun, queuePosition: 1, queuedAheadOfCompletions: false },
       });
       const stops =
         target !== undefined &&
@@ -8507,6 +8501,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       moving,
       ...withoutMoving.slice(beforeIndex),
     ];
+    const lastCompletionIndex = reordered.findLastIndex((run) =>
+      isAutomaticCompletionRun(projection, run),
+    );
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     yield* Effect.forEach(
@@ -8514,7 +8511,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (run, index) =>
         Effect.gen(function* () {
           const queuePosition = index + 1;
-          if (run.queuePosition === queuePosition) {
+          const aheadOfCompletions =
+            index < lastCompletionIndex && !isAutomaticCompletionRun(projection, run);
+          if (
+            run.queuePosition === queuePosition &&
+            (run.queuedAheadOfCompletions === true) === aheadOfCompletions
+          ) {
             return;
           }
           yield* emitEvent({
@@ -8527,6 +8529,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: {
               ...run,
               queuePosition,
+              ...(aheadOfCompletions || run.queuedAheadOfCompletions === true
+                ? { queuedAheadOfCompletions: aheadOfCompletions }
+                : {}),
             },
           });
         }),
@@ -10502,13 +10507,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   }) {
     const { command, events, effects, projection, now, targetRunId } = input;
     const others = queuedRunsInDeliveryOrder(projection).filter(
-      (run) => run.id !== input.queuedRunId,
+      (run) => run.id !== input.queuedRunId && !isAutomaticCompletionRun(projection, run),
     );
-    let visiblePosition = 1;
-    for (const run of others) {
-      // Completions share the goal command's position, which keeps them first.
-      const queuePosition = isAutomaticCompletionRun(projection, run) ? 1 : ++visiblePosition;
-      if (run.queuePosition === queuePosition) continue;
+    for (const [index, run] of others.entries()) {
+      const queuePosition = index + 2;
+      if (run.queuePosition === queuePosition && run.queuedAheadOfCompletions !== true) continue;
       yield* emit(
         events,
         command,
@@ -10519,7 +10522,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
         providerInstanceId: run.providerInstanceId,
         occurredAt: now,
-        payload: { ...run, queuePosition },
+        payload: { ...run, queuePosition, queuedAheadOfCompletions: false },
       });
     }
     if (targetRunId === undefined) return undefined;

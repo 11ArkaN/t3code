@@ -69,4 +69,38 @@ describe("queued run delivery order", () => {
       "run:visible",
     ]);
   });
+
+  it("delivers a message reordered ahead of completions before them", () => {
+    const projection = {
+      messages: [
+        { id: "message:visible" },
+        {
+          id: "message:automatic",
+          delegatedCompletion: {
+            generation: 1,
+            parentRunId: "run:parent",
+            taskIds: ["task:child"],
+          },
+        },
+        { id: "message:later" },
+      ],
+      runs: [
+        { id: "run:automatic", ordinal: 2, queuePosition: 2, status: "queued" },
+        {
+          id: "run:visible",
+          ordinal: 3,
+          queuePosition: 1,
+          queuedAheadOfCompletions: true,
+          status: "queued",
+        },
+        { id: "run:later", ordinal: 4, queuePosition: 3, status: "queued" },
+      ].map((run) => ({ ...run, userMessageId: run.id.replace("run:", "message:") })),
+    } as never;
+
+    expect(queuedRunsInDeliveryOrder(projection).map((run) => run.id)).toEqual([
+      "run:visible",
+      "run:automatic",
+      "run:later",
+    ]);
+  });
 });
