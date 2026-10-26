@@ -87,6 +87,8 @@ const trimClaude = (native: Native) => {
   if (!first || !Array.isArray(first.content))
     throw new Error("The capture has no first user turn.");
   const blocks = (first.content as ReadonlyArray<Block>).flatMap((block) => {
+    // run.ts reads only text here. Images and documents are the user's attachments.
+    if (block.type !== "text") return [];
     const text = block.text ?? "";
     // The user's CLAUDE.md files.
     if (text.includes("Codebase and user instructions are")) return [];

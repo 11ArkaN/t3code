@@ -7,6 +7,7 @@ import {
   executeCodex,
   gradeSample,
   makeSample,
+  ranCalls,
   type McpToolUseCase,
   mockOutput,
   normalizeToolInput,
@@ -285,6 +286,20 @@ it("replays earlier capability results with the model under test as the caller",
     .flatMap((message) => message.content)
     .find((block) => block.type === "tool_result" && String(block.content).includes("inherited"));
   assert.include(String(replayed?.content), '"inheritedModel":"claude-opus-5-5"');
+});
+
+it("does not record a deferred tool called before it was loaded", () => {
+  const base = buildBase(template, { model: "claude-sonnet-5-5", keepUserInstructions: false });
+  const sample = makeSample(childCase, base);
+  const use = (name: string) => ({ type: "tool_use" as const, id: name, name, input: {} });
+  const ran = ranCalls(sample, 0, [
+    use("mcp__t3-code__link_pull_request"),
+    use("mcp__host__term_Bash"),
+  ]);
+  assert.deepEqual(
+    ran.map((call) => call.tool),
+    ["Bash"],
+  );
 });
 
 it("answers simple mocked commands itself and gives the simulator the sample's history", () => {

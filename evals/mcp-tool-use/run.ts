@@ -1404,6 +1404,16 @@ const recordedCall = (step: number, use: typeof ToolUse.Type): Call => {
   return { step, tool, input: claudeAgent ? { run_in_background: true, ...input } : input };
 };
 
+/** Calls that ran. Claude Code rejects a deferred tool that was not loaded, so it never runs. */
+export const ranCalls = (
+  { base, tools }: Sample,
+  step: number,
+  uses: ReadonlyArray<typeof ToolUse.Type>,
+) =>
+  uses
+    .filter((use) => base.codex !== undefined || hasTool(tools, use.name))
+    .map((use) => recordedCall(step, use));
+
 /**
  * Runs one sample until the model ends its turn, uses up its steps, or fails a check that no
  * later step can undo.
@@ -1438,7 +1448,7 @@ const runSample = Effect.fn("evaluateMcpToolUse.runSample")(function* (
     messages.push({ role: "assistant", content: response.content });
     said.push(...response.content.filter(isText).map((block) => block.text));
     const uses = response.content.filter(isToolUse);
-    calls.push(...uses.map((use) => recordedCall(step, use)));
+    calls.push(...ranCalls(sample, step, uses));
     if (response.stop_reason !== "tool_use") {
       stopReason = response.stop_reason ?? "unknown";
       break;
