@@ -697,14 +697,17 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   return completedAt > lastVisitedAt;
 }
 
-/** Unopened threads' failures still count as unseen, unlike completions. */
-function hasUnseenFailure(thread: ThreadStatusInput): boolean {
+/** Unopened failures stay unseen. Missing completedAt falls back to runtime.updatedAt so a visit can clear them. */
+export function hasUnseenFailure(thread: ThreadStatusInput): boolean {
   if (thread.latestRun?.status !== "failed") return false;
   if (!thread.lastVisitedAt) return true;
-  const completedAt = Date.parse(thread.latestRun.completedAt ?? "");
+  const failedAtRaw = thread.latestRun.completedAt ?? thread.runtime?.updatedAt;
+  if (failedAtRaw == null) return false;
+  const failedAt = Date.parse(failedAtRaw);
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
-  if (Number.isNaN(completedAt) || Number.isNaN(lastVisitedAt)) return true;
-  return completedAt > lastVisitedAt;
+  if (Number.isNaN(failedAt)) return false;
+  if (Number.isNaN(lastVisitedAt)) return true;
+  return failedAt > lastVisitedAt;
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
@@ -908,6 +911,7 @@ export type SidebarV2TopStatusKind =
 export function resolveSidebarV2TopStatus(input: {
   readonly status: SidebarThreadStatus;
   readonly isUnread: boolean;
+  readonly isUnseenFailure: boolean;
   readonly isWoke: boolean;
 }): SidebarV2TopStatusKind | null {
   if (input.status === "working") {
@@ -922,8 +926,11 @@ export function resolveSidebarV2TopStatus(input: {
   if (input.status === "input" || input.status === "request") {
     return input.status;
   }
-  if (input.status === "failed" || input.status === "limited") {
-    return input.status;
+  if (input.status === "limited") {
+    return "limited";
+  }
+  if (input.status === "failed" && input.isUnseenFailure) {
+    return "failed";
   }
   if (input.isWoke) {
     return "woke";

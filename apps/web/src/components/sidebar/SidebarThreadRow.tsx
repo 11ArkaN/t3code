@@ -76,9 +76,11 @@ import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   animateSidebarLayoutChanges,
   hasUnseenCompletion,
+  hasUnseenFailure,
   resolveSidebarRowAccessibility,
   type SidebarDropVerb,
   resolveSidebarThreadStatus,
+  resolveSidebarV2TopStatus,
   resolveThreadLastVisitedAt,
   shouldRecedeSidebarThread,
   resolveWorkingStartedAt,
@@ -681,7 +683,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
     : null;
 
-  const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
+  const visitedThread = { ...thread, lastVisitedAt };
+  const isUnread = hasUnseenCompletion(visitedThread);
+  const isUnseenFailure = hasUnseenFailure(visitedThread);
   const status = resolveSidebarThreadStatus(thread);
   const lastVisitedDate = lastVisitedAt === undefined ? null : parseTimestampDate(lastVisitedAt);
   const wokeAtDate = props.wokeAt === null ? null : parseTimestampDate(props.wokeAt);
@@ -689,6 +693,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     wokeAtDate !== null &&
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     thread.settledOverride !== "settled";
+  const topKind = resolveSidebarV2TopStatus({
+    status,
+    isUnread,
+    isUnseenFailure,
+    isWoke,
+  });
   const shouldRecede = shouldRecedeSidebarThread({
     status,
     isUnread,
@@ -733,19 +743,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     icon: "failed" as const,
                     className: "text-warning-foreground",
                   }
-                : status === "failed"
+                : topKind === "failed"
                   ? {
                       label: "Failed",
                       icon: "failed" as const,
                       className: "text-error-foreground",
                     }
-                  : isWoke
+                  : topKind === "woke"
                     ? {
                         label: "Woke",
                         icon: "woke" as const,
                         className: "text-warning-foreground",
                       }
-                    : isUnread
+                    : topKind === "done"
                       ? {
                           label: "Done",
                           icon: "done" as const,

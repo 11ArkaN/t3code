@@ -9,6 +9,7 @@ import {
   deleteSelectedThreadEntries,
   getFallbackThreadIdAfterDelete,
   hasUnseenCompletion,
+  hasUnseenFailure,
   resolveSidebarRowThreadId,
   isSidebarThreadWorking,
   orderItemsByPreferredIds,
@@ -303,9 +304,14 @@ describe("resolveSidebarThreadStatus", () => {
     expect(
       resolveSidebarThreadStatus({ ...idle, runtime: { ...limited, status: "completed" } }),
     ).toBe("ready");
-    expect(resolveSidebarV2TopStatus({ status: "limited", isUnread: false, isWoke: false })).toBe(
-      "limited",
-    );
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "limited",
+        isUnread: false,
+        isUnseenFailure: false,
+        isWoke: false,
+      }),
+    ).toBe("limited");
     expect(
       shouldRecedeSidebarThread({
         status: "limited",
@@ -577,6 +583,96 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it("acknowledges a failure that has no completion time once the visit is newer than the runtime update", () => {
+    const runtime = {
+      ...baseThread.runtime,
+      status: "failed" as const,
+      activeRunId: null,
+      updatedAt: "2026-03-09T10:05:00.000Z",
+    };
+    const latestRun = { ...makeLatestRun(), status: "failed" as const, completedAt: null };
+    expect(
+      hasUnseenFailure({
+        ...baseThread,
+        latestRun,
+        lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        runtime,
+      }),
+    ).toBe(true);
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestRun,
+          lastVisitedAt: "2026-03-09T10:06:00.000Z",
+          runtime,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps an unopened failure unseen even when it has no completion time", () => {
+    expect(
+      hasUnseenFailure({
+        ...baseThread,
+        latestRun: { ...makeLatestRun(), status: "failed", completedAt: null },
+        lastVisitedAt: undefined,
+        runtime: {
+          ...baseThread.runtime,
+          status: "failed",
+          activeRunId: null,
+          updatedAt: "2026-03-09T10:05:00.000Z",
+        },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("resolveSidebarV2TopStatus", () => {
+  it("shows Failed only for an unseen failure, then Woke, then Done", () => {
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "failed",
+        isUnread: false,
+        isUnseenFailure: true,
+        isWoke: true,
+      }),
+    ).toBe("failed");
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "failed",
+        isUnread: false,
+        isUnseenFailure: false,
+        isWoke: true,
+      }),
+    ).toBe("woke");
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "failed",
+        isUnread: true,
+        isUnseenFailure: false,
+        isWoke: false,
+      }),
+    ).toBe("done");
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "failed",
+        isUnread: false,
+        isUnseenFailure: false,
+        isWoke: false,
+      }),
+    ).toBeNull();
+    expect(
+      resolveSidebarV2TopStatus({
+        status: "working",
+        isUnread: false,
+        isUnseenFailure: true,
+        isWoke: false,
+      }),
+    ).toBe("working");
   });
 });
 
@@ -1018,7 +1114,9 @@ describe("unseen completion with background work", () => {
 
     expect(isUnread).toBe(true);
     expect(status).toBe(expected.status);
-    expect(resolveSidebarV2TopStatus({ status, isUnread, isWoke: false })).toBe(expected.topStatus);
+    expect(
+      resolveSidebarV2TopStatus({ status, isUnread, isUnseenFailure: false, isWoke: false }),
+    ).toBe(expected.topStatus);
     expect(
       shouldRecedeSidebarThread({
         status,
