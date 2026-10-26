@@ -33,7 +33,7 @@ export const offlineEnvironmentIdsAtom = Atom.make((get) => {
     isEnvironmentOffline({
       networkStatus,
       connectionState: environment.connectionState,
-      shellStatus: get(environmentShell.stateValueAtom(environment.environmentId)).status,
+      shellStatus: get(environmentShell.statusAtom(environment.environmentId)),
     })
       ? [environment.environmentId]
       : [],

@@ -1089,9 +1089,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               )}
             >
               {statusLabel.label}
-              {status === "working" ? (
+              {!offline && status === "working" ? (
                 <ThreadListV2Duration startedAt={resolveThreadWorkingStartedAt(thread)} />
-              ) : status === "waiting" ? (
+              ) : !offline && status === "waiting" ? (
                 <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
               ) : null}
             </Text>
