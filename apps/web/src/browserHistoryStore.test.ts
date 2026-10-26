@@ -194,6 +194,18 @@ describe("useBrowserHistoryStore", () => {
     ).toBe("New");
   });
 
+  it("keeps another thread's newer title when this thread revisits the same url", () => {
+    const otherThreadRef = { ...threadRef, threadId: ThreadId.make("thread-2") };
+    const store = useBrowserHistoryStore.getState();
+    store.registerThreadProject(threadRef, "proj-a");
+    store.registerThreadProject(otherThreadRef, "proj-a");
+    recordVisitForThread(threadRef, "http://a.test/", 1);
+    settle("http://a.test/", "Old", "tab_a", threadRef);
+    settle("http://a.test/", "New", "tab_a", otherThreadRef);
+    recordVisitForThread(threadRef, "http://a.test/", 2);
+    expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.title).toBe("New");
+  });
+
   it("sets a title against a settled url that differs from the stored one only by a trailing slash", () => {
     useBrowserHistoryStore.getState().registerThreadProject(threadRef, "proj-a");
     recordVisitForThread(threadRef, "http://a.test/community", 1);
@@ -284,6 +296,19 @@ describe("titles before registration", () => {
 
     const entries = useBrowserHistoryStore.getState().byProjectKey["proj-a"];
     expect(entries?.[0]).toMatchObject({ url: "http://a.test/", title: "My App" });
+  });
+
+  it("keeps another thread's title when a queued visit to the same url drains", () => {
+    const otherThreadRef = { ...threadRef, threadId: ThreadId.make("thread-2") };
+    recordVisitForThread(threadRef, "http://a.test/", 1);
+    settle("http://a.test/", "Old", "tab_a", threadRef);
+    useBrowserHistoryStore.getState().registerThreadProject(otherThreadRef, "proj-a");
+    recordVisitForThread(otherThreadRef, "http://a.test/", 2);
+    settle("http://a.test/", "New", "tab_a", otherThreadRef);
+
+    useBrowserHistoryStore.getState().registerThreadProject(threadRef, "proj-a");
+
+    expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.title).toBe("New");
   });
 });
 

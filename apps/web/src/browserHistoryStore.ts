@@ -337,8 +337,9 @@ export function recordVisitForThread(ref: ScopedThreadRef, url: string, at?: num
 
 /**
  * Titles only update entries already in history, so they apply on settle and on
- * visit. Callers pass only what just happened: history is shared across a
- * project's threads, so replaying an older settle would clobber a newer title.
+ * visit. History is shared across a project's threads and settled sessions stay
+ * retained, so a visit only fills untitled entries: replaying this thread's
+ * older settle would clobber a newer title. Settles apply what just changed.
  */
 function recordPreviewTitles(
   ref: ScopedThreadRef,
@@ -356,7 +357,17 @@ function recordPreviewTitles(
     const normalized = normalizeHistoryUrl(url);
     return normalized ? titleLookupKey(normalized, environmentHostname) : null;
   };
-  const visitKeys = "urls" in only ? new Set(only.urls.map(titleKey)) : null;
+  const titled = new Set(
+    "urls" in only
+      ? state.byProjectKey[projectKey]?.flatMap((entry) =>
+          entry.title ? [titleLookupKey(entry.url, environmentHostname)] : [],
+        )
+      : [],
+  );
+  const visitKeys =
+    "urls" in only
+      ? new Set(only.urls.map(titleKey).filter((key) => key !== null && !titled.has(key)))
+      : null;
   const include = (session: PreviewSessionSnapshot, url: string) =>
     "changedSince" in only
       ? only.changedSince[session.tabId] !== session
