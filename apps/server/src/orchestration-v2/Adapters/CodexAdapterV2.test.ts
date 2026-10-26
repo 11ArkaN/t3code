@@ -1720,102 +1720,178 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  it.effect("preserves T3 context on the wire and restores it after compaction", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const nativeThreadId = "context-thread";
-        const nativeTurnId = "context-turn";
-        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
-          nativeThreadId,
-          codexInput: [{ type: "text", text: "work" }],
-          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-          modelSelection: CODEX_TEST_MODEL_SELECTION,
-          hasT3Mcp: true,
-        });
-        assert.include(
-          params.additionalContext?.t3_code_orchestration_01?.value ?? "",
-          "delegate_task",
-        );
-        const entries = codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "work" });
-        const transcript = makeCodexReplayTranscript({
-          scenario: "restore-context",
-          entries: [
-            ...entries.slice(0, 5),
-            {
-              type: "expect_outbound",
-              label: "context turn",
-              frame: { id: 3, method: "turn/start", params },
-            },
-            ...entries.slice(6),
-            {
-              type: "emit_inbound",
-              label: "compacted",
-              frame: {
-                method: "item/completed",
-                params: {
-                  threadId: nativeThreadId,
-                  turnId: nativeTurnId,
-                  item: { type: "contextCompaction", id: "compact-context" },
+  it.effect.each([false, true])(
+    "restores T3 context and its digest after compaction (explicit: %s)",
+    (explicit) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = "context-thread";
+          const nativeTurnId = "context-turn";
+          const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId,
+            codexInput: [{ type: "text", text: "work" }],
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            hasT3Mcp: true,
+          });
+          assert.include(
+            params.additionalContext?.t3_code_orchestration_01?.value ?? "",
+            "delegate_task",
+          );
+          const entries = codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "work" });
+          const transcript = makeCodexReplayTranscript({
+            scenario: "restore-context",
+            entries: [
+              ...entries.slice(0, 5),
+              {
+                type: "expect_outbound",
+                label: "context turn",
+                frame: { id: 3, method: "turn/start", params },
+              },
+              ...entries.slice(6),
+              ...(explicit
+                ? [
+                    {
+                      type: "emit_inbound" as const,
+                      label: "first turn completed",
+                      frame: {
+                        method: "turn/completed",
+                        params: {
+                          threadId: nativeThreadId,
+                          turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                        },
+                      },
+                    },
+                    {
+                      type: "expect_outbound" as const,
+                      label: "explicit compact",
+                      frame: {
+                        id: 4,
+                        method: "thread/compact/start",
+                        params: { threadId: nativeThreadId },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "explicit compact",
+                      frame: { id: 4, result: {} },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "compact started",
+                      frame: {
+                        method: "turn/started",
+                        params: {
+                          threadId: nativeThreadId,
+                          turn: makeCodexReplayTurn({
+                            id: "explicit-compact-turn",
+                            status: "inProgress",
+                          }),
+                        },
+                      },
+                    },
+                  ]
+                : []),
+              {
+                type: "emit_inbound",
+                label: "compacted",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: explicit ? "explicit-compact-turn" : nativeTurnId,
+                    item: { type: "contextCompaction", id: "compact-context" },
+                  },
                 },
               },
-            },
-            {
-              type: "expect_outbound",
-              label: "restore context",
-              frame: {
-                id: 4,
-                method: "thread/inject_items",
-                params: {
-                  threadId: nativeThreadId,
-                  items: Object.entries(params.additionalContext ?? {}).map(([key, entry]) => ({
-                    type: "message",
-                    role: "developer",
-                    content: [{ type: "input_text", text: `<${key}>${entry.value}</${key}>` }],
-                  })),
+              {
+                type: "expect_outbound",
+                label: "restore context",
+                frame: {
+                  id: explicit ? 5 : 4,
+                  method: "thread/inject_items",
+                  params: {
+                    threadId: nativeThreadId,
+                    items: Object.entries(params.additionalContext ?? {}).map(([key, entry]) => ({
+                      type: "message",
+                      role: "developer",
+                      content: [{ type: "input_text", text: `<${key}>${entry.value}</${key}>` }],
+                    })),
+                  },
                 },
               },
-            },
-            { type: "emit_inbound", label: "restored", frame: { id: 4, result: {} } },
-            {
-              type: "emit_inbound",
-              label: "done",
-              frame: {
-                method: "turn/completed",
-                params: {
-                  threadId: nativeThreadId,
-                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+              {
+                type: "emit_inbound",
+                label: "restored",
+                frame: { id: explicit ? 5 : 4, result: {} },
+              },
+              {
+                type: "emit_inbound",
+                label: "done",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({
+                      id: explicit ? "explicit-compact-turn" : nativeTurnId,
+                      status: "completed",
+                    }),
+                  },
                 },
               },
-            },
-          ],
-        });
-        const harness = yield* makeCodexReplayHarness(transcript);
-        yield* (yield* McpProviderSessions.McpProviderSessions).set({
-          environmentId: EnvironmentId.make("test"),
-          threadId: harness.threadId,
-          providerSessionId: "context-session",
-          providerInstanceId: ProviderInstanceId.make("codex"),
-          endpoint: "http://127.0.0.1:43123/mcp",
-          authorizationHeader: "Bearer test",
-          browserToolsAvailable: true,
-        });
-        yield* harness.runtime.startTurn(
-          makeCodexTestTurnInput({
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(transcript);
+          yield* (yield* McpProviderSessions.McpProviderSessions).set({
+            environmentId: EnvironmentId.make("test"),
             threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now: yield* DateTime.now,
-            attemptId: RunAttemptId.make("context-attempt"),
-            text: "work",
-          }),
-        );
-        yield* harness.firstTerminal;
-        assert.equal(harness.terminalEvents()[0]?.status, "completed");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+            providerSessionId: "context-session",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            endpoint: "http://127.0.0.1:43123/mcp",
+            authorizationHeader: "Bearer test",
+            browserToolsAvailable: true,
+          });
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("context-attempt"),
+              text: "work",
+            }),
+          );
+          yield* harness.firstTerminal;
+          assert.equal(harness.terminalEvents()[0]?.status, "completed");
+          if (explicit) {
+            const delivered = harness.events.findLast(
+              (event) => event.type === "provider_thread.updated",
+            )?.providerThread;
+            assert.isDefined(delivered?.nativeMetadata?.codexAdditionalContextDigest);
+            if (!delivered) return yield* Effect.die("Missing delivered provider thread");
+            yield* harness.runtime.compactThread!(
+              makeCodexTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: delivered,
+                now: yield* DateTime.now,
+                attemptId: RunAttemptId.make("explicit-context-compact"),
+                text: "/compact",
+              }),
+            );
+            yield* harness.awaitTerminal(2);
+            const restored = harness.events.findLast(
+              (event) => event.type === "provider_thread.updated",
+            )?.providerThread;
+            assert.equal(
+              restored?.nativeMetadata?.codexAdditionalContextDigest,
+              delivered?.nativeMetadata?.codexAdditionalContextDigest,
+            );
+          }
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
         ),
       ),
-    ),
   );
 
   // regression: #25191 a restarted app-server re-appends unchanged context after thread/resume

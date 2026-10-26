@@ -1672,6 +1672,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             NonNullable<CodexTurnStartParamsWithCollaborationMode["additionalContext"]>
           >(),
         );
+        const digestAdditionalContext = Effect.fn("CodexAdapterV2.digestAdditionalContext")(
+          function* (context: typeof CodexAdditionalContext.Type) {
+            return Hex.encode(
+              yield* crypto.digest(
+                "SHA-256",
+                new TextEncoder().encode(yield* encodeCodexAdditionalContextJson(context)),
+              ),
+            );
+          },
+        );
         // Absent: fall back to persisted metadata. Undefined: Codex holds no known context.
         const deliveredContextDigests = new Map<string, string | undefined>();
         // Codex drops client developer messages during compaction but only
@@ -1705,6 +1715,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     },
               ),
             });
+            yield* recordAdditionalContextDigest(threadId, yield* digestAdditionalContext(context));
           },
           (effect, threadId) =>
             effect.pipe(
@@ -1865,22 +1876,42 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
 
-        const invalidateAdditionalContext = Effect.fn("CodexAdapterV2.invalidateAdditionalContext")(
-          function* (threadId: string) {
-            deliveredContextDigests.set(threadId, undefined);
-            const providerThread = rootProviderThreads.get(threadId);
-            if (!providerThread?.nativeMetadata?.codexAdditionalContextDigest) return;
-            const { codexAdditionalContextDigest: _digest, ...nativeMetadata } =
-              providerThread.nativeMetadata;
-            const updated = { ...providerThread, nativeMetadata };
-            rootProviderThreads.set(threadId, updated);
-            yield* emitProviderEvent({
-              type: "provider_thread.updated",
-              driver: CODEX_PROVIDER,
-              providerThread: updated,
-            });
-          },
-        );
+        const withCurrentContextDigest = (
+          threadId: string,
+          providerThread: OrchestrationV2ProviderThread,
+        ) => {
+          if (!deliveredContextDigests.has(threadId)) return providerThread;
+          const { codexAdditionalContextDigest: _digest, ...nativeMetadata } =
+            providerThread.nativeMetadata ?? {};
+          const digest = deliveredContextDigests.get(threadId);
+          return {
+            ...providerThread,
+            nativeMetadata: {
+              ...nativeMetadata,
+              ...(digest === undefined ? {} : { codexAdditionalContextDigest: digest }),
+            },
+          };
+        };
+        const recordAdditionalContextDigest = Effect.fn(
+          "CodexAdapterV2.recordAdditionalContextDigest",
+        )(function* (threadId: string, digest: string | undefined) {
+          deliveredContextDigests.set(threadId, digest);
+          const providerThread = rootProviderThreads.get(threadId);
+          if (
+            !providerThread ||
+            providerThread.nativeMetadata?.codexAdditionalContextDigest === digest
+          )
+            return;
+          const updated = withCurrentContextDigest(threadId, providerThread);
+          rootProviderThreads.set(threadId, updated);
+          yield* emitProviderEvent({
+            type: "provider_thread.updated",
+            driver: CODEX_PROVIDER,
+            providerThread: updated,
+          });
+        });
+        const invalidateAdditionalContext = (threadId: string) =>
+          recordAdditionalContextDigest(threadId, undefined);
         const emitGoalUpdate = Effect.fnUntraced(function* (nativeThreadId: string) {
           const providerThread = rootProviderThreads.get(nativeThreadId);
           if (providerThread === undefined || !goalsByNativeThread.has(nativeThreadId)) return;
@@ -1900,7 +1931,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         ) {
           const nativeThreadId = providerThread.nativeThreadRef?.nativeId;
           if (nativeThreadId == null) return;
-          rootProviderThreads.set(nativeThreadId, providerThread);
+          rootProviderThreads.set(
+            nativeThreadId,
+            withCurrentContextDigest(nativeThreadId, providerThread),
+          );
           yield* emitGoalUpdate(nativeThreadId);
         });
 
@@ -6314,14 +6348,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const contextDigest =
               additionalContext === undefined
                 ? undefined
-                : Hex.encode(
-                    yield* crypto.digest(
-                      "SHA-256",
-                      new TextEncoder().encode(
-                        yield* encodeCodexAdditionalContextJson(additionalContext),
-                      ),
-                    ),
-                  );
+                : yield* digestAdditionalContext(additionalContext);
             const deliveredDigest = deliveredContextDigests.has(threadId)
               ? deliveredContextDigests.get(threadId)
               : turnInput.providerThread.nativeMetadata?.codexAdditionalContextDigest;
@@ -6331,23 +6358,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ? paramsWithoutContext
                 : turnStartParams,
             );
-            let providerThread = turnInput.providerThread;
+            rootProviderThreads.set(
+              threadId,
+              withCurrentContextDigest(threadId, turnInput.providerThread),
+            );
             if (contextDigest !== undefined && contextDigest !== deliveredDigest) {
-              deliveredContextDigests.set(threadId, contextDigest);
-              providerThread = {
-                ...providerThread,
-                nativeMetadata: {
-                  ...providerThread.nativeMetadata,
-                  codexAdditionalContextDigest: contextDigest,
-                },
-              };
-              rootProviderThreads.set(threadId, providerThread);
-              yield* emitProviderEvent({
-                type: "provider_thread.updated",
-                driver: CODEX_PROVIDER,
-                providerThread,
-              });
+              yield* recordAdditionalContextDigest(threadId, contextDigest);
             }
+            const providerThread = rootProviderThreads.get(threadId) ?? turnInput.providerThread;
             yield* registerRootTurn({
               turnInput: { ...turnInput, providerThread },
               nativeTurnId: started.turn.id,
