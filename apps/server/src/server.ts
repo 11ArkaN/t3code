@@ -751,6 +751,7 @@ const layerMakeServer = Layer.unwrap(
     const layerActivation = Layer.succeed(ServerActivation.ServerActivation, awaitActivation);
     const runtimeStateParked = yield* Deferred.make<void>();
     const tailscaleParked = yield* Deferred.make<void>();
+    const tailscaleSettled = yield* Deferred.make<void>();
     const cloudLinkParked = yield* Deferred.make<void>();
     const routesReady = yield* Deferred.make<void>();
     const layerLauncher = ServiceLauncherClient.layer;
@@ -822,7 +823,7 @@ const layerMakeServer = Layer.unwrap(
                   }).pipe(Effect.as(null)),
                 ),
               );
-            }),
+            }).pipe(Effect.ensuring(Deferred.succeed(tailscaleSettled, undefined))),
             (configured) =>
               configured
                 ? disableTailscaleServe({ servePort: configured.servePort }).pipe(
@@ -1035,6 +1036,9 @@ const layerMakeServer = Layer.unwrap(
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),
+      ...(config.tailscaleServeEnabled
+        ? { awaitTailscaleServe: Deferred.await(tailscaleSettled) }
+        : {}),
     }).pipe(Layer.provideMerge(layerRuntimeDependencies), Layer.provide(layerLauncher));
 
     const layerRoutes = HttpRouter.serve(layerMakeRoutes.pipe(Layer.provide(layerLauncher)), {
