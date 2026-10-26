@@ -171,6 +171,7 @@ import {
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
   filterCommandPaletteGroups,
+  resolveNewThreadProjectGroups,
   buildNestedSearchItems,
   filterPinnedBrowseEntries,
   getCommandPaletteInputPlaceholder,
@@ -1246,7 +1247,7 @@ function OpenCommandPaletteDialog(props: {
       title: "New thread in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-      groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+      groups: [{ value: "new-thread-in", label: "Projects", items: projectThreadItems }],
     });
   }
 
@@ -1532,7 +1533,7 @@ function OpenCommandPaletteDialog(props: {
       case "new-thread-in":
         pushPaletteView({
           addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
-          groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+          groups: [{ value: "new-thread-in", label: "Projects", items: projectThreadItems }],
         });
         return;
       case "change-theme":
@@ -1685,7 +1686,7 @@ function OpenCommandPaletteDialog(props: {
   const isLinkedThreadSearch =
     linkedThreadSearch?.linkedThreads !== undefined && deferredQuery === linkedThreadSearch.query;
   const filteredGroups = filterCommandPaletteGroups({
-    activeGroups,
+    activeGroups: resolveNewThreadProjectGroups(activeGroups, projectThreadItems),
     query: deferredQuery,
     isInSubmenu: currentView !== null,
     ...(deferredQuery.trim().length > 0
