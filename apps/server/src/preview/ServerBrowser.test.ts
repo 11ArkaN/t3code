@@ -24,6 +24,7 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import type { BrowserContext, Page } from "playwright-core";
 import { beforeEach, expect, vi } from "vite-plus/test";
 
@@ -625,23 +626,25 @@ it.live("a viewer's stream opens before its first still arrives", () =>
   ).pipe(Effect.provide(layer)),
 );
 
-it.live("a first still that never returns does not stall the tab's later captures", () =>
+it.effect("a first still that never returns does not stall the tab's later captures", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const { browser, broker, tabId } = yield* ready;
+      const capturing = Promise.withResolvers<void>();
       const stuck = Promise.withResolvers<void>();
       heldStill = () => {
         heldStill = null;
+        capturing.resolve();
         return stuck.promise;
       };
       yield* Effect.addFinalizer(() => Effect.sync(() => stuck.resolve()));
       yield* browser.attachViewer(viewerInput(tabId, true));
-      const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
-        scope,
-        tabId,
-        operation: "snapshot",
-        input: {},
-      });
+      yield* Effect.promise(() => capturing.promise);
+      const snapshotting = yield* broker
+        .invoke<PreviewAutomationSnapshot>({ scope, tabId, operation: "snapshot", input: {} })
+        .pipe(Effect.forkScoped);
+      yield* TestClock.adjust("2 seconds");
+      const snapshot = yield* Fiber.join(snapshotting);
       expect(snapshot.accessibilityTree).toContain("delete");
       const second = yield* browser.attachViewer(viewerInput(tabId, false));
       const frame = yield* Stream.fromQueue(second.output).pipe(
@@ -671,7 +674,10 @@ it.live("streams to a read-only viewer without allowing takeover, input, or view
         yield* viewer.input(message);
       expect(page.setViewportSize).not.toHaveBeenCalled();
       expect(session.send.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false);
-      const outputs = yield* Queue.takeAll(viewer.output);
+      const outputs = yield* Stream.fromQueue(viewer.output).pipe(
+        Stream.takeUntil((output) => output._tag === "frame"),
+        Stream.runCollect,
+      );
       expect(outputs).toContainEqual(
         expect.objectContaining({ _tag: "frame", data: Buffer.from("frame") }),
       );

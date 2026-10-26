@@ -95,6 +95,8 @@ const SCREENCAST_MOTION_WINDOW_MS = 300;
 const SCREENCAST_MOTION_QUALITY = 50;
 const HOST_RECONNECT_DELAY = "1 second";
 const DESKTOP_ATTACH_TIMEOUT = "10 seconds";
+// A viewer still is best-effort; a capture Chromium never answers must not hold the capture lock.
+const VIEWER_STILL_TIMEOUT = "2 seconds";
 const VIEWER_OUTPUT_LIMIT = 64;
 const RECORDING_SCREENCAST = { format: "jpeg", quality: 90, everyNthFrame: 1 } as const;
 const decodeViewportSetting = Schema.decodeUnknownSync(PreviewViewportSettingSchema);
@@ -454,7 +456,9 @@ const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
-  const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  const services = yield* Effect.context<never>();
+  const runFork = Effect.runForkWith(services);
+  const runPromise = Effect.runPromiseWith(services);
   const launchServices = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   const setupCommand = yield* resolveRootCliCommand(PreviewBrowserHost.SETUP_SUBCOMMAND);
 
@@ -2333,11 +2337,15 @@ const make = Effect.gen(function* () {
     // Full scale: a scaled capture would flash in every other viewer.
     const pushStill = async () => {
       const data = await withCaptureLock(tab, () =>
-        ServerBrowserPage.captureViewport(tab.page, session, {
-          format: "jpeg",
-          quality,
-          scale: 1,
-        }),
+        runPromise(
+          Effect.tryPromise(() =>
+            ServerBrowserPage.captureViewport(tab.page, session, {
+              format: "jpeg",
+              quality,
+              scale: 1,
+            }),
+          ).pipe(Effect.timeoutOption(VIEWER_STILL_TIMEOUT), Effect.map(Option.getOrNull)),
+        ),
       ).catch(() => null);
       if (data) viewer.push({ _tag: "frame", data: Buffer.from(data, "base64"), ack: Effect.void });
     };
@@ -2396,7 +2404,7 @@ const make = Effect.gen(function* () {
     yield* Effect.promise(() => startScreencast(1));
     // An idle page does not repaint for a new screencast, so the viewer
     // starts from a still unless a live frame beat it.
-    if (!screencastStarted) yield* Effect.promise(pushStill);
+    if (!screencastStarted) yield* Effect.forkScoped(Effect.promise(pushStill));
     return {
       output,
       input: (raw: unknown) =>
