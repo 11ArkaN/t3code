@@ -602,6 +602,14 @@ describe("resolveThreadStatusPill", () => {
       }),
     ).toBe(true);
     expect(
+      hasUnseenFailure({
+        ...baseThread,
+        latestRun,
+        lastVisitedAt: runtime.updatedAt,
+        runtime,
+      }),
+    ).toBe(false);
+    expect(
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
