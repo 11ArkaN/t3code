@@ -360,16 +360,10 @@ export default defineConfig(() => {
               ? `assets/pdfjs-${pdfjsPkg.version}/[name][extname]`
               : "assets/[name]-[hash][extname]",
           codeSplitting: {
-            // Preview imports must not fold shared file icons back into main.
             groups: [
               {
                 name: "react",
                 test: /\/node_modules\/(?:react|react-dom|scheduler)\//,
-                includeDependenciesRecursively: false,
-              },
-              {
-                name: "icons",
-                test: /\/(?:components\/chat\/PierreEntryIcon\.tsx|pierre-icons\.ts|mediaPreview\.ts)$/,
                 includeDependenciesRecursively: false,
               },
             ],
