@@ -74,6 +74,24 @@ describe("mergeClaudeWorkflowProgress", () => {
     expect(workflow?.agents[2]).not.toHaveProperty("completedAt");
   });
 
+  it("keeps a started member queued until the provider reports its startedAt", () => {
+    const scheduled = mergeClaudeWorkflowProgress({
+      previous: undefined,
+      message: snapshotFrame([agent({ state: "start", queuedAt: 1000 })]),
+    });
+    expect(scheduled?.agents[0]?.state).toBe("queued");
+    const started = mergeClaudeWorkflowProgress({
+      previous: scheduled,
+      message: snapshotFrame([agent({ state: "start", queuedAt: 1000, startedAt: 21_000 })]),
+    });
+    expect(started?.agents[0]).toMatchObject({ state: "running", startedAt: 21_000 });
+    const progressed = mergeClaudeWorkflowProgress({
+      previous: started,
+      message: snapshotFrame([agent({ state: "progress", startedAt: 21_000 })]),
+    });
+    expect(progressed?.agents[0]?.state).toBe("running");
+  });
+
   it.each(["something-new", "toString", "constructor", "__proto__"])(
     "treats unrecognised state %s as still running rather than settled",
     (state) => {
