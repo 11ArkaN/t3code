@@ -87,6 +87,10 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
   const hasStack = stackedItems.length > 0;
   const showCollapsedStackCap = hasStack && exitingItemId !== frontItem.id;
   const firstStackedItem = stackedItems[0];
+  const peekTitle =
+    firstStackedItem && "title" in firstStackedItem && typeof firstStackedItem.title === "string"
+      ? firstStackedItem.title
+      : null;
 
   const requestDismiss = (item: ComposerBannerStackEntry) => {
     if (!("onDismiss" in item) || !item.onDismiss || exitingItemId) {
@@ -138,9 +142,7 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
               ref={peekRef}
               variant={firstStackedItem.variant}
               aria-label={
-                "title" in firstStackedItem
-                  ? undefined
-                  : `Show ${stackedItems.length} other notices`
+                peekTitle !== null ? undefined : `Show ${stackedItems.length} other notices`
               }
               aria-expanded={stackExpanded}
               aria-controls={expandedItemsId}
@@ -152,15 +154,15 @@ export function ComposerBannerStack({ className, items, attachedAbove }: Compose
               }}
               className={cn(stackExpanded && "pointer-events-none invisible opacity-0")}
             >
-              {"title" in firstStackedItem ? (
+              {peekTitle !== null && "icon" in firstStackedItem ? (
                 <>
                   {firstStackedItem.icon}
-                  <span className="min-w-0 truncate">{firstStackedItem.title}</span>
+                  <span className="min-w-0 truncate">{peekTitle}</span>
                 </>
               ) : (
                 <span>{stackedItems.length} more</span>
               )}
-              {"title" in firstStackedItem && stackedItems.length > 1 ? (
+              {peekTitle !== null && stackedItems.length > 1 ? (
                 <span className="flex-none">+{stackedItems.length - 1}</span>
               ) : null}
             </ComposerBanner.Peek>
