@@ -40,6 +40,7 @@ export interface ListAuthoredPathsInput {
 export interface DeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
+  readonly refNamespaces?: ReadonlyArray<string>;
 }
 
 export class CheckpointStore extends Context.Service<

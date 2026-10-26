@@ -415,6 +415,8 @@ const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_RECOVERY_MAX_CANDIDATES = 64;
 const CHECKPOINT_RECOVERY_TIMEOUT = "5 seconds";
 const GIT_CHECK_IGNORE_MAX_STDIN_BYTES = 256 * 1024;
+// Plain path segments only, so a namespace can never act as a for-each-ref glob or broader prefix.
+const CHECKPOINT_REF_NAMESPACE = /^refs\/t3\/(?:[A-Za-z0-9_-]+\/)+$/;
 const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   "-c",
   "core.fsmonitor=false",
@@ -1366,17 +1368,33 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
 
     deleteCheckpointRefs: Effect.fn("GitVcsDriver.checkpoints.deleteCheckpointRefs")(
       function* (input) {
-        yield* Effect.forEach(
-          input.checkpointRefs,
-          (checkpointRef) =>
-            execute({
-              operation: "GitVcsDriver.checkpoints.deleteCheckpointRefs",
-              cwd: input.cwd,
-              args: ["update-ref", "-d", checkpointRef],
-              allowNonZeroExit: true,
-            }),
-          { discard: true },
-        );
+        const operation = "GitVcsDriver.checkpoints.deleteCheckpointRefs";
+        const namespaces = input.refNamespaces ?? [];
+        const invalid = namespaces.find((namespace) => !CHECKPOINT_REF_NAMESPACE.test(namespace));
+        if (invalid !== undefined) {
+          return yield* new VcsUnsupportedOperationError({
+            operation,
+            kind: "git",
+            detail: `Refusing to delete refs below ${invalid}.`,
+          });
+        }
+        const listed =
+          namespaces.length === 0
+            ? []
+            : (yield* execute({
+                operation,
+                cwd: input.cwd,
+                args: ["for-each-ref", "--format=%(refname)", ...namespaces],
+              })).stdout.split("\n");
+        const refs = new Set([...input.checkpointRefs, ...listed].filter((ref) => ref !== ""));
+        if (refs.size === 0) return;
+        // One transaction: a locked ref fails the whole deletion instead of being skipped.
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["update-ref", "--stdin"],
+          stdin: Array.from(refs, (ref) => `delete ${ref}\n`).join(""),
+        });
       },
     ),
   };
