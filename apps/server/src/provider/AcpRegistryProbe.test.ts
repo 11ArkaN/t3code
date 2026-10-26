@@ -1,4 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
@@ -18,6 +20,7 @@ import {
   logoutAcpRegistry,
   normalizeAcpRegistryAuthMethods,
   normalizeAcpRegistryCommands,
+  probeAcpRegistryConfiguration,
 } from "@t3tools/provider-acp-registry/testing";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 
@@ -373,6 +376,63 @@ describe("ACP Registry probe", () => {
       Effect.scoped,
     );
   });
+
+  it.live.each(["succeeds", "fails"] as const)(
+    "deletes its health-probe session when deletion is advertised and %s",
+    (deleteOutcome) => {
+      const requestLogPath = NodePath.join(
+        NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-probe-delete-")),
+        "requests.ndjson",
+      );
+      const catalog = AcpRegistrySupport.AcpRegistryCatalog.of({
+        search: () => Effect.die("unused search"),
+        prepare: () => Effect.die("unused prepare"),
+        inspect: () => Effect.die("unused inspect"),
+        uninstallManagedBinary: () => Effect.die("unused uninstall"),
+        resolve: () =>
+          Effect.succeed({
+            agent: {
+              id: "mock-agent",
+              name: "Mock Agent",
+              version: "1.0.0",
+              description: "ACP probe cleanup test agent",
+              distribution: { npx: { package: "mock-agent@1.0.0" } },
+            },
+            distribution: "npx" as const,
+            spawn: {
+              command: "node",
+              args: [mockAgentPath],
+              env: {
+                ...process.env,
+                T3_ACP_V2_MANAGEMENT: "1",
+                T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+                ...(deleteOutcome === "fails" ? { T3_ACP_FAIL_DELETE_SESSION: "1" } : {}),
+              },
+            },
+          }),
+      });
+
+      return Effect.gen(function* () {
+        const result = yield* probeAcpRegistryConfiguration({
+          instanceId,
+          settings: decodeSettings({ agentId: "mock-agent" }),
+          cwd: process.cwd(),
+          environment: process.env,
+        });
+        expect(result.probe.ready).toBe(true);
+        expect(result.probe.sessionManagement.canDelete).toBe(true);
+
+        const methods = NodeFS.readFileSync(requestLogPath, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .map((line) => Reflect.get(JSON.parse(line), "method"));
+        expect(methods).toContain("session/delete");
+      }).pipe(
+        Effect.provideService(AcpRegistrySupport.AcpRegistryCatalog, catalog),
+        Effect.provide(NodeServices.layer),
+      );
+    },
+  );
 
   it("distinguishes authentication failures from generic probe failures", () => {
     const advertised = normalizeAcpRegistryAuthMethods([
