@@ -1334,7 +1334,21 @@ it.effect.each([false, true])(
         yield* reactor.handle(taskCompleted);
       }
       assert.equal((yield* wakeRun())?.status, "cancelled");
-      if (missedEvent) return;
+      if (missedEvent) {
+        const before = (yield* projections.getThreadRecords(parentThreadId, ["runs"])).runs.length;
+        const delayedQuestion = {
+          ...question,
+          id: EventId.make("event:delayed-question"),
+          payload: { ...question.payload, id: RuntimeRequestId.make("request:delayed-question") },
+        };
+        yield* eventSink.write({ events: [delayedQuestion] });
+        yield* reactor.handle(delayedQuestion);
+        assert.equal(
+          (yield* projections.getThreadRecords(parentThreadId, ["runs"])).runs.length,
+          before,
+        );
+        return;
+      }
 
       yield* orchestrator.dispatch({
         type: "message.dispatch",
