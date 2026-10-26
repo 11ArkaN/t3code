@@ -125,9 +125,8 @@ export const make = Effect.gen(function* () {
     }),
     { capacity: CONCURRENT_READS, timeToLive: () => Duration.zero },
   );
-  // A cache entry keeps the fiber that filled it, and that fiber keeps the caller's lazy stack
-  // frames. Called from a sync sweep, those frames hold the whole sweep's thread data until the
-  // entry is evicted, so every read and invalidation here detaches its frames first.
+  // A cache entry keeps the fiber that filled it, whose lazy stack frames would keep the caller's
+  // data (e.g. a whole sync sweep) alive until eviction.
   return PullRequestReadCache.of({
     get: Effect.fn("PullRequestReadCache.get")(function* (key, lookup, scopes = []) {
       if (!enabled) return yield* lookup;
