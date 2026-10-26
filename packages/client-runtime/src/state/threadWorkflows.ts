@@ -26,6 +26,11 @@ export interface QueuedThreadRun {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly messageId: Message["id"];
   readonly context?: Message["context"];
+  readonly createdBy?: Message["createdBy"];
+  readonly creationSource?: Message["creationSource"];
+  readonly scheduledTaskId?: Message["scheduledTaskId"];
+  readonly senderThreadId?: Message["senderThreadId"];
+  readonly idleCompaction?: Message["idleCompaction"];
 }
 
 export interface ThreadQueueWorkflowState {
@@ -148,6 +153,11 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
       attachments: message?.attachments ?? [],
       messageId: run.userMessageId,
       ...(message?.context ? { context: message.context } : {}),
+      ...(message?.createdBy ? { createdBy: message.createdBy } : {}),
+      ...(message?.creationSource ? { creationSource: message.creationSource } : {}),
+      ...(message?.scheduledTaskId ? { scheduledTaskId: message.scheduledTaskId } : {}),
+      ...(message?.senderThreadId ? { senderThreadId: message.senderThreadId } : {}),
+      ...(message?.idleCompaction ? { idleCompaction: message.idleCompaction } : {}),
     };
   });
 

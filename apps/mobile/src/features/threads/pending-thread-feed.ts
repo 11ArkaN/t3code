@@ -70,28 +70,38 @@ export function appendPendingThreadMessages(
     }),
     ...queuedRuns
       .filter(({ messageId }) => !deliveredIds.has(messageId) && !outboxIds.has(messageId))
-      .map(({ run, text, attachments, messageId, context }): PendingThreadFeedEntry => {
-        const createdAt = DateTime.formatIso(run.requestedAt);
-        return {
-          type: "message",
-          id: messageId,
-          createdAt,
-          queued: true,
-          message: {
+      .map(
+        ({
+          run,
+          text,
+          attachments,
+          messageId,
+          context,
+          ...attribution
+        }): PendingThreadFeedEntry => {
+          const createdAt = DateTime.formatIso(run.requestedAt);
+          return {
+            type: "message",
             id: messageId,
-            role: "user",
-            text,
-            attachments,
-            context,
             createdAt,
-            updatedAt: createdAt,
-            runId: null,
-            streaming: false,
-            visibility: "local",
-            sourceThreadId: run.threadId,
-          },
-        };
-      }),
+            queued: true,
+            message: {
+              ...attribution,
+              id: messageId,
+              role: "user",
+              text,
+              attachments,
+              context,
+              createdAt,
+              updatedAt: createdAt,
+              runId: null,
+              streaming: false,
+              visibility: "local",
+              sourceThreadId: run.threadId,
+            },
+          };
+        },
+      ),
     ...queuedMessages
       .filter((message) => !deliveredIds.has(message.messageId))
       .map((pendingMessage): PendingThreadFeedEntry => ({

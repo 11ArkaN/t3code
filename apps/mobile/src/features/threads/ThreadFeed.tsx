@@ -1452,7 +1452,9 @@ function renderFeedEntry(
     const presentation = resolveUserMessagePresentation(message);
     const renderedText = renderAssistantCitationsAsText(presentation.text);
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
-    const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt);
+    const timestampLabel = entry.queued
+      ? "Queued"
+      : formatMessageTime(isUser ? message.createdAt : message.updatedAt);
     const attachments = message.attachments ?? [];
     const hasReviewCommentContext = presentation.text.includes("<review_comment");
     // Android does not reposition children after maxWidth clamps bubbles; definite width prevents wide-block overlap.
@@ -1698,11 +1700,7 @@ function renderFeedEntry(
                 </Text>
               ) : null}
               <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
-                {entry.queued
-                  ? "Queued"
-                  : entry.pendingMessage && !entry.acknowledged
-                    ? "Pending"
-                    : timestampLabel}
+                {entry.pendingMessage && !entry.acknowledged ? "Pending" : timestampLabel}
               </Text>
               {props.onEditPendingMessage !== null &&
               entry.pendingMessage &&

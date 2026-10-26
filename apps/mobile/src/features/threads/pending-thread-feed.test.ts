@@ -7,6 +7,7 @@ import {
   MessageId,
   ProjectId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import { DateTime } from "effect";
@@ -189,7 +190,7 @@ describe("pending timeline messages", () => {
     ).toEqual(["thinking", "first", "unsent"]);
   });
 
-  it("keeps a queued message's attachments and context", () => {
+  it("keeps a queued message's attachments, context and attribution", () => {
     const context = {
       version: 1 as const,
       records: [
@@ -213,11 +214,26 @@ describe("pending timeline messages", () => {
       [],
       [],
       [],
-      [serverQueued("rich", { attachments: [attachment], context })],
+      [
+        serverQueued("rich", {
+          attachments: [attachment],
+          context,
+          createdBy: "agent",
+          creationSource: "server",
+          scheduledTaskId: ScheduledTaskId.make("sample-schedule"),
+          senderThreadId: ThreadId.make("sender-thread"),
+        }),
+      ],
     )[0];
     if (entry?.type !== "message") throw new Error("Expected a queued message");
     expect(entry.message.attachments).toEqual([attachment]);
     expect(entry.message.context).toEqual(context);
+    expect(entry.message).toMatchObject({
+      createdBy: "agent",
+      creationSource: "server",
+      scheduledTaskId: "sample-schedule",
+      senderThreadId: "sender-thread",
+    });
   });
 
   it("shows a queued compact command as its text until the run starts", () => {
