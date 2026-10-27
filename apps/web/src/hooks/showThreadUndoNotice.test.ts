@@ -95,8 +95,7 @@ describe("thread undo notice", () => {
     showThreadUndoNotice(options);
     vi.mocked(announce).mockClear();
     await notice().undo();
-    const spoken = vi.mocked(announce).mock.calls.map(([message]) => message);
-    expect(spoken).toContainEqual(expect.stringMatching(/unpin/i));
+    expect(announce).toHaveBeenCalledExactlyOnceWith("Undid unpin of 1 thread");
   });
 
   it("does not announce an undo that failed", async () => {
