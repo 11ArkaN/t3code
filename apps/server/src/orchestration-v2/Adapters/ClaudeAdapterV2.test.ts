@@ -8991,6 +8991,70 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect(
+    "reports a pending wake once the finished task leaves the roster, before its notification",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const hasPendingWakeForThread = harness.runtime.hasPendingWakeForThread;
+          if (hasPendingWakeForThread === undefined) {
+            return yield* Effect.die("Claude adapter runtime must expose hasPendingWakeForThread.");
+          }
+          const hasPendingWake = () => hasPendingWakeForThread(harness.providerThread);
+          const now = yield* DateTime.now;
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-wake-roster-first"),
+              text: "Run the build in the background.",
+              attachments: [],
+            }),
+          );
+          yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
+          yield* Queue.offer(harness.sdkMessages, turnOneResult);
+          yield* harness.awaitTerminal(1);
+          assert.isFalse(yield* hasPendingWake());
+
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [],
+              uuid: "00000000-0000-4000-8000-000000000312",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+          yield* harness.until(
+            () =>
+              providerThreadRosterEvents(harness.events).at(-1)?.providerThread
+                .pendingBackgroundTasks?.length === 0,
+          );
+          assert.isTrue(
+            yield* hasPendingWake(),
+            "the build left the roster before its task_notification, so its wake is still pending",
+          );
+
+          yield* TestClock.adjust("60 seconds");
+          yield* harness.offerAndWait(wakeNotification);
+          assert.lengthOf(harness.continuationRequests, 0);
+          yield* TestClock.adjust("59 seconds");
+          assert.isTrue(yield* hasPendingWake());
+          yield* TestClock.adjust("1 second");
+          assert.isFalse(
+            yield* hasPendingWake(),
+            "the bound runs from when the task left the roster",
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
   it.effect("starts the wake run when Claude opens the wake turn, before its output", () =>
     Effect.scoped(
       Effect.gen(function* () {

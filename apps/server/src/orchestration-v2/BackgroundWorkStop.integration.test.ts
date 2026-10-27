@@ -1020,7 +1020,7 @@ it.effect.each(["missing-session-terminal", "returned-interrupt", "superseded-at
 it.effect.each([
   { case: "waits for a pending wake turn", wakePending: true, devServer: false },
   { case: "waits for a pending wake turn beside a dev server", wakePending: true, devServer: true },
-  { case: "settles a thread running only a dev server", wakePending: false, devServer: false },
+  { case: "settles a thread running only a dev server", wakePending: false, devServer: true },
 ])("Auto-settle $case", ({ wakePending, devServer }) =>
   Effect.scoped(
     Effect.gen(function* () {

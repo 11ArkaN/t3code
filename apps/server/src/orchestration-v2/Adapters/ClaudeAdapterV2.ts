@@ -4559,13 +4559,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const wakeBuffers = yield* Ref.make(
           new Map<
             string,
-            {
-              readonly messages: ReadonlyArray<SDKMessage>;
-              readonly detail: string | null;
-              readonly wakeNotificationBufferedAtMs: number | null;
-            }
+            { readonly messages: ReadonlyArray<SDKMessage>; readonly detail: string | null }
           >(),
         );
+        // When the pending wake became expected; the probe also requires evidence that it still is.
+        const wakeExpectedSinceMsByNativeThread = new Map<string, number>();
         // Wake results lack task ids and can follow queued prompts; retain reports for one user turn.
         // Keep report stamps atomic with turn changes.
         const wakeReportsByNativeThread = yield* Ref.make<{
@@ -4918,6 +4916,52 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             Effect.map((all) => taskIdSetForNativeThread(all, nativeThreadId).has(taskId)),
           );
 
+        // A buffered opaque task_notification, or a wake-eligible task the roster dropped before its notification.
+        const hasWakeEvidenceOnNativeThread = Effect.fnUntraced(function* (nativeThreadId: string) {
+          const opaqueNotifiedTaskIds = taskIdSetForNativeThread(
+            yield* Ref.get(opaqueBackgroundTaskReplayTombstonesByNativeThread),
+            nativeThreadId,
+          );
+          const buffered = (yield* Ref.get(wakeBuffers)).get(nativeThreadId);
+          if (
+            buffered?.messages.some(
+              (message) =>
+                message.type === "system" &&
+                message.subtype === "task_notification" &&
+                opaqueNotifiedTaskIds.has(message.task_id),
+            )
+          ) {
+            return true;
+          }
+          const roster = rosterForNativeThread(
+            yield* Ref.get(pendingBackgroundTasksByNativeThread),
+            nativeThreadId,
+          );
+          for (const taskId of taskIdSetForNativeThread(
+            yield* Ref.get(wakeEligibleBackgroundTasksByNativeThread),
+            nativeThreadId,
+          )) {
+            if (!roster.has(taskId)) return true;
+          }
+          return false;
+        });
+
+        const hasPendingWakeOnNativeThread = Effect.fnUntraced(function* (nativeThreadId: string) {
+          const expectedSinceMs = wakeExpectedSinceMsByNativeThread.get(nativeThreadId);
+          return (
+            expectedSinceMs !== undefined &&
+            (yield* Clock.currentTimeMillis) - expectedSinceMs <
+              Duration.toMillis(CLAUDE_WAKE_TURN_START_DEADLINE) &&
+            (yield* hasWakeEvidenceOnNativeThread(nativeThreadId))
+          );
+        });
+
+        // Roster-first then notification is one wake: keep the earlier start while it is pending.
+        const noteWakeExpected = Effect.fnUntraced(function* (nativeThreadId: string) {
+          if (yield* hasPendingWakeOnNativeThread(nativeThreadId)) return;
+          wakeExpectedSinceMsByNativeThread.set(nativeThreadId, yield* Clock.currentTimeMillis);
+        });
+
         const hasOpaqueBackgroundTaskReplayTombstoneOnNativeThread = (
           nativeThreadId: string,
           taskId: string,
@@ -5054,6 +5098,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeThreadId: string,
             tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>,
           ) {
+            const listed = new Set(tasks.map((task) => task.taskId));
+            const wakeEligible = taskIdSetForNativeThread(
+              yield* Ref.get(wakeEligibleBackgroundTasksByNativeThread),
+              nativeThreadId,
+            );
+            const droppedWakeEligible = [
+              ...rosterForNativeThread(
+                yield* Ref.get(pendingBackgroundTasksByNativeThread),
+                nativeThreadId,
+              ).keys(),
+            ].some((taskId) => !listed.has(taskId) && wakeEligible.has(taskId));
             yield* Ref.update(pendingBackgroundTasksByNativeThread, (current) => {
               const updated = new Map(current);
               if (tasks.length === 0) {
@@ -5073,7 +5128,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 tasks.map((task) => task.taskId),
               );
             }
-            const listed = new Set(tasks.map((task) => task.taskId));
             yield* Ref.update(awaitedBackgroundTasksByNativeThread, (current) => {
               const awaited = current.get(nativeThreadId);
               if (awaited === undefined) return current;
@@ -5084,6 +5138,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               else updated.set(nativeThreadId, kept);
               return updated;
             });
+            if (droppedWakeEligible) {
+              yield* noteWakeExpected(nativeThreadId);
+            }
           });
 
         const upsertPendingBackgroundTask =
@@ -7613,15 +7670,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               childThreadId: registered?.childThreadId,
             });
           }
-          const bufferedAtMs = isPendingTaskNotification ? yield* Clock.currentTimeMillis : null;
+          if (isPendingTaskNotification) {
+            yield* noteWakeExpected(wakeInput.nativeThreadId);
+          }
           yield* Ref.update(wakeBuffers, (current) => {
             const existing = current.get(wakeInput.nativeThreadId);
             const updated = new Map(current);
             updated.set(wakeInput.nativeThreadId, {
               messages: [...(existing?.messages ?? []), message],
               detail: notificationSummary ?? existing?.detail ?? null,
-              wakeNotificationBufferedAtMs:
-                bufferedAtMs ?? existing?.wakeNotificationBufferedAtMs ?? null,
             });
             return updated;
           });
@@ -10586,16 +10643,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               if (nativeThreadId === undefined || nativeThreadId === null) {
                 return false;
               }
-              // A finished task's notification will wake Claude unless no wake frame ever follows.
-              const buffered = (yield* Ref.get(wakeBuffers)).get(nativeThreadId);
-              return (
-                buffered?.wakeNotificationBufferedAtMs != null &&
-                buffered.messages.some(
-                  (message) => message.type === "system" && message.subtype === "task_notification",
-                ) &&
-                (yield* Clock.currentTimeMillis) - buffered.wakeNotificationBufferedAtMs <
-                  Duration.toMillis(CLAUDE_WAKE_TURN_START_DEADLINE)
-              );
+              return yield* hasPendingWakeOnNativeThread(nativeThreadId);
             },
           ),
           ensureThread: Effect.fn("ClaudeAdapterV2.ensureThread")(
