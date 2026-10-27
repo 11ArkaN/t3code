@@ -6,7 +6,7 @@ import { useNavigation, type StaticScreenProps } from "@react-navigation/native"
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { AppBar } from "../../components/ui/AppBar";
-import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
+import type { AppBarAction, AppBarMenuItem } from "../../components/ui/AppBar.types";
 import type { ReviewSectionItem } from "./reviewModel";
 import { useReviewHeaderPresentation } from "./useReviewHeaderPresentation";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
@@ -75,6 +75,21 @@ function ReviewHeader(
 ) {
   const { panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const presentation = useReviewHeaderPresentation(props);
+  const actions: ReadonlyArray<AppBarAction> = [
+    ...presentation.gitActions,
+    ...(props.showChangedFilesToggle
+      ? [
+          {
+            accessibilityLabel: panes.auxiliaryPaneVisible
+              ? "Hide changed files"
+              : "Show changed files",
+            icon: "sidebar.right" as const,
+            selected: panes.auxiliaryPaneVisible,
+            onPress: toggleAuxiliaryPane,
+          },
+        ]
+      : []),
+  ];
   const sectionAction = (section: ReviewSectionItem | null, title: string): AppBarMenuItem => ({
     id: section ? `section:${section.id}` : `unavailable:${title}`,
     title,
@@ -92,23 +107,9 @@ function ReviewHeader(
       hideBottomBorder
       options={{ headerTintColor: props.iconColor, headerTitle: props.title }}
       backInSplitView={{ accessibilityLabel: "Back to chat", icon: "chevron.left" }}
-      actions={
-        props.showChangedFilesToggle
-          ? [
-              {
-                accessibilityLabel: panes.auxiliaryPaneVisible
-                  ? "Hide changed files"
-                  : "Show changed files",
-                icon: "sidebar.right",
-                selected: panes.auxiliaryPaneVisible,
-                onPress: toggleAuxiliaryPane,
-              },
-            ]
-          : undefined
-      }
-      menus={[
-        ...(presentation.gitMenu ? [presentation.gitMenu] : []),
-        ...(props.showSectionToolbar
+      actions={actions.length > 0 ? actions : undefined}
+      menus={
+        props.showSectionToolbar
           ? [
               {
                 title: "Select diff",
@@ -142,8 +143,8 @@ function ReviewHeader(
                 ],
               },
             ]
-          : []),
-      ]}
+          : []
+      }
     />
   );
 }

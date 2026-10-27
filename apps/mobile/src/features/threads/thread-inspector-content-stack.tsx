@@ -4,7 +4,7 @@ import { View } from "react-native";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
 import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 
-export type ThreadInspectorMode = "route" | "git" | "files" | "preview";
+export type ThreadInspectorMode = "route" | "git" | "files" | "preview" | "terminal";
 
 const INSPECTOR_PREWARM_DELAY_MS = 350;
 
@@ -49,6 +49,7 @@ export function ThreadInspectorContentStack(props: {
   readonly renderPreview?: () => ReactNode;
   readonly renderFiles: () => ReactNode;
   readonly renderGit?: () => ReactNode;
+  readonly renderTerminal?: () => ReactNode;
   readonly mode: ThreadInspectorMode;
   readonly resetKeys: readonly [string | null, string | null];
   readonly renderRoute?: () => ReactNode;
@@ -106,6 +107,15 @@ export function ThreadInspectorContentStack(props: {
           visible={props.mode === "git"}
         >
           <InspectorRenderer render={props.renderGit} />
+        </InspectorContentPane>
+      ) : null}
+      {props.renderTerminal ? (
+        <InspectorContentPane
+          mounted={mountedModes.has("terminal") || props.mode === "terminal"}
+          resetKeys={props.resetKeys}
+          visible={props.mode === "terminal"}
+        >
+          <InspectorRenderer render={props.renderTerminal} />
         </InspectorContentPane>
       ) : null}
       {props.renderRoute ? (

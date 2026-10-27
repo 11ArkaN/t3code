@@ -40,6 +40,8 @@ type Options = NativeStackNavigationOptions & {
   readonly headerSubtitleStyle?: { color?: string; fontSize?: number; fontFamily?: string };
   readonly unstable_headerCenterItems?: () => NativeStackHeaderItem[];
   readonly unstable_headerToolbarItems?: () => ToolbarItem[];
+  /** Opens from the title, which UIKit marks with a chevron. */
+  readonly unstable_headerTitleMenu?: MenuInput;
 };
 
 type MenuElementInput =
@@ -358,6 +360,9 @@ export function V5StackHeader(props: {
           trailingItems: trailing,
           titleItem: isValidElement(titleElement)
             ? { id: "title", render: () => titleElement }
+            : undefined,
+          titleMenu: options.unstable_headerTitleMenu
+            ? convertMenu(options.unstable_headerTitleMenu, "title-menu")
             : undefined,
           largeTitleEnabled: options.headerLargeTitle,
           backButtonDisplayMode: options.headerBackButtonDisplayMode ?? "minimal",

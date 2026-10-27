@@ -33,9 +33,12 @@ export function ThreadFileNavigatorPane(props: {
   readonly projectName: string;
   readonly selectedPath: string | null;
   readonly onSelectFile: (path: string) => void;
+  /** Defaults to hiding the inspector column. */
+  readonly onClose?: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const { toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
+  const close = props.onClose ?? toggleAuxiliaryPane;
   const { themeAppearance: highlightTheme } = useAppearancePreferences();
   const theme = useUniwindTheme();
   const foregroundColor = theme["--color-foreground"];
@@ -70,7 +73,7 @@ export function ThreadFileNavigatorPane(props: {
       accessibilityLabel: "Close files",
       icon: { name: "xmark", type: "sfSymbol" as const },
       identifier: "thread-file-navigator-close",
-      onPress: toggleAuxiliaryPane,
+      onPress: close,
       sharesBackground: false,
       tintColor: foregroundColor,
       type: "button" as const,

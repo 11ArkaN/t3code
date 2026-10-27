@@ -65,6 +65,7 @@ import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
 import { ThreadPullRequestsSheet } from "./features/threads/ThreadPullRequestsSheet";
+import { ThreadPanelSheet } from "./features/threads/ThreadPanel";
 import { ThreadAgentsSheet } from "./features/threads/ThreadAgentsSheet";
 import { ThreadBackgroundWorkSheet } from "./features/threads/ThreadBackgroundWorkSheet";
 import { ThreadQueueSheet } from "./features/threads/ThreadQueueControl";
@@ -932,6 +933,20 @@ const RootStackConfig = createWorkspaceStackNavigator({
         sheetGrabberVisible: true,
       },
     }),
+    // Without an inspector column, iOS shows the thread panel as a sheet.
+    ...(Platform.OS === "ios"
+      ? {
+          ThreadPanel: createNativeStackScreen({
+            screen: ThreadPanelSheet,
+            options: {
+              ...HORIZONTAL_FORM_SHEET_OPTIONS,
+              headerShown: false,
+              sheetAllowedDetents: formSheetDetents(0.6),
+              sheetGrabberVisible: true,
+            },
+          }),
+        }
+      : {}),
     ThreadPullRequests: createNativeStackScreen({
       screen: ThreadPullRequestsSheet,
       linking: `${THREAD_LINKING_PREFIX}/pull-requests`,

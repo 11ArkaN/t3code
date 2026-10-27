@@ -3,7 +3,6 @@ import { AppBar } from "../../components/ui/AppBar";
 import { ScreenHeaderButton } from "../../components/ui/ScreenHeaderButton";
 import type { AppBarAction } from "../../components/ui/AppBar.types";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
 import { useThreadHeaderOptions } from "./useThreadHeaderOptions";
 import { useWorkspaceBackNavigation } from "../workspace/useAndroidWorkspaceNavigation";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
@@ -12,8 +11,6 @@ export function ThreadHeader(
   props: Parameters<typeof useThreadHeaderOptions>[0] & {
     readonly hasThreadCwd: boolean;
     readonly hasWorkspaceRoot: boolean;
-    readonly fileInspectorSupported: boolean;
-    readonly inspectorMode: ThreadInspectorMode | null;
     readonly onToggleInspector: () => void;
     readonly onOpenGitInspector: () => void;
     readonly onOpenFilesInspector: () => void;
@@ -103,7 +100,7 @@ export function ThreadHeader(
         hideBottomBorder
         compact={composerKeyboardActive}
       />
-      {native.fallback}
+      {native.overlay}
     </>
   );
 }

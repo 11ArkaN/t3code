@@ -1,5 +1,7 @@
 import { useWorkspaceSidebarHeaderItem } from "../layout/useWorkspaceSidebarHeaderItem";
 import { StackActions, useNavigation } from "@react-navigation/native";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { VcsStatusResult } from "@t3tools/contracts";
 import { threadHeaderAppearance } from "./thread-header-appearance";
 import { isDuoDevice } from "../../lib/device-type";
 import type { AppNativeStackNavigationOptions } from "../../native/StackHeader";
@@ -7,20 +9,34 @@ import { useDeviceType } from "../../native/native-layout-metrics";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import {
-  ThreadGitControls,
-  useThreadGitCenterHeaderItems,
-  useThreadGitRightHeaderItems,
-} from "./ThreadGitControls";
+import type { ThreadInspectorMode } from "./thread-inspector-content-stack";
+import { useThreadTitleMenu } from "./useThreadTitleMenu";
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
+
+type ThreadHeaderGitControls = {
+  readonly gitStatus: VcsStatusResult | null;
+  readonly canOpenTerminal: boolean;
+  readonly onOpenTerminal: (terminalId?: string | null) => void;
+  readonly onMergeBack?: () => void;
+};
 
 export function useThreadHeaderOptions(props: {
   readonly title: string;
   readonly subtitle: string;
   readonly headerColor: string;
   readonly usesNativeHeaderGlass: boolean;
-  readonly gitControls: Parameters<typeof ThreadGitControls>[0];
+  readonly gitControls: ThreadHeaderGitControls;
+  /** Drafts have no title menu. */
+  readonly titleMenu?: {
+    readonly thread: EnvironmentThreadShell;
+    readonly canMutate: boolean;
+    readonly path: string | null;
+  };
+  readonly fileInspectorSupported: boolean;
+  readonly inspectorMode: ThreadInspectorMode | null;
+  /** Absent when the panel would be empty. */
+  readonly onTogglePanel: (() => void) | undefined;
   readonly onReturnToThread?: () => void;
   readonly draft?: boolean;
 }) {
@@ -30,8 +46,13 @@ export function useThreadHeaderOptions(props: {
   const navigation = useNavigation();
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const sidebarHeaderItem = useWorkspaceSidebarHeaderItem();
-  const threadCenterHeaderItems = useThreadGitCenterHeaderItems(props.gitControls);
-  const compactRightHeaderItems = useThreadGitRightHeaderItems(props.gitControls);
+  const titleMenu = useThreadTitleMenu({
+    thread: props.titleMenu?.thread ?? null,
+    canMutate: props.titleMenu?.canMutate ?? false,
+    path: props.titleMenu?.path ?? null,
+    gitStatus: props.gitControls.gitStatus,
+    onMergeBack: props.gitControls.onMergeBack,
+  });
   const splitLeftHeaderItems: NativeHeaderItems = [
     ...(!usesDuoHeader
       ? [
@@ -56,10 +77,10 @@ export function useThreadHeaderOptions(props: {
     ...(!usesDuoHeader && !props.draft
       ? [
           withNativeGlassHeaderItem({
-            accessibilityLabel: "New task",
+            accessibilityLabel: "New thread",
             icon: { name: "square.and.pencil", type: "sfSymbol" as const },
             identifier: "thread-left-new-task",
-            label: "New task",
+            label: "New thread",
             onPress: startNewTask,
             type: "button" as const,
           }),
@@ -76,6 +97,20 @@ export function useThreadHeaderOptions(props: {
       type: "button" as const,
     }),
   ];
+  // Desktop's right panel toggle: the panel holds browser, terminal, files, diff and devices.
+  const panelHeaderItems: NativeHeaderItems = [
+    {
+      accessibilityLabel: "Toggle panel",
+      disabled: props.onTogglePanel === undefined,
+      icon: { name: "sidebar.right", type: "sfSymbol" },
+      identifier: "thread-right-panel",
+      label: "Panel",
+      onPress: props.onTogglePanel,
+      sharesBackground: true,
+      type: "button",
+      variant: "plain",
+    },
+  ];
 
   const options: AppNativeStackNavigationOptions = {
     ...threadHeaderAppearance(props.usesNativeHeaderGlass),
@@ -88,31 +123,24 @@ export function useThreadHeaderOptions(props: {
         ? undefined
         : () => compactHomeHeaderItems,
     // The workspace navigator adds compose to the Duo detail column's bar.
-    unstable_headerRightItems: () =>
-      usesDuoHeader || layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems,
+    unstable_headerRightItems: () => panelHeaderItems,
     unstable_headerToolbarItems: () => [],
     unstable_headerSubtitle: props.usesNativeHeaderGlass ? props.subtitle : undefined,
+    unstable_headerTitleMenu: titleMenu.menu,
     contentStyle: undefined,
   };
-  const { environmentId, threadId, gitStatus } = props.gitControls;
   return {
     options,
-    // Factories re-read only on version changes; include displayed items and hidden callback state such as default refs.
+    // Factories re-read only on version changes; include displayed items and the state the
+    // panel button's handler reads.
     optionsVersion: [
       splitLeftHeaderItems,
-      threadCenterHeaderItems,
-      compactRightHeaderItems,
+      panelHeaderItems,
       usesDuoHeader,
-      environmentId,
-      threadId,
-      gitStatus?.isDefaultRef,
-      gitStatus?.refName,
-      gitStatus?.pr?.url,
+      props.fileInspectorSupported,
+      props.inspectorMode,
     ],
     sidebar: false,
-    fallback:
-      !layout.usesSplitView && !props.usesNativeHeaderGlass ? (
-        <ThreadGitControls {...props.gitControls} showActionControls />
-      ) : null,
+    overlay: titleMenu.overlay,
   };
 }
