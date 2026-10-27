@@ -4,6 +4,7 @@ import android.text.InputType
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
+import android.view.inputmethod.BaseInputConnection
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -88,6 +89,18 @@ class ComposerSubmitTest {
 
     assertEquals(emptyList<Boolean>(), sends)
     assertEquals("\n\n\n\n", editor.text.toString())
+  }
+
+  @Test
+  fun returnSendsWhileTheKeyboardHoldsAComposingRegion() {
+    // Gboard keeps the last word composing during hardware typing; a composing guard broke sends.
+    editor.setText("line")
+    BaseInputConnection.setComposingSpans(editor.text)
+
+    pressReturn()
+    pressReturn(KeyEvent.META_CTRL_ON)
+
+    assertEquals(listOf(false, true), sends)
   }
 
   @Test
