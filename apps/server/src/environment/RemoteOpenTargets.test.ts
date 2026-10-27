@@ -7,11 +7,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import type * as NodeOS from "node:os";
 import { afterEach, describe, expect, vi } from "vite-plus/test";
 
 import * as RemoteOpenTargets from "./RemoteOpenTargets.ts";
+import * as TailscaleStatusCache from "./TailscaleStatusCache.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -19,6 +22,25 @@ afterEach(() => {
 });
 
 const encoder = new TextEncoder();
+
+const nodeOs: typeof NodeOS = NodeModule.createRequire(import.meta.url)("node:os");
+
+const useTailnetAddress = (address: string) =>
+  Effect.sync(() => {
+    vi.spyOn(nodeOs, "networkInterfaces").mockReturnValue({
+      tailscale0: [
+        {
+          address,
+          netmask: "255.255.255.255",
+          family: "IPv4",
+          mac: "00:00:00:00:00:00",
+          internal: false,
+          cidr: `${address}/32`,
+        },
+      ],
+    });
+    NodeModule.syncBuiltinESMExports();
+  });
 
 const TAILSCALE_STATUS_JSON = JSON.stringify({
   Self: { DNSName: "bb-1.tail1234.ts.net.", TailscaleIPs: ["100.64.1.2"] },
@@ -66,6 +88,15 @@ const layerNet = (input: { readonly ipv4: boolean; readonly ipv6: boolean }) =>
     findAvailablePort: (preferred) => Effect.succeed(preferred),
   });
 
+const layerTargets = (
+  sshd: { readonly ipv4: boolean; readonly ipv6: boolean },
+  spawner: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+) =>
+  RemoteOpenTargets.layer.pipe(
+    Layer.provide(layerNet(sshd)),
+    Layer.provide(TailscaleStatusCache.layer.pipe(Layer.provide(spawner))),
+  );
+
 const resolveTargets = (input: {
   readonly sshd: { readonly ipv4: boolean; readonly ipv6: boolean };
   readonly tailscale: { readonly status: CommandResult; readonly prefs: CommandResult };
@@ -76,11 +107,7 @@ const resolveTargets = (input: {
     service.resolveTargets(),
   ).pipe(
     Effect.provideService(HostProcess.Hostname, input.hostname),
-    Effect.provide(
-      RemoteOpenTargets.layer.pipe(
-        Layer.provide(Layer.mergeAll(layerNet(input.sshd), layerSpawner(input.tailscale))),
-      ),
-    ),
+    Effect.provide(layerTargets(input.sshd, layerSpawner(input.tailscale))),
   );
 
   return input.username === undefined
@@ -141,31 +168,56 @@ describe("RemoteOpenTargets", () => {
     }),
   );
 
-  it.effect("reads Tailscale once across repeated resolves while nothing changes", () => {
+  it.effect("keeps a Tailscale read until the tailnet addresses change", () => {
     const spawnedArgs: Array<ReadonlyArray<string>> = [];
+    const spawned = () => ({
+      status: spawnedArgs.filter((args) => args[0] === "status").length,
+      debugPrefs: spawnedArgs.filter((args) => args[0] === "debug").length,
+    });
     return Effect.gen(function* () {
       const service = yield* RemoteOpenTargets.RemoteOpenTargets;
+      yield* useTailnetAddress("100.64.1.2");
       for (let connect = 0; connect < 3; connect++) {
         expect(yield* service.resolveTargets()).toEqual([
           { kind: "tailscale", host: "bb-1.tail1234.ts.net", username: "t3-user" },
         ]);
+        yield* TestClock.adjust("2 minutes");
       }
-      expect({
-        status: spawnedArgs.filter((args) => args[0] === "status").length,
-        debugPrefs: spawnedArgs.filter((args) => args[0] === "debug").length,
-      }).toEqual({ status: 1, debugPrefs: 1 });
+      expect(spawned()).toEqual({ status: 1, debugPrefs: 1 });
+
+      yield* useTailnetAddress("100.64.1.3");
+      yield* service.resolveTargets();
+      expect(spawned()).toEqual({ status: 2, debugPrefs: 2 });
     }).pipe(
       Effect.provideService(HostProcess.Hostname, "bb-1"),
       Effect.provideService(HostProcess.Username, "t3-user"),
       Effect.provide(
-        RemoteOpenTargets.layer.pipe(
-          Layer.provide(
-            Layer.mergeAll(
-              layerNet({ ipv4: false, ipv6: false }),
-              layerSpawner(TAILSCALE_SSH, spawnedArgs),
-            ),
-          ),
-        ),
+        layerTargets({ ipv4: false, ipv6: false }, layerSpawner(TAILSCALE_SSH, spawnedArgs)),
+      ),
+    );
+  });
+
+  it.effect("retries a failed Tailscale read after a minute", () => {
+    const spawnedArgs: Array<ReadonlyArray<string>> = [];
+    const tailscale = { ...TAILSCALE_SSH, status: TAILSCALE_DOWN.status };
+    const statusReads = () => spawnedArgs.filter((args) => args[0] === "status").length;
+    return Effect.gen(function* () {
+      const service = yield* RemoteOpenTargets.RemoteOpenTargets;
+      expect(yield* service.resolveTargets()).toEqual([]);
+      tailscale.status = STATUS_UP;
+      expect(yield* service.resolveTargets()).toEqual([]);
+      expect(statusReads()).toBe(1);
+
+      yield* TestClock.adjust("61 seconds");
+      expect(yield* service.resolveTargets()).toEqual([
+        { kind: "tailscale", host: "bb-1.tail1234.ts.net", username: "t3-user" },
+      ]);
+      expect(statusReads()).toBe(2);
+    }).pipe(
+      Effect.provideService(HostProcess.Hostname, "bb-1"),
+      Effect.provideService(HostProcess.Username, "t3-user"),
+      Effect.provide(
+        layerTargets({ ipv4: false, ipv6: false }, layerSpawner(tailscale, spawnedArgs)),
       ),
     );
   });
