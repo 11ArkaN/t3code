@@ -15,7 +15,9 @@ export function materializeReplayTranscriptRuntimeInstructions(
           ? "Kiro"
           : runtime.driver === "acpRegistry"
             ? "acpRegistry"
-            : undefined;
+            : runtime.driver === "fx"
+              ? "fx"
+              : undefined;
   if (harness === undefined) return transcript;
   const instructions = buildRuntimeInstructions({ harness, model: runtime.model });
 
