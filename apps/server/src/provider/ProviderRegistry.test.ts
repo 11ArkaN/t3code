@@ -1089,6 +1089,101 @@ it.layer(
           ),
         ),
       );
+
+      it.effect("keeps the cached status while the boot probe is still pending", () =>
+        Effect.gen(function* () {
+          const config = yield* ServerConfig.ServerConfig;
+          const filePath = yield* resolveProviderStatusCachePath({
+            cacheDir: config.providerStatusCacheDir,
+            instanceId: cachedProvider.instanceId,
+          });
+          yield* writeProviderStatusCache({ filePath, provider: cachedProvider });
+          const uncheckedProvider = {
+            ...cachedProvider,
+            status: "warning",
+            installed: false,
+            version: null,
+            auth: { status: "unknown" },
+            message: "Codex provider status has not been checked in this session yet.",
+            models: [],
+          } satisfies ServerProvider;
+          const instance = {
+            instanceId: cachedProvider.instanceId,
+            driverKind: cachedProvider.driver,
+            continuationIdentity: {
+              driverKind: cachedProvider.driver,
+              continuationKey: "codex:instance:codex-personal",
+            },
+            displayName: undefined,
+            enabled: true,
+            snapshot: {
+              resolveMaintenance: () =>
+                Effect.succeed(
+                  makeManualOnlyProviderMaintenanceCapabilities({
+                    provider: cachedProvider.driver,
+                    packageName: null,
+                  }),
+                ),
+              getSnapshot: Effect.succeed(uncheckedProvider),
+              refresh: Effect.never,
+              streamChanges: Stream.empty,
+              applyUsageLimits: () => Effect.void,
+            },
+            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+            textGeneration: {} as ProviderInstance["textGeneration"],
+          } satisfies ProviderInstance;
+          const layerInstanceRegistry = Layer.succeed(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            {
+              getInstance: (id) =>
+                Effect.succeed(id === instance.instanceId ? instance : undefined),
+              listInstances: Effect.succeed([instance]),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+            },
+          );
+          const lastKnownStatus = ({
+            status,
+            installed,
+            version,
+            auth,
+            message,
+          }: ServerProvider) => ({
+            status,
+            installed,
+            version,
+            auth,
+            message,
+          });
+
+          const providers = yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            return yield* registry.getProviders;
+          }).pipe(
+            Effect.provide(ProviderRegistry.layer.pipe(Layer.provide(layerInstanceRegistry))),
+            Effect.scoped,
+          );
+
+          assert.deepStrictEqual(
+            providers.map(lastKnownStatus),
+            [lastKnownStatus(cachedProvider)],
+            "the pending placeholder replaced the cached status before the probe finished",
+          );
+          const persisted = yield* readProviderStatusCache(filePath);
+          assert.deepStrictEqual(
+            persisted && lastKnownStatus(persisted),
+            lastKnownStatus(cachedProvider),
+            "the pending placeholder overwrote the cached status on disk",
+          );
+        }).pipe(
+          Effect.provide(
+            ServerConfig.layerTest(process.cwd(), {
+              prefix: "t3-codex-pending-status-cache-",
+            }).pipe(Layer.provideMerge(NodeServices.layer)),
+          ),
+        ),
+      );
     });
 
     describe("Antigravity model inventories", () => {
