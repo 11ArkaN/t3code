@@ -634,37 +634,45 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const publishLauncher = Effect.fn("cloud.boot_service.publish_launcher")(function* (
     directory: string,
   ) {
-    const staging = `${directory}.next`;
-    const previous = `${directory}.prev`;
-    yield* fs.remove(staging, { recursive: true, force: true });
-    yield* fs.remove(previous, { recursive: true, force: true });
-    yield* copyLauncher(runtimePaths.versionDir, staging).pipe(
-      Effect.onError(() =>
-        fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore),
-      ),
+    // Staging is per publish and rename onto a non-empty launcher fails, so overlaps publish only complete copies.
+    const staging = yield* fs.makeTempDirectory({
+      directory: path.dirname(directory),
+      prefix: `${path.basename(directory)}.next-`,
+    });
+    const next = path.join(staging, "launcher");
+    const previous = path.join(staging, "previous");
+    yield* Effect.gen(function* () {
+      yield* copyLauncher(runtimePaths.versionDir, next);
+      // Interrupted between the renames, the unit would point at a missing program.
+      yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          const replacing = yield* fs.exists(directory);
+          if (replacing) yield* fs.rename(directory, previous);
+          yield* fs
+            .rename(next, directory)
+            .pipe(
+              Effect.tapError(() =>
+                replacing ? fs.rename(previous, directory).pipe(Effect.ignore) : Effect.void,
+              ),
+            );
+        }),
+      );
+    }).pipe(
+      Effect.ensuring(fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore)),
     );
-    // Interrupted between the renames, the unit would point at a missing program.
-    yield* Effect.uninterruptible(
-      Effect.gen(function* () {
-        const replacing = yield* fs.exists(directory);
-        if (replacing) yield* fs.rename(directory, previous);
-        yield* fs
-          .rename(staging, directory)
-          .pipe(
-            Effect.tapError(() =>
-              replacing ? fs.rename(previous, directory).pipe(Effect.ignore) : Effect.void,
-            ),
-          );
-      }),
-    );
-    yield* fs.remove(previous, { recursive: true, force: true }).pipe(Effect.ignore);
   });
-  const removeLauncher = (directory: string) =>
-    Effect.forEach(
-      [directory, `${directory}.next`, `${directory}.prev`],
-      (target) => fs.remove(target, { recursive: true, force: true }),
+  const removeLauncher = Effect.fn("cloud.boot_service.remove_launcher")(function* (
+    directory: string,
+  ) {
+    const name = path.basename(directory);
+    const parent = path.dirname(directory);
+    const entries = yield* fs.readDirectory(parent).pipe(Effect.orElseSucceed(() => []));
+    yield* Effect.forEach(
+      entries.filter((entry) => entry === name || entry.startsWith(`${name}.next-`)),
+      (entry) => fs.remove(path.join(parent, entry), { recursive: true, force: true }),
       { discard: true },
     );
+  });
 
   const requireManager = Effect.suspend(() =>
     detectedManager === undefined

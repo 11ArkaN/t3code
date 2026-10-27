@@ -782,9 +782,13 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
         `    <string>${path.join(launcherDir, "t3")}</string>\n    <string>__service-launcher</string>`,
       );
-      expect(commands).toContain(
-        `cp -c -pR ${path.join(baseDir, "runtime", "versions", "1.2.3")} ${launcherDir}.next`,
-      );
+      expect(
+        commands.some((command) =>
+          command.startsWith(
+            `cp -c -pR ${path.join(baseDir, "runtime", "versions", "1.2.3")} ${launcherDir}.next-`,
+          ),
+        ),
+      ).toBe(true);
       expect(yield* service.status).toMatchObject({
         current: true,
         installedVersion: "1.2.3",
@@ -848,7 +852,12 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         Effect.provideService(FileSystem.FileSystem, {
           ...fs,
           rename: (from, to) =>
-            fs.rename(from, from === `${launcherDir}.next` ? path.join(to, "missing", "t3") : to),
+            fs.rename(
+              from,
+              from !== launcherDir && path.basename(from) === "launcher"
+                ? path.join(to, "missing", "t3")
+                : to,
+            ),
         }),
       );
       expect((yield* Effect.flip(failingSwap.install({ start: false })))._tag).toBe(
@@ -869,7 +878,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect((yield* Effect.flip(failingCopy.install({ start: false })))._tag).toBe(
         "BootServiceInstallError",
       );
-      expect(yield* fs.exists(`${launcherDir}.next`)).toBe(false);
+      expect(yield* fs.readDirectory(path.join(baseDir, "runtime"))).not.toContainEqual(
+        expect.stringMatching(/^launcher\./),
+      );
       expect(yield* fs.readFileString(path.join(launcherDir, "t3"))).toBe("#!/bin/sh\n# 1.2.4\n");
     }),
   );
@@ -907,6 +918,71 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       const program = BootService.bootServiceProgramOf(yield* fs.readFileString(plan.unitPath));
       expect(program).toBe(path.join(launcherDir, "t3"));
+      expect((yield* fs.stat(program ?? "")).mode & 0o111).toBe(0o111);
+    }),
+  );
+
+  it.effect("leaves a complete launch agent runtime when two updates overlap", () =>
+    Effect.gen(function* () {
+      const { service, makeService, fs, baseDir } = yield* makeHarness("darwin");
+      const path = yield* Path.Path;
+      const launcherDir = path.join(baseDir, "runtime", "launcher");
+      const plan = yield* service.install();
+      const firstCopied = yield* Deferred.make<void>();
+      const resumeFirst = yield* Deferred.make<void>();
+      const secondPartlyCopied = yield* Deferred.make<void>();
+      const resumeSecond = yield* Deferred.make<void>();
+      const first = yield* makeService(undefined, "1.2.4").pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          copy: (from, to) =>
+            fs
+              .copy(from, to)
+              .pipe(
+                Effect.andThen(Deferred.succeed(firstCopied, undefined)),
+                Effect.andThen(Deferred.await(resumeFirst)),
+              ),
+        }),
+      );
+      const second = yield* makeService(undefined, "1.2.5").pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          copy: (from, to) =>
+            fs
+              .makeDirectory(to, { recursive: true })
+              .pipe(
+                Effect.andThen(
+                  fs.copyFile(
+                    path.join(from, ".install-complete"),
+                    path.join(to, ".install-complete"),
+                  ),
+                ),
+                Effect.andThen(Deferred.succeed(secondPartlyCopied, undefined)),
+                Effect.andThen(Deferred.await(resumeSecond)),
+                Effect.andThen(fs.copyFile(path.join(from, "t3"), path.join(to, "t3"))),
+              ),
+        }),
+      );
+      const versionEntry = (version: string) =>
+        path.join(baseDir, "runtime", "versions", version, "t3");
+      yield* fs.writeFileString(versionEntry("1.2.4"), "#!/bin/sh\n# 1.2.4\n");
+      yield* fs.writeFileString(versionEntry("1.2.5"), "#!/bin/sh\n# 1.2.5\n");
+
+      const firstInstall = yield* Effect.forkChild(first.install({ start: false }));
+      yield* Deferred.await(firstCopied);
+      const secondInstall = yield* Effect.forkChild(second.install({ start: false }));
+      yield* Deferred.await(secondPartlyCopied);
+      yield* Deferred.succeed(resumeFirst, undefined);
+      yield* Fiber.await(firstInstall);
+      yield* Deferred.succeed(resumeSecond, undefined);
+      yield* Fiber.await(secondInstall);
+
+      const program = BootService.bootServiceProgramOf(yield* fs.readFileString(plan.unitPath));
+      expect(program).toBe(path.join(launcherDir, "t3"));
+      expect(yield* fs.exists(program ?? "")).toBe(true);
+      expect(["#!/bin/sh\n# 1.2.4\n", "#!/bin/sh\n# 1.2.5\n"]).toContain(
+        yield* fs.readFileString(program ?? ""),
+      );
       expect((yield* fs.stat(program ?? "")).mode & 0o111).toBe(0o111);
     }),
   );
