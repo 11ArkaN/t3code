@@ -96,9 +96,14 @@ export function PullRequestGuideTab({
   // A failed run's detail can be hundreds of lines of CLI stderr.
   const failureDetail =
     failure === null || running ? null : (
-      <div className="max-h-40 w-full overflow-y-auto text-left font-mono text-xs whitespace-pre-wrap wrap-anywhere">
-        {failure}
-      </div>
+      <details className="max-w-md text-xs text-muted-foreground">
+        <summary className="w-fit cursor-pointer rounded-sm -outline-offset-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+          Technical details
+        </summary>
+        <pre className="scrollbar-gutter-both mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-3 text-left font-mono text-xs">
+          {failure}
+        </pre>
+      </details>
     );
 
   if (guide === null) {
@@ -122,10 +127,8 @@ export function PullRequestGuideTab({
                 ? "An agent is reading the change. A large one takes a few minutes. You can leave; you will be told when it is ready."
                 : "A guide is a tour of the change: stops through the code in reading order, with the calls only a maintainer can make."))}
         </p>
-        {failureDetail === null ? null : (
-          <div className="w-full max-w-md text-muted-foreground">{failureDetail}</div>
-        )}
         {writeButton(failure === null ? "Write guide" : "Try again", "sm")}
+        {failureDetail}
       </div>
     );
   }
