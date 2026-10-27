@@ -5219,7 +5219,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("moves a queued message ahead of queued delegated completions", () =>
+  it.effect("moves a queued message ahead of queued delegated completions and back", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -5297,18 +5297,20 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
       yield* queueCompletion(1);
       yield* queueCompletion(2);
-      yield* orchestrator.dispatch({
-        type: "message.dispatch",
-        createdBy: "user",
-        creationSource: "web",
-        commandId: CommandId.make("runtime-layer-reorder-before-completion-correction"),
-        threadId,
-        messageId: messageId("correction"),
-        text: "Rule correction.",
-        attachments: [],
-        modelSelection,
-        dispatchMode: { type: "queue_after_active" },
-      });
+      for (const key of ["correction", "follow-up"]) {
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`runtime-layer-reorder-before-completion-${key}`),
+          threadId,
+          messageId: messageId(key),
+          text: key,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: "queue_after_active" },
+        });
+      }
       const runIdFor = (projection: OrchestrationV2ThreadProjection, key: string) =>
         projection.runs.find((run) => run.userMessageId === messageId(key))!.id;
       const before = yield* orchestrator.getThreadProjection(threadId);
@@ -5323,13 +5325,45 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
 
       yield* queueCompletion(3);
 
-      const after = yield* orchestrator.getThreadProjection(threadId);
-      assert.deepEqual(
-        queuedRunsInDeliveryOrder(after).map((run) => run.id),
-        ["correction", "completion-1", "completion-2", "completion-3"].map((key) =>
-          runIdFor(after, key),
-        ),
-      );
+      const deliveryOrder = Effect.gen(function* () {
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        return queuedRunsInDeliveryOrder(projection).map((run) =>
+          run.userMessageId.replace(messageId(""), ""),
+        );
+      });
+      assert.deepEqual(yield* deliveryOrder, [
+        "correction",
+        "completion-1",
+        "completion-2",
+        "completion-3",
+        "follow-up",
+      ]);
+
+      const completionReorder = yield* orchestrator
+        .dispatch({
+          type: "queued-run.reorder",
+          commandId: CommandId.make("runtime-layer-reorder-before-completion-completion"),
+          threadId,
+          runId: runIdFor(before, "completion-2"),
+          beforeRunId: runIdFor(before, "completion-1"),
+        })
+        .pipe(Effect.flip);
+      assert.equal(completionReorder._tag, "OrchestratorDispatchError");
+
+      yield* orchestrator.dispatch({
+        type: "queued-run.reorder",
+        commandId: CommandId.make("runtime-layer-reorder-before-completion-back"),
+        threadId,
+        runId: runIdFor(before, "correction"),
+        beforeRunId: null,
+      });
+      assert.deepEqual(yield* deliveryOrder, [
+        "completion-1",
+        "completion-2",
+        "completion-3",
+        "follow-up",
+        "correction",
+      ]);
     }),
   );
 });
