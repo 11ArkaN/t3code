@@ -132,6 +132,7 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     readonly enabled?: boolean;
     readonly safe?: boolean;
     readonly probeUsage?: Effect.Effect<ServerProviderUsageLimits>;
+    readonly auth?: { readonly type: string; readonly label: string };
   } = {},
 ) {
   const initialProbe = yield* Deferred.make<EffectAcpSchema.InitializeResponse, ProbeError>();
@@ -146,6 +147,7 @@ const makeHarness = Effect.fn("makeAntigravityProviderHarness")(function* (
     {
       stampIdentity: (snapshot) => Effect.succeed({ ...snapshot, instanceId, driver }),
       ...(options.probeUsage ? { probeUsage: options.probeUsage } : {}),
+      ...(options.auth ? { auth: options.auth } : {}),
       probe: Ref.update(probeCalls, (count) => count + 1).pipe(
         Effect.andThen(Ref.get(probe)),
         Effect.flatten,
@@ -259,6 +261,40 @@ it.layer(layerTest)("Antigravity provider snapshots", (it) => {
           models: [],
         });
         expect(yield* Ref.get(harness.probeCalls)).toBe(1);
+      }),
+    ),
+  );
+
+  it.effect("tells API key users to connect instead of checking Google account access", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          auth: { type: "gemini-api-key", label: "Gemini API key" },
+        });
+        yield* harness.initialize;
+        const snapshot = yield* harness.provider.snapshot.getSnapshot;
+        expect(snapshot).toMatchObject({
+          installed: true,
+          status: "warning",
+          auth: { status: "unknown", type: "gemini-api-key" },
+        });
+        expect(snapshot.message).not.toContain("Google account");
+        expect(snapshot.message).toContain("Gemini API key");
+        expect(snapshot.message).toMatch(/models/i);
+      }),
+    ),
+  );
+
+  it.effect("keeps Google account wording for browser sign-in before access is checked", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          auth: { type: "oauth-personal", label: "Google account" },
+        });
+        yield* harness.initialize;
+        const snapshot = yield* harness.provider.snapshot.getSnapshot;
+        expect(snapshot).toMatchObject({ installed: true, status: "warning" });
+        expect(snapshot.message).toContain("Google account");
       }),
     ),
   );
