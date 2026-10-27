@@ -37,6 +37,7 @@ import {
   decodeMergeRequestChangesJson,
   decodeMergeRequestListJson,
   decodeNotesJson,
+  decodePipelineJobChecksJson,
   decodeOwnAwardIdJson,
   decodeProjectMergeCapabilitiesJson,
   decodeProjectLabelsJson,
@@ -230,7 +231,15 @@ export class GitLabPullRequestCli extends Context.Service<
       readonly filters?: PullRequestListFilters | undefined;
     }) => Effect.Effect<GitLabMergeRequestListBatch, GitLabPullRequestCliError>;
 
+    /** Adds the head pipeline's jobs as checks, which costs two more reads. */
     readonly getMergeRequestDetail: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly number: number;
+    }) => Effect.Effect<GitLabMergeRequestDetail, GitLabPullRequestCliError>;
+
+    /** The merge request alone, with the head pipeline as one check. */
+    readonly getMergeRequest: (input: {
       readonly cwd: string;
       readonly repository: string;
       readonly number: number;
@@ -927,6 +936,31 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  // Best-effort: any failure keeps the merge request's single pipeline check.
+  const withPipelineJobChecks = (
+    cwd: string,
+    detail: GitLabMergeRequestDetail,
+  ): Effect.Effect<GitLabMergeRequestDetail> => {
+    const pipeline = detail.headPipeline;
+    if (pipeline === undefined) return Effect.succeed(detail);
+    const read = (kind: "jobs" | "bridges") =>
+      api({
+        cwd,
+        path: `projects/${pipeline.projectId}/pipelines/${pipeline.id}/${kind}?per_page=${MAX_PAGE_SIZE}`,
+      });
+    return Effect.all([read("jobs"), read("bridges")], { concurrency: 2 }).pipe(
+      Effect.map(([jobs, bridges]) => {
+        const checks = decodePipelineJobChecksJson(
+          jobs.stdout.trim(),
+          bridges.stdout.trim(),
+          MAX_PAGE_SIZE,
+        );
+        return checks === null ? detail : { ...detail, checks };
+      }),
+      Effect.orElseSucceed(() => detail),
+    );
+  };
+
   const projectUsers = (input: {
     readonly cwd: string;
     readonly repository: string;
@@ -1126,7 +1160,17 @@ export const make = Effect.gen(function* () {
       return listPage({ ...input, page, collected: [], cursorAdvance: 0 });
     }),
 
-    getMergeRequestDetail: mergeRequestDetail,
+    getMergeRequestDetail: Effect.fn("GitLabPullRequestCli.getMergeRequestDetail")(
+      function (input) {
+        return mergeRequestDetail(input).pipe(
+          Effect.flatMap((detail) => withPipelineJobChecks(input.cwd, detail)),
+        );
+      },
+    ),
+
+    getMergeRequest: Effect.fn("GitLabPullRequestCli.getMergeRequest")(function (input) {
+      return mergeRequestDetail(input);
+    }),
 
     listNotes: Effect.fn("GitLabPullRequestCli.listNotes")(function (input) {
       return notesPage({ ...input, page: 1, collected: [] });

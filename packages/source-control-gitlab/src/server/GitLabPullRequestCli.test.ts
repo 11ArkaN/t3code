@@ -84,7 +84,8 @@ function mergeRequestJson(overrides: Record<string, unknown>): string {
 function servePipeline(input: {
   readonly headPipeline: Record<string, unknown>;
   readonly jobs: ReadonlyArray<Record<string, unknown>>;
-  readonly bridges: ReadonlyArray<Record<string, unknown>>;
+  /** Null leaves the trigger jobs unreadable. */
+  readonly bridges: ReadonlyArray<Record<string, unknown>> | null;
 }) {
   const pipelinePath = `projects/${input.headPipeline.project_id}/pipelines/${input.headPipeline.id}`;
   mockedExecute.mockImplementation(({ cwd, args }) => {
@@ -95,7 +96,7 @@ function servePipeline(input: {
     if (path.startsWith(`${pipelinePath}/jobs?`)) {
       return Effect.succeed(output(JSON.stringify(input.jobs)));
     }
-    if (path.startsWith(`${pipelinePath}/bridges?`)) {
+    if (input.bridges !== null && path.startsWith(`${pipelinePath}/bridges?`)) {
       return Effect.succeed(output(JSON.stringify(input.bridges)));
     }
     return Effect.fail(
@@ -1096,6 +1097,44 @@ layer("GitLabPullRequestCli.layer", (it) => {
           url: "https://gitlab.com/acme/preview/-/pipelines/950",
         });
       }),
+  );
+
+  it.effect.each([
+    { case: "the trigger jobs read fails", jobs: [], bridges: null },
+    { case: "both reads are empty", jobs: [], bridges: [] },
+    {
+      case: "a page comes back full",
+      jobs: Array.from({ length: 100 }, (_, index) => ({
+        id: index,
+        name: `job-${index}`,
+        status: "success",
+      })),
+      bridges: [],
+    },
+  ])("keeps the single pipeline check when $case", ({ jobs, bridges }) =>
+    Effect.gen(function* () {
+      servePipeline({
+        headPipeline: {
+          id: 902,
+          project_id: 42,
+          status: "failed",
+          web_url: "https://gitlab.com/acme/web/-/pipelines/902",
+        },
+        jobs,
+        bridges,
+      });
+      const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+      const detail = yield* cli.getMergeRequestDetail({
+        cwd: "/w",
+        repository: "acme/web",
+        number: 7,
+      });
+
+      expect(detail.checks.map(({ name, status }) => ({ name, status }))).toEqual([
+        { name: "Pipeline", status: "failure" },
+      ]);
+    }),
   );
 
   it.effect("reads who has access to the project and who is already on the merge request", () =>

@@ -31,6 +31,8 @@ const RawUserSchema = Schema.Struct({
 });
 
 const RawPipelineSchema = Schema.Struct({
+  id: Schema.optional(Schema.Int),
+  project_id: Schema.optional(Schema.Int),
   status: Schema.optional(Schema.NullOr(Schema.String)),
   web_url: Schema.optional(Schema.NullOr(Schema.String)),
   source: Schema.optional(Schema.NullOr(Schema.String)),
@@ -197,6 +199,8 @@ export interface GitLabMergeRequestDetail extends GitLabMergeRequestListItem {
   /** Absent means not counted, not up to date. */
   readonly divergedCommits?: number;
   readonly headSha?: string;
+  /** A fork's pipeline lives in the source project, not the target. */
+  readonly headPipeline?: { readonly id: number; readonly projectId: number };
 }
 
 function trimmed(value: string | null | undefined): string | null {
@@ -336,6 +340,9 @@ function toDetail(raw: Schema.Schema.Type<typeof RawMergeRequestSchema>): GitLab
       : {}),
     ...(raw.diverged_commits_count == null ? {} : { divergedCommits: raw.diverged_commits_count }),
     ...(headSha === null ? {} : { headSha }),
+    ...(raw.head_pipeline?.id === undefined || raw.head_pipeline.project_id === undefined
+      ? {}
+      : { headPipeline: { id: raw.head_pipeline.id, projectId: raw.head_pipeline.project_id } }),
   };
 }
 
@@ -399,6 +406,51 @@ export function decodeMergeRequestDetailJson(
   return Result.isSuccess(decoded)
     ? Result.succeed(toDetail(decoded.success))
     : Result.fail(decoded.failure);
+}
+
+const RawPipelineJobSchema = Schema.Struct({
+  id: Schema.Int,
+  name: Schema.String,
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
+  status: Schema.optional(Schema.NullOr(Schema.String)),
+  allow_failure: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  web_url: Schema.optional(Schema.NullOr(Schema.String)),
+  // Trigger jobs only: the child or multi-project pipeline they started.
+  downstream_pipeline: Schema.optional(Schema.NullOr(RawPipelineSchema)),
+});
+const decodePipelineJobs = decodeJsonResult(Schema.Array(RawPipelineJobSchema));
+
+/**
+ * One check per job and trigger job, in pipeline order. Null when the pages
+ * cannot stand in for the pipeline: unreadable, empty, or full and so possibly
+ * missing the failed job.
+ */
+export function decodePipelineJobChecksJson(
+  jobsRaw: string,
+  bridgesRaw: string,
+  pageSize: number,
+): ReadonlyArray<PullRequestCheck> | null {
+  const jobs = decodePipelineJobs(jobsRaw);
+  const bridges = decodePipelineJobs(bridgesRaw);
+  if (!Result.isSuccess(jobs) || !Result.isSuccess(bridges)) return null;
+  if (jobs.success.length >= pageSize || bridges.success.length >= pageSize) return null;
+  const checks = [...jobs.success, ...bridges.success]
+    .toSorted((left, right) => left.id - right.id)
+    .flatMap((job): ReadonlyArray<PullRequestCheck> => {
+      const name = trimmed(job.name);
+      if (name === null) return [];
+      const source = job.downstream_pipeline ?? job;
+      const status = toPipelineStatus(source.status);
+      return [
+        {
+          name,
+          status: status === "failure" && job.allow_failure === true ? "neutral" : status,
+          description: trimmed(job.stage),
+          url: trimmed(source.web_url),
+        },
+      ];
+    });
+  return checks.length === 0 ? null : checks;
 }
 
 export function decodeViewerJson(raw: string): Result.Result<string | null, DecodeFailure> {

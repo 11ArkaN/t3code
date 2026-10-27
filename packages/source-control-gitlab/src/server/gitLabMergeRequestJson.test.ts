@@ -10,6 +10,7 @@ import {
   decodeMergeRequestListJson,
   decodeNotesJson,
   decodeOwnAwardIdJson,
+  decodePipelineJobChecksJson,
 } from "./gitLabMergeRequestJson.ts";
 
 function listJson(entries: ReadonlyArray<Record<string, unknown>>): string {
@@ -214,6 +215,20 @@ describe("decodeMergeRequestDetailJson", () => {
     );
 
     expect(detail.checks[0]?.status).toBe("neutral");
+  });
+});
+
+describe("decodePipelineJobChecksJson", () => {
+  it("does not fail the merge request on a job allowed to fail", () => {
+    const checks = decodePipelineJobChecksJson(
+      JSON.stringify([{ id: 1, name: "lint", status: "failed", allow_failure: true }]),
+      "[]",
+      100,
+    );
+
+    expect(checks?.map(({ name, status }) => ({ name, status }))).toEqual([
+      { name: "lint", status: "neutral" },
+    ]);
   });
 });
 
