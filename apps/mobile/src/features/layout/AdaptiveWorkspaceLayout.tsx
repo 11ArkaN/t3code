@@ -47,6 +47,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { activeNewTaskProjectKeyAtom } from "../../state/active-new-task";
 import { useProjects } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
+import { threadOutboxManager } from "../../state/thread-outbox";
 import { workspaceConnections } from "../../state/workspace";
 import { environmentThreadShells } from "../../state/threads";
 import { mobilePreferencesAtom } from "../../state/preferences";
@@ -531,15 +532,24 @@ function AdaptiveWorkspaceLayoutContent(
       Array.isArray(value) ? value[0] : value;
     const environmentId = first(params?.environmentId);
     const threadId = first(params?.threadId);
-    // The index includes subagent threads, which the navigation list leaves out.
-    const threadProjectId =
-      environmentId && threadId
-        ? appAtomRegistry
-            .get(
-              environmentThreadShells.environmentThreadIndexAtom(EnvironmentId.make(environmentId)),
-            )
-            .get(ThreadId.make(threadId))?.projectId
-        : undefined;
+    // The index includes subagent threads, which the navigation list leaves out. A thread whose
+    // creation is still queued is not indexed yet, so its queued creation names the project.
+    const threadProjectId = (() => {
+      if (!environmentId || !threadId) return undefined;
+      const ref = {
+        environmentId: EnvironmentId.make(environmentId),
+        threadId: ThreadId.make(threadId),
+      };
+      const queued = appAtomRegistry.get(threadOutboxManager.queuedMessagesByThreadKeyAtom);
+      return (
+        appAtomRegistry
+          .get(environmentThreadShells.environmentThreadIndexAtom(ref.environmentId))
+          .get(ref.threadId)?.projectId ??
+        queued[scopedThreadKey(ref.environmentId, ref.threadId)]?.find(
+          (message) => message.creation,
+        )?.creation?.projectId
+      );
+    })();
     // An open draft's route may not name the project it shows, so read the draft's selection.
     const currentProjectKey =
       environmentId && threadProjectId
@@ -567,6 +577,7 @@ function AdaptiveWorkspaceLayoutContent(
       return;
     }
     // The picker opens over the current page, so backing out of it returns there.
+    if (Platform.OS === "android") Keyboard.dismiss();
     if (layout.primarySidebarOverlaysContent) setPrimarySidebarVisible(false);
     if (!state || overlays.length === 0) {
       navigation.navigate("NewTaskProject", destination.picker);
