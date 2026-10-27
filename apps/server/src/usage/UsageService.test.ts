@@ -278,6 +278,43 @@ function cursorSource(summary: { readonly sources: readonly UsageSource[] }) {
   return summary.sources.find((source) => source.fingerprint.provider === "cursor");
 }
 
+/** Cursor's API: an API key exchanges for a bearer token that reads only its owner's events. */
+const cursorApi = (accounts: Readonly<Record<string, { readonly outputTokens: number }>>) => {
+  const accessToken = (apiKey: string) =>
+    `header.${Buffer.from(encodeUnknownJsonString({ sub: `auth0|user_${apiKey}`, type: "api_key_token", exp: 4102444800 })).toString("base64url")}.signature`;
+  return (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.sync(() => {
+      const authorization = request.headers["authorization"];
+      if (request.url === "https://api2.cursor.sh/auth/exchange_user_api_key") {
+        const apiKey = Object.keys(accounts).find((key) => authorization === `Bearer ${key}`);
+        return apiKey === undefined
+          ? Response.json({ error: "invalid api key" }, { status: 401 })
+          : Response.json({ accessToken: accessToken(apiKey), refreshToken: `refresh-${apiKey}` });
+      }
+      if (
+        request.url === "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents"
+      ) {
+        const account = Object.entries(accounts).find(
+          ([key]) => authorization === `Bearer ${accessToken(key)}`,
+        );
+        return account === undefined
+          ? Response.json({ error: "unauthenticated" }, { status: 401 })
+          : Response.json({
+              totalUsageEventsCount: 1,
+              usageEventsDisplay: [
+                {
+                  timestamp: String(CURSOR_NOW - 3 * HOUR_MS),
+                  model: "claude-fable-5",
+                  usageEventId: `event-${account[0]}`,
+                  tokenUsage: { inputTokens: 10, outputTokens: account[1].outputTokens },
+                },
+              ],
+            });
+      }
+      return Response.json({});
+    });
+};
+
 const seedCodexHistory = (input: {
   id: string;
   nativeTurnId?: string;
@@ -1351,6 +1388,85 @@ describe("UsageService", () => {
         assert.isFalse(summary.buckets.some((bucket) => bucket.provider === "cursor"));
       }
     }).pipe(Effect.scoped),
+  );
+
+  it.live("reads the Cursor account history billed to each instance's API key", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const cases = [
+        {
+          instances: {
+            [ProviderInstanceId.make("cursor-b")]: {
+              driver: ProviderDriverKind.make("cursor"),
+              environment: [{ name: "CURSOR_API_KEY", value: "key-b", sensitive: true }],
+            },
+          },
+          environment: {},
+        },
+        { instances: {}, environment: { CURSOR_API_KEY: "key-b" } },
+      ];
+      const results = yield* Effect.forEach(cases, (testCase, index) =>
+        Effect.gen(function* () {
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: `usage-service-cursor-instance-key-${index}`,
+                home,
+                settings: {
+                  providerInstances: { ...settings.providerInstances, ...testCase.instances },
+                },
+                environment: testCase.environment,
+                ratesResponse: cursorApi({ "key-b": { outputTokens: 7 } }),
+              }),
+            ),
+          );
+          const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+          return {
+            readsAccount: summary.sources.some(
+              (source) => source.fingerprint.provider === "cursor" && source.status === "ok",
+            ),
+            outputTokens: totalOutputTokens({
+              buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+            }),
+          };
+        }),
+      );
+      assert.deepStrictEqual(results, [
+        { readsAccount: true, outputTokens: 7 },
+        { readsAccount: true, outputTokens: 7 },
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.live("reports a Cursor instance whose account history cannot be read", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-cursor-instance-unreadable",
+            home,
+            settings: {
+              providerInstances: {
+                ...settings.providerInstances,
+                [ProviderInstanceId.make("cursor-b")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                  environment: [{ name: "CURSOR_API_KEY", value: "revoked-key", sensitive: true }],
+                },
+              },
+            },
+            ratesResponse: cursorApi({}),
+          }),
+        ),
+      );
+      const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      const cursor = cursorSource(summary);
+      assert.isDefined(cursor, "the unreadable Cursor instance has no Usage source");
+      assert.notStrictEqual(cursor?.status, "ok");
+      assert.isString(cursor?.message);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
   it.live(
