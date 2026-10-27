@@ -120,13 +120,17 @@ function RetentionControl({
   // switch, so switching off never saves it first, or one stepped toward a rule's first age,
   // so raising it from 8 never saves a shorter age on the way.
   const [held, setHeld] = useState(false);
+  // Hides a saved rule's age once it is switched off, so no blur can save it after null.
+  const [switchedOff, setSwitchedOff] = useState(false);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
     setEnabling(null);
     setHeld(false);
+    setSwitchedOff(false);
   }
   const pending = typeof enabling === "object" ? enabling : null;
+  const on = (value !== null && !switchedOff) || enabling !== null;
   const row = useRef<HTMLDivElement>(null);
 
   const commit = async (next: number) => {
@@ -145,6 +149,15 @@ function RetentionControl({
     }
   };
 
+  const switchOff = async () => {
+    setDraft(value);
+    setHeld(false);
+    setEnabling(null);
+    if (value === null && pending === null) return;
+    setSwitchedOff(true);
+    if (!(await onChange(null))) setSwitchedOff(false);
+  };
+
   return (
     <div
       ref={row}
@@ -155,7 +168,7 @@ function RetentionControl({
         else setEnabling((current) => (typeof current === "string" ? null : current));
       }}
     >
-      {value !== null || enabling !== null ? (
+      {on ? (
         <NumberField
           value={draft}
           min={minimum}
@@ -223,19 +236,14 @@ function RetentionControl({
       )}
       <Switch
         aria-label={label}
-        checked={value !== null || enabling !== null}
+        checked={on}
         // Keeps focus in the age field, so switching off never commits an edited age first.
         onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
           if (enabled) {
             setDraft(8);
             setEnabling("draft");
-            return;
-          }
-          if (value !== null || pending !== null) void onChange(null);
-          setDraft(value);
-          setHeld(false);
-          setEnabling(null);
+          } else void switchOff();
         }}
       />
     </div>

@@ -269,6 +269,24 @@ it("turns a saved retention rule off immediately", async () => {
   });
 });
 
+it("switching an edited saved rule off never saves its age afterwards", async () => {
+  setup();
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, browserArtifactsAfterDays: 30 },
+  };
+  state.update.mockReturnValue(new Promise(() => {}));
+  await using screen = await render(panel());
+  await userEvent.click(daysInput(screen));
+  await userEvent.keyboard("{Control>}a{/Control}40");
+  await userEvent.click(ruleSwitch(screen));
+  await expect.element(ruleSwitch(screen)).not.toBeChecked();
+  await userEvent.click(screen.getByRole("heading", { name: rule }));
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: null },
+  });
+});
+
 it("returns a newly enabled retention rule to off when its first save fails", async () => {
   setup();
   state.update.mockResolvedValue(false);
