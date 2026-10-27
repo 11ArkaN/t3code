@@ -235,18 +235,19 @@ function kiroModelsFromList(
   const list = Option.getOrUndefined(decodeKiroModelList(output.stdout.trim()));
   if (list === undefined || list.models.length === 0) return undefined;
   const defaultId = list.default_model ?? KIRO_FALLBACK_DEFAULT_MODEL;
-  return list.models.map((model) =>
+  const defaultModel: ServerProviderModel = {
+    slug: KIRO_DEFAULT_MODEL_SLUG,
+    name: "Kiro default",
+    aliases: [defaultId],
+    isCustom: false,
+    isDefault: true,
+    // A new session on Kiro's default gets no model write, so Kiro never
+    // advertises its effort option and a level could not be applied.
+    capabilities: EMPTY_CAPABILITIES,
+  };
+  const models = list.models.map((model) =>
     model.model_id === defaultId
-      ? {
-          slug: KIRO_DEFAULT_MODEL_SLUG,
-          name: "Kiro default",
-          aliases: [model.model_id],
-          isCustom: false,
-          isDefault: true,
-          // A new session on Kiro's default gets no model write, so Kiro never
-          // advertises its effort option and a level could not be applied.
-          capabilities: EMPTY_CAPABILITIES,
-        }
+      ? defaultModel
       : {
           slug: model.model_id,
           name: model.model_name ?? model.model_id,
@@ -254,6 +255,8 @@ function kiroModelsFromList(
           capabilities: kiroModelCapabilities(model.model_id),
         },
   );
+  // New threads select "default", so it is listed even when Kiro's list leaves its default out.
+  return models.includes(defaultModel) ? models : [defaultModel, ...models];
 }
 
 /**

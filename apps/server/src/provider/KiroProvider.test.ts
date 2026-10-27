@@ -216,6 +216,27 @@ describe("KiroProvider", () => {
     }),
   );
 
+  it.effect("lists Kiro default even when Kiro's model list leaves its default out", () =>
+    Effect.gen(function* () {
+      const { snapshot } = yield* check({
+        "--version": { stdout: "kiro-cli 2.27.0\n", code: 0 },
+        "whoami --format json": { stdout: '{"accountType":"SocialGitHub"}\n', code: 0 },
+        "chat --list-models --format json": {
+          stdout: JSON.stringify({ models: [{ model_id: "claude-sonnet-4.5" }] }),
+          code: 0,
+        },
+      });
+      assert.deepEqual(
+        snapshot.models.map((model) => [model.slug, model.isDefault === true]),
+        [
+          ["default", true],
+          ["claude-sonnet-4.5", false],
+        ],
+      );
+      assert.equal(kiroDefaultModelId(snapshot.models), "auto");
+    }),
+  );
+
   // `--list-models` names no effort levels, so the picker's come from Kiro's ids.
   const KIRO_EFFORT_MODEL_LIST = JSON.stringify({
     models: [
