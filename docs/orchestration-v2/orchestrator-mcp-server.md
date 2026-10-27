@@ -77,9 +77,8 @@ Codex app-server receives the MCP server in the per-thread `config` of its
 }
 ```
 
-The dotted key overrides only T3's server, so MCP servers from the user's Codex
-config or launch arguments survive. The tool timeout stays above T3's hour-long
-waits.
+The dotted key overrides only T3's server, so MCP servers passed in Codex launch
+arguments survive. The tool timeout stays above T3's hour-long waits.
 
 ### Claude Agent SDK V2
 
