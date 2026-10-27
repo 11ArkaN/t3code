@@ -4,7 +4,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const PROXY_ENV_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"];
 // CFNetwork never sends loopback through the system proxy; env-proxy clients do unless told.
-const LOOPBACK_NO_PROXY = ["localhost", "127.0.0.1", "::1"];
+const LOOPBACK_NO_PROXY = ["localhost", "127.0.0.1", "::1", "[::1]"];
 
 function proxyUrl(fields: ReadonlyMap<string, string>, prefix: "HTTP" | "HTTPS"): string | null {
   const host = fields.get(`${prefix}Proxy`);
@@ -15,7 +15,7 @@ function proxyUrl(fields: ReadonlyMap<string, string>, prefix: "HTTP" | "HTTPS")
   return `http://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}`;
 }
 
-// macOS writes `*.local` and `169.254/16`; curl and npm match `.local` and full CIDRs.
+// macOS writes `*.local` and `169.254/16`; curl matches `.local` and full CIDRs (npm ignores CIDRs).
 function toNoProxyEntry(exception: string): string {
   if (exception.startsWith("*.")) {
     return exception.slice(1);
@@ -30,7 +30,7 @@ function toNoProxyEntry(exception: string): string {
 }
 
 /** Maps `scutil --proxy` output to proxy env vars; SOCKS and PAC are ignored. */
-export function parseScutilProxy(output: string): Record<string, string> {
+export function parseScutilProxy(output: string, inheritedNoProxy = ""): Record<string, string> {
   const fields = new Map<string, string>();
   const exceptions: Array<string> = [];
   let depth = 0;
@@ -60,7 +60,11 @@ export function parseScutilProxy(output: string): Record<string, string> {
   if (!http && !https) {
     return {};
   }
-  const noProxy = [...LOOPBACK_NO_PROXY, ...exceptions.map(toNoProxyEntry)].join(",");
+  const noProxy = [
+    ...inheritedNoProxy.split(",").flatMap((entry) => entry.trim() || []),
+    ...LOOPBACK_NO_PROXY,
+    ...exceptions.map(toNoProxyEntry),
+  ].join(",");
   return {
     ...(http ? { HTTP_PROXY: http, http_proxy: http } : {}),
     ...(https ? { HTTPS_PROXY: https, https_proxy: https } : {}),
@@ -75,8 +79,14 @@ function hasProxyEnv(env: NodeJS.ProcessEnv): boolean {
 
 export const readMacosSystemProxyEnv = Effect.fn("MacosSystemProxy.readEnv")(function* (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  commandEnv: NodeJS.ProcessEnv = {},
 ) {
-  if ((yield* HostProcess.Platform) !== "darwin" || hasProxyEnv(yield* HostProcess.Environment)) {
+  const inherited = yield* HostProcess.Environment;
+  if (
+    (yield* HostProcess.Platform) !== "darwin" ||
+    hasProxyEnv(inherited) ||
+    hasProxyEnv(commandEnv)
+  ) {
     return {};
   }
   const output = yield* spawner
@@ -87,5 +97,5 @@ export const readMacosSystemProxyEnv = Effect.fn("MacosSystemProxy.readEnv")(fun
       Effect.timeout("2 seconds"),
       Effect.orElseSucceed(() => ""),
     );
-  return parseScutilProxy(output);
+  return parseScutilProxy(output, inherited.NO_PROXY || inherited.no_proxy);
 });

@@ -27,7 +27,7 @@ describe("parseScutilProxy", () => {
     assert.deepStrictEqual(parseScutilProxy(""), {});
   });
 
-  it("reads only the top-level settings and converts exceptions to NO_PROXY", () => {
+  it("reads only the top-level settings and merges exceptions into NO_PROXY", () => {
     assert.deepStrictEqual(
       parseScutilProxy(
         dictionary(
@@ -48,12 +48,15 @@ describe("parseScutilProxy", () => {
           "  }",
           "}",
         ),
+        "registry.corp, ",
       ),
       {
         HTTPS_PROXY: "http://[fd00::1]:8443",
         https_proxy: "http://[fd00::1]:8443",
-        NO_PROXY: "localhost,127.0.0.1,::1,.local,169.254.0.0/16,10.0.0.0/8,internal.corp",
-        no_proxy: "localhost,127.0.0.1,::1,.local,169.254.0.0/16,10.0.0.0/8,internal.corp",
+        NO_PROXY:
+          "registry.corp,localhost,127.0.0.1,::1,[::1],.local,169.254.0.0/16,10.0.0.0/8,internal.corp",
+        no_proxy:
+          "registry.corp,localhost,127.0.0.1,::1,[::1],.local,169.254.0.0/16,10.0.0.0/8,internal.corp",
       },
     );
   });

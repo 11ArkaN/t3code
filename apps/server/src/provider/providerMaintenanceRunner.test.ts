@@ -697,6 +697,45 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
+  it.effect("does not read the macOS system proxy when the updater declares its own proxy", () => {
+    const spawns: Array<{ command: string; env: NodeJS.ProcessEnv | undefined }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed({
+            ...lifecycleFor(provider),
+            update: {
+              command: "npm install -g @openai/codex@latest",
+              executable: "npm",
+              args: ["install", "-g", "@openai/codex@latest"],
+              lockKey: "npm-global",
+              env: { HTTPS_PROXY: "http://instance.proxy:3128" },
+            },
+          }),
+      });
+
+      yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.deepStrictEqual(spawns, [
+        { command: "npm", env: { HTTPS_PROXY: "http://instance.proxy:3128" } },
+      ]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcess.Platform, "darwin"),
+          Layer.succeed(HostProcess.Environment, { PATH: "/usr/bin:/bin" }),
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((command, _args, options) => {
+            spawns.push({ command, env: options.env });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("passes the macOS system proxy to the updater when the env has none", () => {
     const updaterEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
     return Effect.gen(function* () {
