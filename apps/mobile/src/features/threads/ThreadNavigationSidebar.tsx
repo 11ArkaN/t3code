@@ -7,10 +7,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import {
-  threadSearchMatchKey,
-  type EnvironmentThreadSearchMatch,
-} from "@t3tools/client-runtime/state/thread-search";
+import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_SIDEBAR_ROW_LAYOUT } from "./threadListAnimations";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -33,6 +30,7 @@ import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
+import { useThreadListNow } from "./use-thread-list-now";
 import { usePendingThreadOrder } from "../../state/thread-order";
 import { threadListEnvironmentsAtom } from "../../state/server";
 import { usePendingNewTasks, type PendingNewTask } from "../../state/use-pending-new-tasks";
@@ -83,7 +81,12 @@ import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 
 type SidebarListItem =
   | ThreadListV2ListItem
-  | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number };
+  | {
+      readonly type: "v2-show-more";
+      readonly key: string;
+      readonly hiddenCount: number;
+      readonly state?: "loading" | "failed";
+    };
 
 const SIDEBAR_STICKY_HEADER_HEIGHT = 106;
 
@@ -187,10 +190,6 @@ function ThreadNavigationSidebarPane(
           )
         ? [options.selectedEnvironmentId]
         : [];
-  const threadSearch = useThreadSearch(searchEnvironmentIds, props.searchQuery);
-  // This map reaches LegendList's extraData, which re-renders every row whenever it changes
-  // identity; the hook keeps it stable.
-  const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
   const projectScopeKey = options.selectedProjectKey;
   const resolvedProjectKey = resolveScratchProjectScopeKey(projectScopeKey, projects, {
     sidebarProjectGroupingMode: options.projectGroupingMode,
@@ -231,6 +230,16 @@ function ThreadNavigationSidebarPane(
   );
   const selectedProjectScope =
     projectScopes.find((scope) => scope.key === resolvedProjectKey) ?? null;
+  const threadSearch = useThreadSearch(
+    searchEnvironmentIds,
+    props.searchQuery,
+    selectedProjectScope === null
+      ? {}
+      : { projectIds: selectedProjectScope.projectRefs.map((ref) => ref.projectId) },
+  );
+  // This map reaches LegendList's extraData, which re-renders every row whenever it changes
+  // identity; the hook keeps it stable.
+  const threadSearchMatchByKey = useThreadListSearchMatches(threads, threadSearch);
   const selectedProjectKey = selectedProjectScope?.key ?? null;
   const projectByKey = useMemo(() => {
     const map = new Map<string, EnvironmentProject>();
@@ -261,15 +270,7 @@ function ThreadNavigationSidebarPane(
     toggleSnoozedShelf,
     toggleWorkingShelf,
   } = useThreadListV2ShelfPreferences();
-  // Keep time in state; the compiler would cache a render-time new Date().
-  const [now, setNow] = useState(() => new Date().toISOString());
-  const nowMinute = now.slice(0, 16);
-  const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
-  useEffect(() => {
-    setNow(new Date().toISOString());
-    const id = setInterval(() => setNow(new Date().toISOString()), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  const now = useThreadListNow(threads);
   const listEnvironments = useAtomValue(threadListEnvironmentsAtom);
   const {
     providersByEnvironmentId,
@@ -283,11 +284,12 @@ function ThreadNavigationSidebarPane(
     titleRegenerationEnvironmentIds,
   } = listEnvironments;
   const resolveProviderInstance = useThreadRowProviderInstanceResolver(providersByEnvironmentId);
-  const pendingOrder = usePendingThreadOrder(nowMinute, snoozeWakeTick);
+  const pendingOrder = usePendingThreadOrder();
   const {
     layout: threadListV2Layout,
     items: threadListV2Items,
     contentOnlyThreadKeys,
+    olderSettledShelf,
   } = useThreadListV2({
     threads,
     pendingTasks,
@@ -310,19 +312,6 @@ function ThreadNavigationSidebarPane(
     settledShelfExpanded,
     selectedThreadKey: props.selectedThreadKey ?? null,
   });
-  const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;
-  useEffect(() => {
-    if (nextSnoozeWakeAt === null) return;
-    const wakeAtMs = Date.parse(nextSnoozeWakeAt);
-    if (Number.isNaN(wakeAtMs)) return;
-    const delayMs = Math.min(Math.max(0, wakeAtMs - Date.now()) + 50, 2_147_483_647);
-    const id = setTimeout(() => {
-      setNow(new Date().toISOString());
-      bumpSnoozeWakeTick((tick) => tick + 1);
-    }, delayMs);
-    return () => clearTimeout(id);
-    // snoozeWakeTick re-arms clamped timers even when the wake date exceeds 32-bit setTimeout and stays unchanged.
-  }, [nextSnoozeWakeAt, snoozeWakeTick]);
   const listItems: readonly SidebarListItem[] =
     settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0
       ? [
@@ -331,6 +320,11 @@ function ThreadNavigationSidebarPane(
             type: "v2-show-more",
             key: "v2-show-more",
             hiddenCount: threadListV2Layout.hiddenSettledCount,
+            ...(olderSettledShelf.loading
+              ? { state: "loading" as const }
+              : olderSettledShelf.failed
+                ? { state: "failed" as const }
+                : {}),
           },
         ]
       : threadListV2Items;
@@ -477,7 +471,7 @@ function ThreadNavigationSidebarPane(
       return threadListV2ListItemsAreEqual(previous, item);
     }
     if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
-      return previous.hiddenCount === item.hiddenCount;
+      return previous.hiddenCount === item.hiddenCount && previous.state === item.state;
     }
     return false;
   };
@@ -552,7 +546,6 @@ function ThreadNavigationSidebarPane(
             snoozeWakeLabelText={item.snoozeWakeLabelText}
             timeLabel={item.timeLabel}
             project={projectByKey.get(scopeKey) ?? null}
-            projectTitle={projectTitleByProjectKey.get(scopeKey)}
             providerInstance={resolveProviderInstance(thread)}
             providers={providersByEnvironmentId.get(thread.environmentId)}
             environmentLabel={
@@ -648,7 +641,11 @@ function ThreadNavigationSidebarPane(
           <ThreadListV2ShowMoreRow
             pane="sidebar"
             hiddenCount={item.hiddenCount}
-            onPress={showMoreSettled}
+            {...(item.state === undefined ? {} : { state: item.state })}
+            onPress={() => {
+              olderSettledShelf.retry();
+              showMoreSettled();
+            }}
           />
         );
     }
