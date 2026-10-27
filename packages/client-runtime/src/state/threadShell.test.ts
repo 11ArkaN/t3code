@@ -382,7 +382,7 @@ describe("v2 thread shell lists", () => {
 
   it("delivers one quiet shell list per snapshot update that changes several threads", () => {
     const harness = makeHarness();
-    const snapshot = {
+    const snapshot: OrchestrationV2ShellSnapshot = {
       ...v2ShellSnapshot,
       threads: ["a", "b", "c", "d"].map((id) => ({
         ...v2ThreadShell,
