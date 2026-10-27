@@ -6,7 +6,6 @@
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
-import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -165,8 +164,14 @@ const command = Command.make(
     const device = makeDevice({
       agentDevice: flags.agentDevice,
       targetArgs: [
-        ...["--platform", "ios", "--udid", flags.device],
-        ...["--config", flags.deviceConfig, "--session", flags.deviceSession],
+        "--platform",
+        "ios",
+        "--udid",
+        flags.device,
+        "--config",
+        flags.deviceConfig,
+        "--session",
+        flags.deviceSession,
       ],
       metro,
       deviceName: flags.deviceName,

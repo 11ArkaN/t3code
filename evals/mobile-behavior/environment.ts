@@ -132,8 +132,16 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         [
           "apps/server/src/bin.ts",
           "serve",
-          ...["--host", "0.0.0.0", "--port", String(port), "--base-dir", input.baseDir],
-          ...["--no-browser", "--log-level", "warn", workspace],
+          "--host",
+          "0.0.0.0",
+          "--port",
+          String(port),
+          "--base-dir",
+          input.baseDir,
+          "--no-browser",
+          "--log-level",
+          "warn",
+          workspace,
         ],
         // A scratch HOME keeps the user's own skills and config out of the app under test.
         { cwd: REPO_ROOT, stdio: ["ignore", log, log], env: { ...process.env, HOME: home } },
@@ -144,7 +152,12 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
   yield* waitForPort(port);
   const origin = `http://127.0.0.1:${port}`;
   const token = (yield* runCli([
-    ...["auth", "session", "issue", "--base-dir", input.baseDir, "--token-only"],
+    "auth",
+    "session",
+    "issue",
+    "--base-dir",
+    input.baseDir,
+    "--token-only",
   ]))
     .trim()
     .split("\n")
@@ -349,8 +362,14 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         "auth",
         "pairing",
         "create",
-        ...["--base-dir", input.baseDir, "--base-url", `http://${input.deviceHost}:${port}`],
-        ...["--ttl", "15m", "--label", "mobile-behavior-eval"],
+        "--base-dir",
+        input.baseDir,
+        "--base-url",
+        `http://${input.deviceHost}:${port}`,
+        "--ttl",
+        "15m",
+        "--label",
+        "mobile-behavior-eval",
       ]).pipe(
         Effect.flatMap((out) => {
           const url = /Pair URL:\s*(\S+)/.exec(out)?.[1];
