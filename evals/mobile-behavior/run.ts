@@ -140,6 +140,8 @@ const command = Command.make(
   },
   Effect.fn("mobileBehavior.main")(function* (flags) {
     const out = NodePath.resolve(flags.out);
+    // Read first: the baseline may be this --out's own results.jsonl, which the run rewrites.
+    const baseline = Option.map(flags.baseline, (file) => resultsFor(decodeRows(file)));
     NodeFS.mkdirSync(out, { recursive: true });
     const label = Option.getOrElse(flags.label, () => flags.pose);
     const wanted = Option.map(flags.cases, (ids) => new Set(ids.split(",").map((id) => id.trim())));
@@ -242,6 +244,7 @@ const command = Command.make(
       const cases = selected.filter((testCase) => testCase.scenario === scenario);
       for (let sample = 1; sample <= flags.samples; sample++) {
         const outcome = yield* env.interruptAll().pipe(
+          Effect.andThen(env.archiveAllExcept(longThread)),
           Effect.andThen(device.reload(seeded)),
           Effect.andThen(SCENARIOS[scenario](ctx)),
           Effect.map((metrics) => ({ metrics, error: undefined })),
@@ -275,10 +278,7 @@ const command = Command.make(
     const summary = summarize({
       cases: selected as ReadonlyArray<MobileBehaviorCase>,
       results: resultsFor(rows),
-      ...Option.match(flags.baseline, {
-        onNone: () => ({}),
-        onSome: (file) => ({ baseline: resultsFor(decodeRows(file)) }),
-      }),
+      ...Option.match(baseline, { onNone: () => ({}), onSome: (rows) => ({ baseline: rows }) }),
       header: `# Mobile behavior: ${label}\n\n${flags.deviceName}, ${flags.samples} samples per case, ${minutes} min. Cells show pass or FAIL and the key metric's median.`,
     });
     NodeFS.writeFileSync(NodePath.join(out, "summary.md"), summary);

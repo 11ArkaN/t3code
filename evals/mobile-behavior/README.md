@@ -22,7 +22,7 @@ pnpm mobile-behavior --out runs/iphone --label iphone-17-pro \
 - `--host` is this machine's address as the simulator sees it. The default is the tailnet IP, so a simulator on another Mac reaches the server and Metro.
 - Output: `results.jsonl` (one row per case sample), `summary.md` (the scoreboard), and `env/` and `metro.log` for debugging.
 
-Each sample stops any unfinished turn, reloads the app's JS, and starts from Home. Composer flows use new threads, so drafts from earlier samples never mix in. A scenario runs once per sample and grades every case that uses it. A case fails when half or more of its graded samples fail. It is `incomplete` when scenario errors outnumber graded samples. Cells show the median of the key metric.
+Each sample stops any unfinished turn, archives the threads earlier samples made, reloads the app's JS, and starts from Home. Composer flows use new threads, so drafts from earlier samples never mix in. A scenario runs once per sample and grades every case that uses it. A case fails when half or more of its graded samples fail. It is `incomplete` when scenario errors outnumber graded samples. Cells show the median of the key metric.
 
 **Cost.** No paid models. A full run takes about 15 minutes per simulator with 3 samples: about 2 minutes to seed a 60-turn thread and load the bundle, then the scenarios. Run devices in parallel, one run each; each run owns its server, Metro, and port.
 
@@ -44,3 +44,4 @@ Cases are data in [`cases.ts`](cases.ts). Each has an `id`, a `kind` (`bad` fail
 - Native editor scroll when the keyboard hides (#22006). The editor's scroll offset is native and the probe cannot read it.
 - The background-work pill (#21342) and async questions while the agent keeps working (#24914). Fx has no background tasks and its questions block the turn; these need Claude or Codex replays.
 - 120 Hz frame pacing. Simulators run at 60 Hz.
+- Losing the open thread on return from the background. `draft-survives-background` comes back through a link to the thread, because a plain launch reloads the dev client's JS.

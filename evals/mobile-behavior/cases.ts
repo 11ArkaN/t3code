@@ -103,7 +103,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     source: "#15641, #14010, #19120",
     experience: "A long reply streaming into a long thread freezes or stutters the app.",
     scenario: "streamInView",
-    key: "uiP99Ms",
+    key: "jsDroppedPct",
     checks: smooth,
   },
   {

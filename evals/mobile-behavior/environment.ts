@@ -322,6 +322,17 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
       });
       return { threadId, lock };
     }),
+    /** Archives every thread but `keep`, so earlier samples' rows never crowd Home. */
+    archiveAllExcept: Effect.fn("environment.archiveAllExcept")(function* (keep: ThreadId) {
+      for (const thread of (yield* shell()).threads) {
+        if (thread.id === keep) continue;
+        yield* client["orchestration.dispatchCommand"]({
+          type: "thread.archive",
+          commandId: yield* command,
+          threadId: thread.id,
+        });
+      }
+    }),
     /** Stops every unfinished run, so one sample's held turns never leak into the next. */
     interruptAll: Effect.fn("environment.interruptAll")(function* () {
       const threads = (yield* shell()).threads;
