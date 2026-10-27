@@ -79,24 +79,32 @@ describe("ElectronUpdater", () => {
       }).pipe(Effect.provide(ElectronUpdater.layer)),
   );
 
-  it.effect("rejects a retry when the upstream capability probe skips verification", () =>
+  it.effect("retries a check the upstream capability probe skipped, and never accepts one", () =>
     Effect.gen(function* () {
-      const verify = vi
+      const skipped = async () => {
+        // electron-updater warns through the updater's logger, then resolves null unchecked.
+        autoUpdaterMock.logger.warn(
+          "Cannot execute ConvertTo-Json: spawnSync powershell.exe ETIMEDOUT. Ignoring signature validation due to unsupported powershell version. Please upgrade to powershell 3 or higher.",
+        );
+        return null;
+      };
+
+      const recovers = vi
         .fn<VerifyUpdateCodeSignature>()
         .mockRejectedValueOnce(timedOut())
-        .mockImplementationOnce(async () => {
-          // electron-updater warns through the updater's logger, then resolves null unchecked.
-          autoUpdaterMock.logger.warn(
-            "Cannot execute ConvertTo-Json: spawnSync powershell.exe ETIMEDOUT. Ignoring signature validation due to unsupported powershell version. Please upgrade to powershell 3 or higher.",
-          );
-          return null;
-        });
-      autoUpdaterMock.verifyUpdateCodeSignature = verify;
+        .mockImplementationOnce(skipped)
+        .mockResolvedValueOnce(null);
+      autoUpdaterMock.verifyUpdateCodeSignature = recovers;
+      yield* downloadVerifyingSignature();
+      assert.equal(recovers.mock.calls.length, 3);
 
+      const alwaysSkipped = vi
+        .fn<VerifyUpdateCodeSignature>(skipped)
+        .mockRejectedValueOnce(timedOut());
+      autoUpdaterMock.verifyUpdateCodeSignature = alwaysSkipped;
       const error = yield* downloadVerifyingSignature().pipe(Effect.flip);
-
       assert.instanceOf(error, ElectronUpdater.ElectronUpdaterDownloadUpdateError);
-      assert.equal(verify.mock.calls.length, 2);
+      assert.equal(alwaysSkipped.mock.calls.length, 5);
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   );
 });

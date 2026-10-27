@@ -96,7 +96,7 @@ const retrySignatureCheckOnTimeout = () => {
   const verify = updater.verifyUpdateCodeSignature;
   if (verify === undefined || signatureChecksWithRetry.has(verify)) return;
 
-  const verifyRejectingSkip: VerifyUpdateCodeSignature = async (publisherNames, path) => {
+  const verifyDetectingSkip = async (publisherNames: Array<string>, path: string) => {
     const logger = updater.logger;
     let skipped = false;
     updater.logger = {
@@ -111,7 +111,7 @@ const retrySignatureCheckOnTimeout = () => {
     };
     try {
       const result = await verify(publisherNames, path);
-      return skipped ? "Signature validation was skipped after a timed-out check." : result;
+      return { result, skipped };
     } finally {
       updater.logger = logger;
     }
@@ -119,12 +119,14 @@ const retrySignatureCheckOnTimeout = () => {
 
   const verifyWithRetry: VerifyUpdateCodeSignature = async (publisherNames, path) => {
     for (let attempt = 1; ; attempt++) {
+      const lastAttempt = attempt === SIGNATURE_CHECK_ATTEMPTS;
       try {
-        return attempt === 1
-          ? await verify(publisherNames, path)
-          : await verifyRejectingSkip(publisherNames, path);
+        if (attempt === 1) return await verify(publisherNames, path);
+        const { result, skipped } = await verifyDetectingSkip(publisherNames, path);
+        if (!skipped) return result;
+        if (lastAttempt) return "Signature validation was skipped after a timed-out check.";
       } catch (error) {
-        if (!isTimedOut(error) || attempt === SIGNATURE_CHECK_ATTEMPTS) throw error;
+        if (!isTimedOut(error) || lastAttempt) throw error;
       }
     }
   };
