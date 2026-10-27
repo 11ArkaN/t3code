@@ -74,6 +74,43 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
   yield* fileSystem.writeFileString(absolutePath, contents).pipe(Effect.orDie);
 });
 
+// `wslpath` honours the distro's configurable automount root, so the fake maps drives under a temp dir.
+const makeWslHost = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const mountRoot = yield* makeTempDir;
+  const binDir = yield* makeTempDir;
+  const wslpath = path.join(binDir, "wslpath");
+  yield* fileSystem
+    .writeFileString(
+      wslpath,
+      [
+        "#!/bin/sh",
+        '[ "$1" = "-u" ] || exit 1',
+        "p=$(printf '%s' \"$2\" | tr '\\\\' '/')",
+        "drive=$(printf '%s' \"$p\" | cut -c1 | tr 'A-Z' 'a-z')",
+        `printf '%s/%s%s\\n' '${mountRoot}' "$drive" "\${p#?:}"`,
+        "",
+      ].join("\n"),
+    )
+    .pipe(Effect.orDie);
+  yield* fileSystem.chmod(wslpath, 0o755).pipe(Effect.orDie);
+  const environment = {
+    ...HostProcess.Environment.defaultValue(),
+    PATH: `${binDir}:${HostProcess.Environment.defaultValue().PATH ?? ""}`,
+    WSL_DISTRO_NAME: "Ubuntu",
+  };
+  const underWsl = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.Environment, environment),
+    );
+  const service = yield* underWsl(
+    WorkspaceFileSystem.make.pipe(Effect.provide(layerKnownWorkspacesTest)),
+  );
+  return { mountRoot, service, underWsl };
+});
+
 it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (it) => {
   describe("getMetadata", () => {
     it.effect(
@@ -159,6 +196,26 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(statted).toEqual([]);
       }),
     );
+
+    it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+      "reports a Windows drive path under WSL as the file it maps to",
+      () =>
+        Effect.gen(function* () {
+          const { mountRoot, service, underWsl } = yield* makeWslHost;
+          yield* writeTextFile(mountRoot, "c/Users/me/Documents/notes.md", "# Notes\n");
+
+          const { entries } = yield* underWsl(
+            service.getMetadata({
+              paths: ["C:\\Users\\me\\Documents\\notes.md", "C:/Users/me/Documents/notes.md"],
+            }),
+          );
+
+          expect(entries).toEqual([
+            { kind: "file", byteLength: 8 },
+            { kind: "file", byteLength: 8 },
+          ]);
+        }),
+    );
   });
 
   describe("readFile", () => {
@@ -232,6 +289,24 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           expect((yield* workspaceFileSystem.getMetadata({ paths: [fifoPath] })).entries).toEqual([
             { kind: "other" },
           ]);
+        }),
+    );
+
+    it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+      "reads a Windows drive path under WSL from where wslpath mounts it",
+      () =>
+        Effect.gen(function* () {
+          const { mountRoot, service, underWsl } = yield* makeWslHost;
+          const cwd = yield* makeTempDir;
+          yield* writeTextFile(mountRoot, "c/Users/me/Documents/notes.md", "# Notes\n");
+
+          for (const relativePath of [
+            "C:\\Users\\me\\Documents\\notes.md",
+            "C:/Users/me/Documents/notes.md",
+          ]) {
+            const result = yield* underWsl(service.readFile({ cwd, relativePath }));
+            expect(result).toMatchObject({ contents: "# Notes\n", truncated: false });
+          }
         }),
     );
 
