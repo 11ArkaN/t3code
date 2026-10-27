@@ -177,10 +177,10 @@ function normalBoundsOnWindowDisplay(
   displays: readonly DisplayBounds[],
 ): DisplayBounds {
   const target = displayMatching(windowBounds, displays);
-  if (target === undefined || windowFitsWithinDisplay(normalBounds, target)) {
+  const source = displayMatching(normalBounds, displays);
+  if (target === undefined || source === undefined || source === target) {
     return normalBounds;
   }
-  const source = displayMatching(normalBounds, displays) ?? target;
   const width = Math.min(normalBounds.width, target.width);
   const height = Math.min(normalBounds.height, target.height);
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -459,7 +459,9 @@ export const make = Effect.gen(function* () {
     let pendingBoundsPersistFiber: Fiber.Fiber<void, never> | undefined;
     let boundsPersistenceEnabled = persistedBounds === null || restoredPersistedBounds;
     const readPersistableBounds = (): DesktopAppSettings.DesktopWindowBounds | null => {
-      if (window.isDestroyed()) {
+      // Minimized windows report stale state on some platforms (macOS: not maximized, the
+      // pre-move normal frame; Windows: -32000), so the last state saved before minimizing stays.
+      if (window.isDestroyed() || window.isMinimized()) {
         return null;
       }
       const bounds =
@@ -469,9 +471,7 @@ export const make = Effect.gen(function* () {
               window.getBounds(),
               readDisplayBoundsOrEmpty(),
             )
-          : window.isMinimized()
-            ? window.getNormalBounds()
-            : window.getBounds();
+          : window.getBounds();
       return DesktopAppSettings.normalizeMainWindowBounds({
         x: Math.round(bounds.x),
         y: Math.round(bounds.y),
