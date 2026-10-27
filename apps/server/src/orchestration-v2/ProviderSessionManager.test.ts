@@ -2535,16 +2535,16 @@ const idleAcrossHostSleep = (input: { readonly timerCountsSleep: boolean }) =>
       sleptMs = input.timerCountsSleep ? 2 * 60 * 60_000 - 25 * 60_000 : 2 * 60 * 60_000;
       yield* TestClock.adjust("25 minutes");
       yield* Effect.yieldNow;
-      const releasedAfter30AwakeMinutes = Option.isNone(yield* manager.get(providerSessionId));
-      const closeCountAfter30AwakeMinutes = (yield* Ref.get(state)).closeCount;
+      const releasedAtFirstDeadline = Option.isNone(yield* manager.get(providerSessionId));
+      const closeCountAtFirstDeadline = (yield* Ref.get(state)).closeCount;
 
       yield* TestClock.adjust("30 minutes");
       yield* Effect.yieldNow;
       return {
-        releasedAfter30AwakeMinutes,
-        closeCountAfter30AwakeMinutes,
-        releasedAfter60AwakeMinutes: Option.isNone(yield* manager.get(providerSessionId)),
-        closeCountAfter60AwakeMinutes: (yield* Ref.get(state)).closeCount,
+        releasedAtFirstDeadline,
+        closeCountAtFirstDeadline,
+        releasedAtSecondDeadline: Option.isNone(yield* manager.get(providerSessionId)),
+        closeCountAtSecondDeadline: (yield* Ref.get(state)).closeCount,
       };
     });
 
@@ -2559,12 +2559,12 @@ it.effect("ProviderSessionManagerV2 does not count host sleep toward the idle ti
   Effect.gen(function* () {
     const result = yield* idleAcrossHostSleep({ timerCountsSleep: true });
     assert.isFalse(
-      result.releasedAfter30AwakeMinutes,
+      result.releasedAtFirstDeadline,
       "session was idle-released on resume after only 5 awake minutes of a 30 minute timeout",
     );
-    assert.equal(result.closeCountAfter30AwakeMinutes, 0);
-    assert.isTrue(result.releasedAfter60AwakeMinutes);
-    assert.equal(result.closeCountAfter60AwakeMinutes, 1);
+    assert.equal(result.closeCountAtFirstDeadline, 0);
+    assert.isTrue(result.releasedAtSecondDeadline);
+    assert.equal(result.closeCountAtSecondDeadline, 1);
   }),
 );
 
@@ -2574,10 +2574,10 @@ it.effect(
     Effect.gen(function* () {
       const result = yield* idleAcrossHostSleep({ timerCountsSleep: false });
       assert.isTrue(
-        result.releasedAfter30AwakeMinutes,
+        result.releasedAtFirstDeadline,
         "session outlived its 30 awake idle minutes because wall time jumped during sleep",
       );
-      assert.equal(result.closeCountAfter30AwakeMinutes, 1);
+      assert.equal(result.closeCountAtFirstDeadline, 1);
     }),
 );
 
