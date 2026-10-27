@@ -1,9 +1,5 @@
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
-import {
-  buildProjectGroups,
-  derivePhysicalProjectKey,
-  type ProjectGroupingSettings,
-} from "./logicalProject";
+import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
 import { resolveScratchProjectScopeKey } from "@t3tools/client-runtime/state/project-grouping";
 import type { Project } from "./types";
 
@@ -43,27 +39,6 @@ export interface SidebarProjectPickerEntry {
   group: SidebarProjectSnapshot;
   targetProject: SidebarProjectGroupMember;
   isPreferred: boolean;
-}
-
-export function getSidebarProjectSettingsKey(
-  group: SidebarProjectSnapshot,
-  settings: ProjectGroupingSettings,
-  projects: ReadonlyArray<Project>,
-  projectRef?: ScopedProjectRef,
-): string {
-  if (!group.isScratch) return group.projectKey;
-  const project =
-    group.memberProjects.find(
-      (member) =>
-        member.environmentId === projectRef?.environmentId && member.id === projectRef.projectId,
-    ) ??
-    group.memberProjects.find((member) => member.environmentId === projectRef?.environmentId) ??
-    group;
-  return (
-    buildPhysicalToLogicalProjectKeyMap({ projects, settings, primaryEnvironmentId: null }).get(
-      derivePhysicalProjectKey(project),
-    ) ?? group.projectKey
-  );
 }
 
 export function resolveSidebarProjectScopeKey(input: {

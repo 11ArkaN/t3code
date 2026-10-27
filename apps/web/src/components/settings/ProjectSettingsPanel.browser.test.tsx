@@ -537,8 +537,7 @@ describe("project settings scope", () => {
   });
 });
 
-it("lists every environment's scratch project under one No project row", async () => {
-  setup();
+function replaceProjectsWithScratch() {
   state.projects = state.projects.map(({ repositoryIdentity: _, ...project }) => ({
     ...project,
     id: ProjectId.make(`scratch-${project.environmentId}`),
@@ -546,6 +545,11 @@ it("lists every environment's scratch project under one No project row", async (
     workspaceRoot: `/home/${project.environmentId}/scratch`,
     isScratch: true,
   }));
+}
+
+it("lists every environment's scratch project under one No project row", async () => {
+  setup();
+  replaceProjectsWithScratch();
   await using _screen = await mountSettings({});
 
   const rows = page.getByRole("button", { name: /^No project/ });
@@ -553,6 +557,19 @@ it("lists every environment's scratch project under one No project row", async (
   expect(rows.elements()).toHaveLength(1);
 
   await userEvent.click(rows.first());
+  await expect
+    .element(page.getByRole("button", { name: "Remove checkout /home/primary/scratch" }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Remove checkout /home/remote/scratch" }))
+    .toBeVisible();
+});
+
+it("opens a link to one environment's scratch project as the grouped No project", async () => {
+  setup();
+  replaceProjectsWithScratch();
+  await using _screen = await mountSettings({ project: "remote:/home/remote/scratch" });
+
   await expect
     .element(page.getByRole("button", { name: "Remove checkout /home/primary/scratch" }))
     .toBeVisible();

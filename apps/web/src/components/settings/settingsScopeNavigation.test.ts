@@ -226,6 +226,17 @@ describe("settings scope navigation", () => {
     expect(router.state.location.search).toEqual({ project: "legacy-project" });
   });
 
+  it("keeps the grouped No project key across reload and category navigation", async () => {
+    const scratchSearch = { project: "\0no-project" };
+    const router = createSettingsRouter();
+    await router.navigate({ to: "/settings/projects", search: scratchSearch });
+    const reloaded = createSettingsRouter(router.state.location.href);
+    await reloaded.load();
+    expect(reloaded.state.location.search).toEqual(scratchSearch);
+    await reloaded.navigate({ to: "/settings/integrations" });
+    expect(reloaded.state.location.search).toEqual(scratchSearch);
+  });
+
   it("keeps scope through the settings index redirect", async () => {
     const router = createSettingsRouter();
     await router.navigate({ to: "/settings", search: { machine: "remote-server" } });

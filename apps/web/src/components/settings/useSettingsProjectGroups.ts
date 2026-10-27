@@ -18,6 +18,7 @@ export function useSettingsProjectGroups() {
   return buildSidebarProjectSnapshots({
     projects,
     settings: { sidebarProjectGroupingMode, sidebarProjectGroupingOverrides },
+    groupScratchProjects: true,
     primaryEnvironmentId,
     resolveEnvironmentLabel: (id) => labels.get(id) ?? null,
   }).sort((a, b) => a.displayName.localeCompare(b.displayName));
