@@ -287,7 +287,7 @@ export const make = Effect.gen(function* () {
 
   /**
    * A command the server stopped waiting on, such as a timed-out screenshot or evaluation,
-   * may never settle; the turn's end ends every hold. The agent also sends on its own extra
+   * may never settle; the turn's end ends every focus hold. The agent also sends on its own extra
    * session, so this cannot spare other sessions; a viewer's screencast still holds.
    */
   const endAgentTurn = (threadId: string) => {
