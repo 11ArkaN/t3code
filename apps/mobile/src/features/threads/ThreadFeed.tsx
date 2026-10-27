@@ -2093,10 +2093,7 @@ function useThreadFeedPresentation(
   expandedWorkGroups: Record<string, boolean>,
 ) {
   const [feedCache] = useState(createThreadFeedCache);
-  const queueWorkflow = useThreadQueueWorkflow({
-    environmentId: props.environmentId,
-    threadId: props.threadId,
-  });
+  const queueWorkflow = useThreadQueueWorkflow(props.detailRef);
   return appendPendingThreadMessages(
     deriveThreadFeedPresentation(
       props.feed,

@@ -9,7 +9,7 @@ import {
   createThreadEnvironmentAtoms,
   createThreadFamilyAtoms,
 } from "@t3tools/client-runtime/state/threads";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect } from "react";
@@ -40,11 +40,14 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   snapshotAtom: threadEnvironment.snapshotAtom,
 });
 
-export function useThreadQueueWorkflow(target: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-}) {
-  return useAtomValue(environmentThreadDetails.queueWorkflowAtom(target));
+const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null);
+
+export function useThreadQueueWorkflow(target: ScopedThreadRef | null) {
+  return useAtomValue(
+    target === null
+      ? EMPTY_QUEUE_WORKFLOW_ATOM
+      : environmentThreadDetails.queueWorkflowAtom(target),
+  );
 }
 
 /** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */
