@@ -509,7 +509,13 @@ export const serveAntigravityAuthorizationUrlSink = Effect.fn(
     );
     return `${HttpServer.formatAddress(server.address)}/${token}`;
   },
-  Effect.mapError(() => authSupportError("The Antigravity sign-in URL listener could not start.")),
+  Effect.mapError(
+    (cause) =>
+      new AcpErrors.AcpTransportError({
+        detail: "The Antigravity sign-in URL listener could not start.",
+        cause,
+      }),
+  ),
 );
 
 export const parseAntigravityAuthorizationUrl = Effect.fn("parseAntigravityAuthorizationUrl")(
