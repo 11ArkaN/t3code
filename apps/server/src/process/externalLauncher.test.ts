@@ -241,7 +241,6 @@ it.effect.skipIf(windowsHost)(
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
-      yield* fileSystem.writeFileString(path.join(binDir, "explorer.EXE"), "");
       const systemRoot = path.join(binDir, "Windows");
       const powershellPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
       yield* fileSystem.writeFileString(powershellPath, "");
@@ -251,7 +250,7 @@ it.effect.skipIf(windowsHost)(
         const launcher = yield* ExternalLauncher.ExternalLauncher;
         yield* launcher.launchEditor({
           editor: "file-manager",
-          cwd: "C:/Work/t3code/author's [draft]",
+          cwd: "C:/Work/t3code/author's [draft] safe’; calc; #",
         });
       }).pipe(
         Effect.provide(
@@ -272,7 +271,7 @@ it.effect.skipIf(windowsHost)(
       const decodedCommand = Buffer.from(encodedCommand, "base64").toString("utf16le");
       assert.include(
         decodedCommand,
-        "Invoke-Item -LiteralPath 'C:\\Work\\t3code\\author''s [draft]'",
+        "Invoke-Item -LiteralPath 'C:\\Work\\t3code\\author''s [draft] safe’’; calc; #'",
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
