@@ -491,6 +491,8 @@ export const SCENARIOS = {
     const target = yield* ctx.env.launch(title, "Hi. [[eval:reply]]");
     yield* ctx.env.settled(target);
     yield* waitForRow(ctx, title);
+    // A just-inserted row animates in, and a tap during that misses it.
+    yield* Effect.sleep("1 second");
     yield* ctx.device.press(rowSelector(title));
     const after = yield* ctx.device
       .waitFor("the tapped thread", (state) => isThread(state, target))
