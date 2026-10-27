@@ -71,6 +71,7 @@ function setup(revision: number | null) {
   mocks.write.mockResolvedValue(undefined);
   mocks.mounts.mockClear();
   mocks.unmounts.mockClear();
+  mocks.paste = () => {};
   const document = { nodeType: 9, addEventListener() {}, removeEventListener() {} };
   const container = {
     nodeType: 1,

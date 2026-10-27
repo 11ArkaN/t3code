@@ -994,7 +994,9 @@ function ThreadTerminal(props: {
                     onPress={handleShowKeyboard}
                   />
                 </View>
-              ) : Platform.OS !== "android" && hasNativeTerminalSurface() ? (
+              ) : Platform.OS !== "android" &&
+                !keyboardState.isVisible &&
+                hasNativeTerminalSurface() ? (
                 <Pressable
                   accessibilityRole="button"
                   onPress={() => {
@@ -1003,11 +1005,7 @@ function ThreadTerminal(props: {
                   }}
                   className="px-4 pt-2"
                   style={{
-                    paddingBottom:
-                      8 +
-                      (keyboardState.isVisible
-                        ? 0
-                        : (nativeColumnMetrics?.safeArea.bottom ?? insets.bottom)),
+                    paddingBottom: 8 + (nativeColumnMetrics?.safeArea.bottom ?? insets.bottom),
                   }}
                 >
                   <Text style={{ color: terminalTheme.foreground }}>Attach visible output</Text>

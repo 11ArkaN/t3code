@@ -110,6 +110,13 @@ private enum TerminalHardwareKeyEncoder {
   }
 }
 
+/// Ghostty's io thread queues app messages (title changes, bells) and calls `wakeup_cb`.
+/// Unless the main thread drains them with `ghostty_app_tick`, the bounded queue fills, the
+/// io thread blocks, and the next feed or surface free on the main thread hangs the app.
+private final class GhosttyAppWakeup {
+  weak var view: T3TerminalView?
+}
+
 private enum TerminalInputSequence {
   /// Terminal Enter is carriage return. Sending line feed instead is Ctrl+J,
   /// which raw-mode TUIs may interpret as the literal J key.
@@ -208,6 +215,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   private var pendingVerticalScrollPoints: CGFloat = 0
   private var menuText: String?
   private var app: ghostty_app_t?
+  private var appWakeup: GhosttyAppWakeup?
   private var surface: ghostty_surface_t?
   private var isCreatingSurface = false
   private var surfaceCreationFailed = false
@@ -585,10 +593,16 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     isCreatingSurface = true
     defer { isCreatingSurface = false }
 
+    let wakeup = GhosttyAppWakeup()
+    wakeup.view = self
     var runtimeConfig = ghostty_runtime_config_s(
-      userdata: Unmanaged.passUnretained(self).toOpaque(),
+      userdata: Unmanaged.passUnretained(wakeup).toOpaque(),
       supports_selection_clipboard: false,
-      wakeup_cb: { _ in },
+      wakeup_cb: { userdata in
+        guard let userdata else { return }
+        let wakeup = Unmanaged<GhosttyAppWakeup>.fromOpaque(userdata).takeUnretainedValue()
+        DispatchQueue.main.async { wakeup.view?.tickApp() }
+      },
       action_cb: { _, _, _ in false },
       read_clipboard_cb: { _, _, _, _, _, _ in GHOSTTY_CLIPBOARD_READ_UNSUPPORTED },
       confirm_read_clipboard_cb: { _, _, _, _ in },
@@ -625,6 +639,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     }
 
     app = createdApp
+    appWakeup = wakeup
     surface = createdSurface
     ghostty_app_set_color_scheme(createdApp, appearance.ghosttyColorScheme)
     ghostty_surface_set_color_scheme(createdSurface, appearance.ghosttyColorScheme)
@@ -653,6 +668,8 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   }
 
   private func destroySurface() {
+    // Unblock the io thread before ghostty_surface_free joins it.
+    tickApp()
     if let surface {
       ghostty_surface_set_write_callback(surface, nil, nil)
       ghostty_surface_free(surface)
@@ -662,6 +679,12 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     }
     surface = nil
     app = nil
+    appWakeup = nil
+  }
+
+  private func tickApp() {
+    guard let app else { return }
+    ghostty_app_tick(app)
   }
 
   private func applyRemoteBuffer(_ buffer: String) {
@@ -711,6 +734,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   private func feedData(_ data: Data) {
     guard let surface, !data.isEmpty else { return }
 
+    tickApp()
     data.withUnsafeBytes { buffer in
       guard let pointer = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
         return
