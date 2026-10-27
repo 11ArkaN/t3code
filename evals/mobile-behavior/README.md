@@ -29,7 +29,7 @@ Each sample stops any unfinished turn, reloads the app's JS, and starts from Hom
 ## Metrics
 
 - **Scroll.** The probe reads the thread list's state on every JS frame and records each visible row's y on screen (list position minus scroll offset). A list that shifts its offset to hold content still shows no motion. `backwardPx` is the largest move against the drag. `teleports` counts one-frame moves over 400 pt, which is faster than a real fling. `maxFromEndPx` is the distance from the latest message.
-- **Jank.** JS-thread frames come from `requestAnimationFrame` in the probe. UI-thread frames come from a worklet `requestAnimationFrame` loop on the UI runtime. Percentiles and dropped-frame share are against the display's budget: 120 Hz when its fastest frames come under 12 ms, else 60 Hz. Simulators render at 60 Hz, so check 120 Hz behavior on a device.
+- **Jank.** JS-thread frames come from `requestAnimationFrame` in the probe. UI-thread frames come from a worklet `requestAnimationFrame` loop on the UI runtime. Percentiles and dropped-frame share are against the display's budget: 120 Hz when its fastest frames come under 12 ms, else 60 Hz. Simulators render at 60 Hz, so check 120 Hz behavior on a device. Injected swipes load the simulator's UI thread, so swipe-driven cases grade JS frames only.
 - **Composer.** The draft store, the text the native editor shows (from the accessibility tree), whether the editor expanded, and whether the keyboard is up.
 - **Status.** Each Home row's status from the app's own `resolveThreadListV2Status`, and the Working shelf count, against server state.
 

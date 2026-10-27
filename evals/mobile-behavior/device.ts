@@ -238,7 +238,6 @@ export function makeDevice(options: DeviceOptions) {
     swipe: (x: number, y1: number, y2: number) =>
       run(["swipe", String(x), String(y1), String(x), String(y2)]),
     home: run(["home"]),
-    foreground: run(["open", APP_ID]),
     fold: (pose: "closed" | "open") => run(["fold", pose]),
     back: run(["back"]),
   };

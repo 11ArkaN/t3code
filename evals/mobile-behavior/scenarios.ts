@@ -8,7 +8,7 @@ import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import type { Device, FeedSample, ProbeState } from "./device.ts";
+import { APP_ID, SCHEME, type Device, type FeedSample, type ProbeState } from "./device.ts";
 import { uuid, type EvalEnvironment } from "./environment.ts";
 import { feedMotion, frameStats, type Metrics } from "./grade.ts";
 
@@ -263,7 +263,13 @@ export const SCENARIOS = {
     yield* typeInComposer(ctx, text);
     yield* ctx.device.home;
     yield* Effect.sleep("3 seconds");
-    yield* ctx.device.foreground;
+    // A link back to the thread foregrounds the running app; a plain open would reload its JS.
+    yield* ctx.device.run([
+      "open",
+      APP_ID,
+      "--launch-url",
+      `${SCHEME}://${threadPath(ctx, threadId)}`,
+    ]);
     const back = yield* ctx.device.waitFor("the thread after foreground", (state) =>
       isThread(state, threadId),
     );
