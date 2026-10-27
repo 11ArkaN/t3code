@@ -114,13 +114,20 @@ const encodeLegacySavedEnvironments = Schema.encodeEffect(
     Schema.Struct({ version: Schema.Literal(1), records: Schema.Array(Schema.Unknown) }),
   ),
 );
-function layerSafeStorageFor(available: boolean, failDecrypt: Ref.Ref<boolean> | null = null) {
+function layerSafeStorageFor(
+  available: boolean,
+  failDecrypt: Ref.Ref<boolean> | null = null,
+  wrongKeyPlaintext?: string,
+) {
   return Layer.succeed(ElectronSafeStorage.ElectronSafeStorage, {
     isEncryptionAvailable: Effect.succeed(available),
     encryptString: (value) => Effect.succeed(textEncoder.encode(`encrypted:${value}`)),
     decryptString: (value) => {
       return Effect.gen(function* () {
         const decoded = textDecoder.decode(value);
+        if (!decoded.startsWith("encrypted:") && wrongKeyPlaintext !== undefined) {
+          return wrongKeyPlaintext;
+        }
         if (
           !decoded.startsWith("encrypted:") ||
           (failDecrypt !== null && (yield* Ref.get(failDecrypt)))
@@ -146,6 +153,7 @@ function layerFor(
     readonly appVersion: string;
     readonly linuxSecretLookups?: Ref.Ref<ReadonlyArray<string>>;
     readonly beforeLinuxSecretLookup?: Effect.Effect<void>;
+    readonly wrongKeyPlaintext?: string;
   } = { platform: "darwin", appVersion: "1.2.3" },
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
@@ -163,7 +171,11 @@ function layerFor(
       Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),
     ),
   );
-  const layerSafeStorage = layerSafeStorageFor(encryptionAvailable, failDecrypt);
+  const layerSafeStorage = layerSafeStorageFor(
+    encryptionAvailable,
+    failDecrypt,
+    host.wrongKeyPlaintext,
+  );
   const layerDependencies = Layer.mergeAll(
     layerEnvironment,
     layerSafeStorage,
@@ -486,6 +498,35 @@ describe("DesktopConnectionCatalogStore", () => {
         assert.deepStrictEqual(yield* reopened.get, Option.some(savedCatalog));
         assert.equal(keychainPassword.mock.calls.length, 0);
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("recovers when the current key decrypts the old Nightly catalog to garbage", () =>
+    Effect.gen(function* () {
+      keychainPassword
+        .mockReset()
+        .mockImplementation((service, account) =>
+          service === `${OLD_SAFE_STORAGE_NAME} Safe Storage` &&
+          account === `${OLD_SAFE_STORAGE_NAME} Key`
+            ? OLD_SAFE_STORAGE_SECRET
+            : null,
+        );
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-connection-catalog-test-",
+      });
+      yield* writeOldNightlyCatalog(baseDir, "darwin");
+      const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+        Effect.provide(
+          layerFor(baseDir, true, null, NodeServices.layer, {
+            platform: "darwin",
+            appVersion: NIGHTLY_VERSION,
+            wrongKeyPlaintext: "\u0007\u00e9\u0001not a catalog",
+          }),
+        ),
+      );
+
+      assert.deepStrictEqual(yield* store.get, Option.some(savedCatalog));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
   it.effect.each([

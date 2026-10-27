@@ -391,9 +391,10 @@ const migrateSavedEnvironmentRecords = Effect.fn(
 const decryptWithOldNightlyKey = Effect.fn(
   "desktop.connectionCatalogStore.decryptWithOldNightlyKey",
 )(function* (platform: "darwin" | "linux", encrypted: Uint8Array) {
-  // decryptChromiumValue also accepts plaintext; safeStorage output always carries a prefix.
+  // decryptChromiumValue also accepts plaintext, so require safeStorage's prefix. Linux v10 uses a
+  // fixed passphrase, so only v11 can depend on the old name.
   const prefix = Buffer.from(encrypted.subarray(0, 3)).toString("latin1");
-  if (prefix !== "v10" && !(platform === "linux" && prefix === "v11")) {
+  if (prefix !== (platform === "darwin" ? "v10" : "v11")) {
     return Option.none<string>();
   }
   const keys = yield* resolveChromiumKeys({
