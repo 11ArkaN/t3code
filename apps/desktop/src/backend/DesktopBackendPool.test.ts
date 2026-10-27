@@ -1,12 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient } from "effect/http";
-import { ChildProcessSpawner } from "effect/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
@@ -21,18 +26,94 @@ import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import type { DesktopBackendStartConfig } from "./DesktopBackendManager.ts";
 
-function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+const windowsConfig: DesktopBackendStartConfig = {
+  executablePath: "/electron",
+  args: [],
+  entryPath: "/server/bin.mjs",
+  cwd: "/server",
+  env: {},
+  bootstrap: {
+    mode: "desktop",
+    noBrowser: true,
+    port: 3773,
+    t3Home: "/tmp/t3",
+    host: "127.0.0.1",
+    desktopBootstrapToken: "token",
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 443,
+  },
+  bootstrapDelivery: "fd3",
+  extendEnv: true,
+  httpBaseUrl: new URL("http://127.0.0.1:3773"),
+  captureOutput: false,
+  preflightFailure: Option.none(),
+};
+
+function makeProcess(
+  exitCode: ChildProcessSpawner.ChildProcessHandle["exitCode"],
+): ChildProcessSpawner.ChildProcessHandle {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(123),
+    stdout: Stream.empty,
+    stderr: Stream.empty,
+    all: Stream.empty,
+    exitCode,
+    isRunning: Effect.succeed(false),
+    kill: () => Effect.void,
+    stdin: Sink.drain,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+    unref: Effect.succeed(Effect.void),
+  });
+}
+
+interface PoolTestInput {
+  readonly label: Effect.Effect<string>;
+  readonly settings?: DesktopAppSettings.DesktopSettings;
+  readonly resolvePrimary?: Effect.Effect<
+    DesktopBackendStartConfig,
+    never,
+    DesktopAppSettings.DesktopAppSettings
+  >;
+  readonly spawn?: (command: ChildProcess.Command) => ChildProcessSpawner.ChildProcessHandle;
+  readonly showErrorBox?: ElectronDialog.ElectronDialog["Service"]["showErrorBox"];
+  readonly onBackendExit?: Effect.Effect<void>;
+}
+
+function layerPool(
+  input: PoolTestInput,
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool | DesktopAppSettings.DesktopAppSettings> {
+  const layerConfiguration = Layer.effect(
+    DesktopBackendConfiguration.DesktopBackendConfiguration,
+    Effect.gen(function* () {
+      const context = yield* Effect.context<DesktopAppSettings.DesktopAppSettings>();
+      return {
+        resolvePrimary:
+          input.resolvePrimary?.pipe(Effect.provide(context)) ??
+          Effect.die("unexpected primary config resolve"),
+        resolvePrimaryLabel: input.label,
+        resolveWsl: () => Effect.die("unexpected WSL config resolve"),
+        currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
+      } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"];
+    }),
+  ).pipe(Layer.provideMerge(DesktopAppSettings.layerTest(input.settings)));
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        FileSystem.layerNoop({}),
+        FileSystem.layerNoop({ exists: () => Effect.succeed(true) }),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
+          ChildProcessSpawner.make((command) =>
+            input.spawn
+              ? Effect.sync(() => input.spawn!(command))
+              : Effect.die("unexpected child process spawn"),
+          ),
         ),
         Layer.succeed(
           HttpClient.HttpClient,
-          HttpClient.make(() => Effect.die("unexpected HTTP request")),
+          HttpClient.make(() =>
+            input.spawn ? Effect.never : Effect.die("unexpected HTTP request"),
+          ),
         ),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLogFactory, {
           forInstance: () =>
@@ -40,7 +121,7 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
               beginSession: () => Effect.void,
               writeOutputChunk: () => Effect.void,
               persistFailureSnapshot: () => Effect.void,
-              persistFailure: () => Effect.void,
+              persistFailure: () => input.onBackendExit ?? Effect.void,
               discardSession: Effect.void,
             } satisfies DesktopObservability.DesktopBackendOutputLogShape),
         } satisfies DesktopObservability.DesktopBackendOutputLogFactory["Service"]),
@@ -56,16 +137,13 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
           updateCancellations: Stream.empty,
         }),
         DesktopBrowserHost.layer,
-        Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
-          resolvePrimary: Effect.die("unexpected primary config resolve"),
-          resolvePrimaryLabel: Ref.get(labelRef),
-          resolveWsl: () => Effect.die("unexpected WSL config resolve"),
-          currentBootstrapToken: Effect.die("unexpected bootstrap token read"),
-        } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
-        DesktopAppSettings.layerTest(),
+        layerConfiguration,
         DesktopState.layer,
         DesktopWslEnvironment.layerTest(),
-        ElectronDialog.layer,
+        Layer.succeed(ElectronDialog.ElectronDialog, {
+          ...ElectronDialog.make,
+          ...(input.showErrorBox ? { showErrorBox: input.showErrorBox } : {}),
+        }),
         ElectronApp.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
@@ -130,7 +208,64 @@ describe("DesktopBackendPool", () => {
         assert.equal(stopped.desiredRunning, false);
         assert.equal(stopped.restartScheduled, false);
         assert.equal(Option.isNone(yield* pool.get(id)), true);
-      }).pipe(Effect.provide(layerPool(Ref.makeUnsafe("Windows")))),
+      }).pipe(Effect.provide(layerPool({ label: Effect.succeed("Windows") }))),
+    ),
+  );
+
+  it.effect("falls back to Windows for this launch when the WSL primary keeps crashing", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spawned = yield* Queue.unbounded<string>();
+        const errors = yield* Ref.make<ReadonlyArray<string>>([]);
+        const firstExit = yield* Deferred.make<void>();
+        const layer = layerPool({
+          label: Effect.succeed("WSL (Ubuntu)"),
+          settings: {
+            ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+            wslBackendEnabled: true,
+            wslOnly: true,
+          },
+          resolvePrimary: Effect.gen(function* () {
+            const settings = yield* (yield* DesktopAppSettings.DesktopAppSettings).get;
+            return settings.wslBackendEnabled && settings.wslOnly
+              ? { ...windowsConfig, executablePath: "wsl.exe", bootstrapDelivery: "stdin" }
+              : windowsConfig;
+          }),
+          // The WSL server dies on every start (missing libatomic.so.1); Windows stays up.
+          spawn: (command) => {
+            const executable = command._tag === "StandardCommand" ? command.command : "";
+            Queue.offerUnsafe(spawned, executable);
+            return makeProcess(
+              executable === "wsl.exe"
+                ? Effect.succeed(ChildProcessSpawner.ExitCode(1))
+                : Effect.never,
+            );
+          },
+          showErrorBox: (title) => Ref.update(errors, (shown) => [...shown, title]),
+          onBackendExit: Deferred.succeed(firstExit, undefined).pipe(Effect.asVoid),
+        });
+        yield* Effect.gen(function* () {
+          const pool = yield* DesktopBackendPool.DesktopBackendPool;
+          const settings = yield* DesktopAppSettings.DesktopAppSettings;
+          const primary = yield* pool.primary;
+          yield* primary.start;
+          yield* Deferred.await(firstExit);
+          yield* TestClock.adjust(Duration.minutes(1));
+
+          assert.isNotEmpty(
+            yield* Ref.get(errors),
+            "the user should be told the WSL backend could not start",
+          );
+          const current = yield* settings.get;
+          assert.isFalse(current.wslOnly, "wslOnly should be off in memory for this launch");
+          const executables = yield* Queue.takeAll(spawned);
+          assert.equal(
+            executables.at(-1),
+            "/electron",
+            "the restarted primary should be the Windows backend",
+          );
+        }).pipe(Effect.provide(layer));
+      }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
 });
