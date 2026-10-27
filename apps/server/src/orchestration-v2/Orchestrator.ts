@@ -11845,6 +11845,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ),
           );
         for (const providerThread of providerThreads) {
+          // The sweep already judged projected work; ask only about work the projection has not seen.
+          if ((providerThread.pendingBackgroundTasks?.length ?? 0) > 0) continue;
           if (yield* stillReportsBackgroundWork(providerThread)) {
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,

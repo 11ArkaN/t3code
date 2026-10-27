@@ -1017,7 +1017,10 @@ it.effect.each(["missing-session-terminal", "returned-interrupt", "superseded-at
   (stalledRun) => stopEarlierBackgroundWork({ stalledRun }),
 );
 
-it.effect("Auto-settle leaves a thread whose live session still reports background work", () =>
+it.effect.each([
+  { case: "a finished task awaits its wake turn", devServer: false, settles: false },
+  { case: "only a dev server it already lists runs", devServer: true, settles: true },
+])("Auto-settle with live background work when $case", ({ devServer, settles }) =>
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("background-work-auto-settle");
@@ -1048,7 +1051,7 @@ it.effect("Auto-settle leaves a thread whose live session still reports backgrou
                 lastError: null,
               },
               events: Stream.fromQueue(events),
-              // The awaited task finished and its wake turn has not attached yet.
+              // Either an awaited task finished before its wake turn attached, or a dev server runs.
               hasPendingBackgroundWorkForThread: () => Effect.succeed(true),
               ensureThread: ({ threadId }) =>
                 Effect.succeed({
@@ -1151,6 +1154,18 @@ it.effect("Auto-settle leaves a thread whose live session still reports backgrou
             event.payload.id === first.runId &&
             event.payload.status === "waiting",
         );
+        if (devServer) {
+          const [providerThread] = (yield* orchestrator.getThreadProjection(threadId))
+            .providerThreads;
+          yield* Queue.offer(events, {
+            type: "provider_thread.updated",
+            driver,
+            providerThread: {
+              ...providerThread!,
+              pendingBackgroundTasks: [{ taskId: "dev-server", kind: "command" }],
+            },
+          });
+        }
         yield* Queue.offer(events, {
           type: "provider_turn.updated",
           driver,
@@ -1172,9 +1187,9 @@ it.effect("Auto-settle leaves a thread whose live session still reports backgrou
         const before = yield* orchestrator.getThreadProjection(threadId);
         assert.deepEqual(
           before.providerThreads.map(
-            (providerThread) => providerThread.pendingBackgroundTasks ?? [],
+            (providerThread) => providerThread.pendingBackgroundTasks?.length ?? 0,
           ),
-          [[]],
+          [devServer ? 1 : 0],
         );
         yield* orchestrator
           .dispatch({
@@ -1187,6 +1202,10 @@ it.effect("Auto-settle leaves a thread whose live session still reports backgrou
         yield* worker.drain();
 
         const after = yield* orchestrator.getThreadProjection(threadId);
+        if (settles) {
+          assert.equal(after.thread.settledOverride, "settled");
+          return;
+        }
         assert.isNull(
           after.thread.settledOverride,
           "auto-settle settled the thread while its live provider session still reported background work",
