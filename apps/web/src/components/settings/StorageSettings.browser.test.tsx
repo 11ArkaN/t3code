@@ -192,6 +192,20 @@ it("saves an edited draft when focus leaves its row", async () => {
   });
 });
 
+it("saves a stepped first age only once it is committed", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.click(screen.getByRole("button", { name: `Increase ${rule}` }));
+  await userEvent.keyboard("{ArrowUp}");
+  await expect.element(daysInput(screen)).toHaveValue("10");
+  expect(state.update).not.toHaveBeenCalled();
+  await userEvent.keyboard("{Enter}");
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: 10 },
+  });
+});
+
 it("saves a re-entered age that matches the shown value", async () => {
   setup();
   state.settings = {

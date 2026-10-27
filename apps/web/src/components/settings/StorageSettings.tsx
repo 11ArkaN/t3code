@@ -116,7 +116,9 @@ function RetentionControl({
   // Saving an age can start a cleanup sweep, so turning a rule on only opens a draft.
   // While its first save is in flight this holds that submission.
   const [enabling, setEnabling] = useState<"draft" | "edited" | { days: number } | null>(null);
-  // An edited age is held while focus is on the switch, so switching off never saves it first.
+  // Holds an age until Enter or focus leaves the row: one edited before focus moved to the
+  // switch, so switching off never saves it first, or one stepped toward a rule's first age,
+  // so raising it from 8 never saves a shorter age on the way.
   const [held, setHeld] = useState(false);
   if (savedValue !== value) {
     setSavedValue(value);
@@ -168,10 +170,11 @@ function RetentionControl({
           onValueCommitted={(next, { reason, event }) => {
             if (next === null) setDraft(value);
             else if (
-              reason === "input-blur" &&
-              event instanceof FocusEvent &&
-              event.relatedTarget instanceof Node &&
-              row.current?.contains(event.relatedTarget)
+              reason === "input-blur"
+                ? event instanceof FocusEvent &&
+                  event.relatedTarget instanceof Node &&
+                  row.current?.contains(event.relatedTarget)
+                : value === null
             ) {
               setDraft(next);
               setHeld(true);
