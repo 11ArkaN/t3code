@@ -88,10 +88,9 @@ export function buildKiroAcpSpawnInput(
 }
 
 /**
- * Approval choices a Kiro permission request can honor. V3 sends its options
- * as authoritative, so only the kinds it offered appear. `allow_always` in V3
- * persists a consent rule (workspace or wider) rather than a session grant, so
- * it is not offered as "this session".
+ * Approval choices a Kiro permission request can honor; V3's options are
+ * authoritative. Its `allow_always` saves a consent rule for the workspace or
+ * wider, so it is offered, as "Always allow", only without a one-time choice.
  */
 export function kiroApprovalOptions(
   request: EffectAcpSchema.RequestPermissionRequest,
@@ -99,7 +98,11 @@ export function kiroApprovalOptions(
   const has = (kind: EffectAcpSchema.PermissionOption["kind"]) =>
     request.options.some((option) => option.kind === kind && option.optionId.trim().length > 0);
   return [
-    ...(has("allow_once") ? [{ decision: "accept", label: "Allow once" } as const] : []),
+    ...(has("allow_once")
+      ? [{ decision: "accept", label: "Allow once" } as const]
+      : has("allow_always")
+        ? [{ decision: "acceptForSession", label: "Always allow" } as const]
+        : []),
     ...(has("reject_once") ? [{ decision: "decline", label: "Deny" } as const] : []),
     { decision: "cancel", label: "Cancel" },
   ];
