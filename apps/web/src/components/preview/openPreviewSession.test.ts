@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import * as browserDefaults from "~/browser/browserDefaults";
 import { BrowserSettingsReadError, openUrlInPreview } from "~/browser/openFileInPreview";
+import * as previewRuntime from "~/browser/previewRuntime";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
@@ -85,6 +86,24 @@ describe("openPreviewSession", () => {
           viewport,
           profileId: "work",
         },
+      });
+    },
+  );
+
+  // regression: #24911 server tabs opened at 100% and ignored the default zoom setting
+  it.each(["session", "link"] as const)(
+    "opens a server %s tab at the saved default zoom",
+    async (entryPoint) => {
+      vi.spyOn(previewRuntime, "previewRuntimeFor").mockReturnValue("server");
+      __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, browserDefaultZoomFactor: 0.8 });
+      const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+      const open = entryPoint === "session" ? openPreviewSession : openUrlInPreview;
+
+      await open({ openPreview, threadRef, url: "https://t3.chat/" });
+
+      expect(openPreview).toHaveBeenCalledExactlyOnceWith({
+        environmentId: threadRef.environmentId,
+        input: expect.objectContaining({ runtime: "server", zoomFactor: 0.8 }),
       });
     },
   );

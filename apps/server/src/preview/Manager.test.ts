@@ -86,6 +86,23 @@ it.layer(layer)("PreviewManager", (it) => {
     }),
   );
 
+  // regression: #24911 the desktop host reset server tabs to 100% because open dropped the zoom
+  it.effect("opens a tab at the requested zoom", () =>
+    Effect.gen(function* () {
+      const threadId = freshThreadId();
+      const manager = yield* PreviewManager.PreviewManager;
+      const collector = yield* collectEvents;
+
+      const opened = yield* manager.open({ threadId, runtime: "server", zoomFactor: 0.8 });
+
+      expect(opened.zoomFactor).toBe(0.8);
+      const events = yield* collector.drain;
+      expect(events.find((event) => event.type === "opened")).toMatchObject({
+        snapshot: { zoomFactor: 0.8 },
+      });
+    }),
+  );
+
   it.effect("reissues presentation requests without replaying them on navigation", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();
