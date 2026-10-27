@@ -228,9 +228,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return false;
     }
     const instanceId = state.snapshot.instanceId;
+    const options = { recovery: state.snapshot.status === "error" };
     const [genericDemand, instanceDemand] = yield* Effect.all([
-      host.shouldRunBackgroundWork({ type: "provider-status" }),
-      host.shouldRunBackgroundWork({ type: "provider-status", instanceId }),
+      host.shouldRunBackgroundWork({ type: "provider-status" }, options),
+      host.shouldRunBackgroundWork({ type: "provider-status", instanceId }, options),
     ]);
     return genericDemand || instanceDemand;
   });

@@ -43,7 +43,11 @@ export class ProviderHost extends Context.Service<
       /** Changes buffered from the moment the scoped subscription is acquired. */
       readonly subscribe: Effect.Effect<Stream.Stream<ServerSettings>, never, Scope.Scope>;
     };
-    readonly shouldRunBackgroundWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
+    /** `recovery` re-checks failed work through the host's power-saving pauses. */
+    readonly shouldRunBackgroundWork: (
+      scope: BackgroundScope,
+      options?: { readonly recovery?: boolean },
+    ) => Effect.Effect<boolean>;
     /** Absolute attachment path, or null if the ID does not resolve inside attachmentsDir. */
     readonly resolveAttachmentPath: (attachment: ChatAttachment) => string | null;
     readonly resolveExtractedTextPath?: (path: string) => Effect.Effect<string | undefined>;

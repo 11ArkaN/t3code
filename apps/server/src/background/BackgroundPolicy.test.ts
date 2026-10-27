@@ -97,6 +97,68 @@ function layerProviderHostFor(hostPower: HostPowerSnapshot) {
   );
 }
 
+const lowPowerHostPower: HostPowerSnapshot = {
+  ...nominalHostPower,
+  onBattery: "true",
+  lowPowerMode: "true",
+  stale: false,
+};
+
+const countProviderChecksOverOneInterval = Effect.fn(function* (status: ServerProvider["status"]) {
+  const policy = yield* BackgroundPolicy.BackgroundPolicy;
+  const reportFocusedProviderStatusLease = policy.reportClientActivity(
+    AuthSessionId.make("session-1"),
+    RpcClientId.make(1),
+    makeReport({
+      clientKind: "desktop-renderer",
+      scopes: [{ type: "server-config" }, { type: "provider-status" }],
+    }),
+  );
+  const providerSnapshot: ServerProvider = {
+    instanceId: ProviderInstanceId.make("codex"),
+    driver: ProviderDriverKind.make("codex"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status,
+    auth: { status: "unknown" },
+    checkedAt: "2026-05-13T00:00:00.000Z",
+    message: "Timed out while checking Codex app-server provider status.",
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+  const checkCalls = yield* Ref.make(0);
+  const initialCheckDone = yield* Deferred.make<void>();
+
+  yield* reportFocusedProviderStatusLease;
+  yield* makeManagedServerProvider({
+    resolveMaintenance: () => Effect.die("unused"),
+    getSettings: Effect.succeed({}),
+    streamSettings: Stream.empty,
+    haveSettingsChanged: () => false,
+    initialSnapshot: () => Effect.succeed(providerSnapshot),
+    checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+      Effect.tap((count) =>
+        count === 1 ? Deferred.succeed(initialCheckDone, undefined) : Effect.void,
+      ),
+      Effect.as(providerSnapshot),
+    ),
+  });
+  yield* Deferred.await(initialCheckDone);
+
+  // Balanced re-probes every 5 minutes; the focused client keeps renewing its 45 s lease.
+  yield* TestClock.adjust("290 seconds");
+  yield* reportFocusedProviderStatusLease;
+  const snapshot = yield* policy.snapshot;
+  assert.equal(snapshot.hostPower.lowPowerMode, "true");
+  assert.equal(snapshot.activeForegroundLeaseCount, 1);
+  assert.isTrue(yield* policy.hasDemand({ type: "provider-status" }));
+
+  yield* TestClock.adjust("10 seconds");
+  return yield* Ref.get(checkCalls);
+});
+
 describe("BackgroundPolicy", () => {
   it.effect("removes all leases for a disconnected websocket connection", () =>
     Effect.gen(function* () {
@@ -337,73 +399,19 @@ describe("BackgroundPolicy", () => {
     "re-checks a failed provider for a focused client while the host is in Low Power Mode",
     () =>
       Effect.gen(function* () {
-        const policy = yield* BackgroundPolicy.BackgroundPolicy;
-        const reportFocusedProviderStatusLease = policy.reportClientActivity(
-          AuthSessionId.make("session-1"),
-          RpcClientId.make(1),
-          makeReport({
-            clientKind: "desktop-renderer",
-            scopes: [{ type: "server-config" }, { type: "provider-status" }],
-          }),
-        );
-        const failedSnapshot: ServerProvider = {
-          instanceId: ProviderInstanceId.make("codex"),
-          driver: ProviderDriverKind.make("codex"),
-          enabled: true,
-          installed: true,
-          version: null,
-          status: "error",
-          auth: { status: "unknown" },
-          checkedAt: "2026-05-13T00:00:00.000Z",
-          message: "Timed out while checking Codex app-server provider status.",
-          models: [],
-          slashCommands: [],
-          skills: [],
-        };
-        const checkCalls = yield* Ref.make(0);
-        const initialCheckDone = yield* Deferred.make<void>();
-
-        yield* reportFocusedProviderStatusLease;
-        yield* makeManagedServerProvider({
-          resolveMaintenance: () => Effect.die("unused"),
-          getSettings: Effect.succeed({}),
-          streamSettings: Stream.empty,
-          haveSettingsChanged: () => false,
-          initialSnapshot: () => Effect.succeed(failedSnapshot),
-          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
-            Effect.tap((count) =>
-              count === 1 ? Deferred.succeed(initialCheckDone, undefined) : Effect.void,
-            ),
-            Effect.as(failedSnapshot),
-          ),
-        });
-        yield* Deferred.await(initialCheckDone);
-
-        // Balanced re-probes every 5 minutes; the focused client keeps renewing its 45 s lease.
-        yield* TestClock.adjust("290 seconds");
-        yield* reportFocusedProviderStatusLease;
-        const snapshot = yield* policy.snapshot;
-        assert.equal(snapshot.hostPower.lowPowerMode, "true");
-        assert.equal(snapshot.activeForegroundLeaseCount, 1);
-        assert.isTrue(yield* policy.hasDemand({ type: "provider-status" }));
-
-        yield* TestClock.adjust("10 seconds");
-
         assert.equal(
-          yield* Ref.get(checkCalls),
+          yield* countProviderChecksOverOneInterval("error"),
           2,
           "provider in error was not re-checked after the balanced 5 minute interval",
         );
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          layerProviderHostFor({
-            ...nominalHostPower,
-            onBattery: "true",
-            lowPowerMode: "true",
-            stale: false,
-          }),
-        ),
-      ),
+      }).pipe(Effect.scoped, Effect.provide(layerProviderHostFor(lowPowerHostPower))),
+  );
+
+  it.effect(
+    "keeps a ready provider paused for a focused client while the host is in Low Power Mode",
+    () =>
+      Effect.gen(function* () {
+        assert.equal(yield* countProviderChecksOverOneInterval("ready"), 1);
+      }).pipe(Effect.scoped, Effect.provide(layerProviderHostFor(lowPowerHostPower))),
   );
 });

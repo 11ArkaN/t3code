@@ -50,7 +50,11 @@ export class BackgroundPolicy extends Context.Service<
       Scope.Scope
     >;
     readonly hasDemand: (scope: BackgroundScope) => Effect.Effect<boolean>;
-    readonly shouldRunScopeWork: (scope: BackgroundScope) => Effect.Effect<boolean>;
+    /** `recovery` re-checks failed work through the host's power-saving pauses. */
+    readonly shouldRunScopeWork: (
+      scope: BackgroundScope,
+      options?: { readonly recovery?: boolean },
+    ) => Effect.Effect<boolean>;
     readonly shouldRunOpportunisticWork: Effect.Effect<boolean>;
   }
 >()("t3/background/BackgroundPolicy") {}
@@ -141,6 +145,7 @@ function hasThermalPressure(hostPower: HostPowerSnapshot): boolean {
 function isHostConstrained(
   hostPower: HostPowerSnapshot,
   settings: ResolvedBackgroundActivitySettings,
+  ignorePowerSaving = false,
 ): boolean {
   if (hostPower.stale) return false;
   if (
@@ -150,6 +155,7 @@ function isHostConstrained(
   ) {
     return true;
   }
+  if (ignorePowerSaving) return false;
   if (settings.pauseWhenHostLowPower && hostPower.lowPowerMode === "true") return true;
   return settings.pauseWhenOnBattery && hostPower.onBattery === "true";
 }
@@ -291,9 +297,9 @@ export const make = Effect.fn("background.policy.make")(function* () {
 
   const shouldRunScopeWork: BackgroundPolicy["Service"]["shouldRunScopeWork"] = Effect.fn(
     "BackgroundPolicy.shouldRunScopeWork",
-  )(function* (scope) {
+  )(function* (scope, options) {
     const [current, settings] = yield* Effect.all([snapshot, backgroundActivitySettings]);
-    if (isHostConstrained(current.hostPower, settings)) {
+    if (isHostConstrained(current.hostPower, settings, options?.recovery === true)) {
       return false;
     }
     return current.leases.some((lease) =>
