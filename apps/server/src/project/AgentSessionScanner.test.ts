@@ -2180,6 +2180,110 @@ describe("parseAgentSessionTranscript", () => {
     expect(thread?.messages.map((message) => message.text)).toEqual([prompt]);
   });
 
+  it("imports only Codex user events when the rollout records them", () => {
+    const responseUser = (text: string) =>
+      encodeTranscriptRecord({
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+      });
+    const assistant = (text: string) =>
+      encodeTranscriptRecord({
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text }] },
+      });
+    const thread = AgentSessionScanner.parseAgentSessionTranscript({
+      contents: [
+        encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
+        responseUser("<user_instructions>\nBe friendly.\n</user_instructions>"),
+        responseUser("<environment_context>\n<cwd>/tmp/project</cwd>\n</environment_context>"),
+        responseUser("Which database should we use?"),
+        encodeTranscriptRecord({
+          type: "event_msg",
+          payload: { type: "user_message", message: "Which database should we use?" },
+        }),
+        assistant("Pick one?"),
+        responseUser(
+          '<send_user_message_question_reply>\n[{"answer":"Use PostgreSQL","question":"Which database?","questionItemId":"q-1"}]\n</send_user_message_question_reply>',
+        ),
+        assistant("PostgreSQL it is."),
+      ].join("\n"),
+      source: "codex",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      fallbackSessionId: "fallback",
+      lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
+    });
+
+    expect(thread?.messages.map((message) => message.text)).toEqual([
+      "Which database should we use?",
+      "Pick one?",
+      "PostgreSQL it is.",
+    ]);
+  });
+
+  it("imports a Codex request after the files-mentioned prefix", () => {
+    const prompt = [
+      "# Files mentioned by the user:",
+      "",
+      "## screenshot.png: /tmp/attachments/screenshot.png",
+      "Image attachment: true",
+      "",
+      '<in-app-browser-context source="ambient-ui-state">\nTab\n</in-app-browser-context>',
+      "",
+      "## My request for Codex:",
+      "Hey, what's up?",
+    ].join("\n");
+    const thread = AgentSessionScanner.parseAgentSessionTranscript({
+      contents: [
+        encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
+        encodeTranscriptRecord({
+          type: "event_msg",
+          payload: { type: "user_message", message: prompt },
+        }),
+      ].join("\n"),
+      source: "codex",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      fallbackSessionId: "fallback",
+      lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
+    });
+
+    expect(thread?.title).toBe("Hey, what's up?");
+    expect(thread?.messages.map((message) => message.text)).toEqual(["Hey, what's up?"]);
+  });
+
+  it("imports Claude slash commands as typed and drops their local output", () => {
+    const user = (content: string) =>
+      JSON.stringify({
+        type: "user",
+        sessionId: "claude-session",
+        message: { role: "user", content },
+      });
+    const thread = AgentSessionScanner.parseAgentSessionTranscript({
+      contents: [
+        user("Summarise the README"),
+        user(
+          "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+        ),
+        user("<local-command-stdout>Compacted </local-command-stdout>"),
+        user(
+          "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>",
+        ),
+        user("<local-command-stderr>Unknown model</local-command-stderr>"),
+        user("Now add a license"),
+      ].join("\n"),
+      source: "claudeAgent",
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      fallbackSessionId: "fallback",
+      lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+    });
+
+    expect(thread?.messages.map((message) => message.text)).toEqual([
+      "Summarise the README",
+      "/compact",
+      "/model opus",
+      "Now add a license",
+    ]);
+  });
+
   it("skips sessions without a visible user message", () => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: JSON.stringify({
