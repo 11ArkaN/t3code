@@ -125,6 +125,18 @@ function fitPreviewMiniPlayerWidth(
   return { width: Math.round(width), height: Math.round(width / aspectRatio) };
 }
 
+/** Sizes below the minimum, kept because the layout already squeezed the frame under it. */
+function previewMiniPlayerSizeAtWidth(
+  width: number,
+  source: PreviewMiniPlayerSize,
+): PreviewMiniPlayerSize {
+  const clamped = Math.max(1, width);
+  return {
+    width: Math.round(clamped),
+    height: Math.round((clamped * source.height) / source.width),
+  };
+}
+
 function defaultPreviewMiniPlayerWidth(source: PreviewMiniPlayerSize): number {
   return Math.min(
     PREVIEW_MINI_PLAYER_DEFAULT_BOX.width,
@@ -236,7 +248,7 @@ export function resolvePreviewMiniPlayerFrame(input: {
     container,
     obstacles = NO_PREVIEW_MINI_PLAYER_OBSTACLES,
   } = input;
-  const size = fitPreviewMiniPlayerWidth(
+  const fitted = fitPreviewMiniPlayerWidth(
     width ?? defaultPreviewMiniPlayerWidth(source),
     source,
     availableArea(
@@ -245,6 +257,7 @@ export function resolvePreviewMiniPlayerFrame(input: {
       position && width ? spanOf(position.x, width) : null,
     ),
   );
+  const size = width && fitted.width > width ? previewMiniPlayerSizeAtWidth(width, source) : fitted;
   const { detailsCard } = obstacles;
   const anchored =
     position ??
@@ -307,7 +320,12 @@ export function resizePreviewMiniPlayer(input: {
       : horizontal
         ? desiredWidth
         : desiredHeight * aspectRatio;
-  const size = fitPreviewMiniPlayerWidth(desired, source, max);
+  const fitted = fitPreviewMiniPlayerWidth(desired, source, max);
+  // An inward drag on a frame already under the minimum shrinks it rather than snapping up to it.
+  const size =
+    desired < start.width && fitted.width > start.width
+      ? previewMiniPlayerSizeAtWidth(desired, source)
+      : fitted;
   const position = clampPreviewMiniPlayerPosition(
     { x: west ? right - size.width : start.x, y: north ? bottom - size.height : start.y },
     container,
