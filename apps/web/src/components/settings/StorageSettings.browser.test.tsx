@@ -175,6 +175,32 @@ it("discards an untouched retention draft when focus leaves it", async () => {
   expect(state.update).not.toHaveBeenCalled();
 });
 
+it("saves an edited draft when focus leaves it", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.tab();
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: 30 },
+  });
+});
+
+it("saves a re-entered age that matches the shown value", async () => {
+  setup();
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, browserArtifactsAfterDays: 30 },
+  };
+  await using screen = await render(panel());
+  await userEvent.click(daysInput(screen));
+  await userEvent.keyboard("{Control>}a{/Control}30");
+  await userEvent.tab();
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: 30 },
+  });
+});
+
 it("turns a saved retention rule off immediately", async () => {
   setup();
   state.settings = {
@@ -216,16 +242,16 @@ it("keeps a newer pending age open when an older first save fails", async () => 
   setup();
   let failFirst = () => {};
   const first = new Promise<boolean>((resolve) => (failFirst = () => resolve(false)));
-  state.update.mockReturnValueOnce(first).mockReturnValueOnce(new Promise(() => {}));
+  state.update.mockReturnValueOnce(first).mockReturnValue(new Promise(() => {}));
   await using screen = await render(panel());
   await userEvent.click(ruleSwitch(screen));
-  await userEvent.fill(daysInput(screen), "30");
-  await userEvent.keyboard("{Enter}");
-  await userEvent.fill(daysInput(screen), "60");
-  await userEvent.keyboard("{Enter}");
-  expect(state.update).toHaveBeenCalledTimes(2);
+  for (const age of ["30", "60", "30"]) {
+    await userEvent.fill(daysInput(screen), age);
+    await userEvent.keyboard("{Enter}");
+  }
+  expect(state.update).toHaveBeenCalledTimes(3);
 
   await act(async () => failFirst());
-  await expect.element(daysInput(screen)).toHaveValue("60");
+  await expect.element(daysInput(screen)).toHaveValue("30");
   await expect.element(ruleSwitch(screen)).toBeChecked();
 });

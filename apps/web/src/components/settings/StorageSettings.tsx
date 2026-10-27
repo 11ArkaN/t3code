@@ -114,25 +114,27 @@ function RetentionControl({
   const [draft, setDraft] = useState(value);
   const [savedValue, setSavedValue] = useState(value);
   // Saving an age can start a cleanup sweep, so turning a rule on only opens a draft.
-  // While its first save is in flight this holds that age.
-  const [enabling, setEnabling] = useState<"draft" | "edited" | number | null>(null);
+  // While its first save is in flight this holds that submission.
+  const [enabling, setEnabling] = useState<"draft" | "edited" | { days: number } | null>(null);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
     setEnabling(null);
   }
+  const pending = typeof enabling === "object" ? enabling : null;
 
   const commit = async (next: number) => {
     const days = Math.min(3650, Math.max(minimum, Math.round(next)));
     setDraft(days);
-    if (days === value || days === enabling) return;
+    if (days === pending?.days) return;
     if (value !== null) {
       void onChange(days);
       return;
     }
-    setEnabling(days);
+    const submission = { days };
+    setEnabling(submission);
     if (!(await onChange(days))) {
-      setEnabling((current) => (current === days ? null : current));
+      setEnabling((current) => (current === submission ? null : current));
     }
   };
 
@@ -169,7 +171,7 @@ function RetentionControl({
               size={new Intl.NumberFormat().format(draft ?? value ?? 8).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {
                   // Blurring lets NumberField parse the visible text and commit it once. It
                   // skips an unedited value, so an untouched draft is committed here.
@@ -208,7 +210,7 @@ function RetentionControl({
             setEnabling("draft");
             return;
           }
-          if (value !== null || typeof enabling === "number") void onChange(null);
+          if (value !== null || pending !== null) void onChange(null);
           setEnabling(null);
         }}
       />
