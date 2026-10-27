@@ -263,10 +263,7 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
               }),
             ),
         }),
-        Effect.tapCauseIf(
-          (cause) => !Cause.hasInterruptsOnly(cause),
-          (cause) => Effect.logWarning("Cursor sign-in failed", cause),
-        ),
+        Effect.tapCause((cause) => Effect.logWarning("Cursor sign-in failed", cause)),
         Effect.exit,
         Effect.flatMap((result) =>
           lock.withPermits(1)(
