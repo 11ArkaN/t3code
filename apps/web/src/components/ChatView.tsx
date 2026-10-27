@@ -1796,6 +1796,10 @@ export default function ChatView(props: ChatViewProps) {
     composerRef.current?.focusAtEnd();
   };
   const focusComposerStable = useStableCallback(focusComposer);
+  const focusSnapshotComposer = useStableCallback(() => {
+    acquireComposer();
+    focusComposer();
+  });
   const canInterruptRunningThread =
     canOperateThread && deriveCanInterruptRunningThread(activeThread !== undefined, activeRuntime);
   const onInterrupt = async () => {
@@ -1820,8 +1824,8 @@ export default function ChatView(props: ChatViewProps) {
   // SnapShot captures land in the route thread's draft, so a side chat never
   // takes the focus that follows one.
   useEffect(
-    () => (embedded ? undefined : subscribeSnapShotComposerFocus(focusComposerStable)),
-    [embedded, focusComposerStable],
+    () => (embedded ? undefined : subscribeSnapShotComposerFocus(focusSnapshotComposer)),
+    [embedded, focusSnapshotComposer],
   );
   const scheduleComposerFocus = () => {
     window.requestAnimationFrame(() => {
