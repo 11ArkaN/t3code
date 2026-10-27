@@ -45,6 +45,7 @@ const baseProps = {
   optimisticMessages: [],
   threadId: "thread:test" as never,
   editingRunId: null,
+  editBlockedReason: null,
   onEditQueuedRun: () => undefined,
   onCancelEdit: () => undefined,
 } satisfies ComponentProps<typeof QueuedRunsControl>;
