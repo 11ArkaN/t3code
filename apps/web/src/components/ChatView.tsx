@@ -655,7 +655,7 @@ export default function ChatView(props: ChatViewProps) {
         focus.focus(scopedThreadKey(sideChat.parentRef), threadId);
       } else {
         const threadRef = scopeThreadRef(environmentId, threadId);
-        if (focusedSideChatId !== null) {
+        if (activeRightPanelSurface?.kind === "aside") {
           useRightPanelStore.getState().setMaximized(threadRef, false);
           if (shouldUsePlanSidebarSheet) useRightPanelStore.getState().close(threadRef);
         }
