@@ -254,6 +254,31 @@ describe("makeManagedServerProvider", () => {
     ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
   );
 
+  it.effect("reports probed only once the first provider check has published", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const releaseCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          resolveMaintenance: () => Effect.succeed(maintenanceCapabilities),
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Deferred.await(releaseCheck).pipe(Effect.as(refreshedSnapshot)),
+          refreshInterval: "1 hour",
+        });
+        assert.isDefined(provider.hasProbed);
+        const update = yield* provider.streamChanges.pipe(Stream.runHead, Effect.forkChild);
+        yield* Effect.yieldNow;
+        assert.isFalse(yield* provider.hasProbed);
+
+        yield* Deferred.succeed(releaseCheck, undefined);
+        yield* Fiber.join(update);
+        assert.isTrue(yield* provider.hasProbed);
+      }),
+    ).pipe(Effect.provide(Layer.mergeAll(layerAlwaysRunTest, TestClock.layer()))),
+  );
+
   it.effect("reruns the provider check when streamed settings change", () =>
     Effect.scoped(
       Effect.gen(function* () {

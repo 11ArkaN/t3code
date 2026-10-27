@@ -1090,87 +1090,92 @@ it.layer(
         ),
       );
 
+      const lastKnownStatus = ({ status, installed, version, auth, message }: ServerProvider) => ({
+        status,
+        installed,
+        version,
+        auth,
+        message,
+      });
+      const bootFromCache = Effect.fn("bootFromCache")(function* (input: {
+        readonly cached: ServerProvider;
+        readonly current: ServerProvider;
+        readonly hasProbed: boolean;
+      }) {
+        const config = yield* ServerConfig.ServerConfig;
+        const filePath = yield* resolveProviderStatusCachePath({
+          cacheDir: config.providerStatusCacheDir,
+          instanceId: input.cached.instanceId,
+        });
+        yield* writeProviderStatusCache({ filePath, provider: input.cached });
+        const instance = {
+          instanceId: input.cached.instanceId,
+          driverKind: input.cached.driver,
+          continuationIdentity: {
+            driverKind: input.cached.driver,
+            continuationKey: "codex:instance:codex-personal",
+          },
+          displayName: undefined,
+          enabled: true,
+          snapshot: {
+            resolveMaintenance: () =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({
+                  provider: input.cached.driver,
+                  packageName: null,
+                }),
+              ),
+            getSnapshot: Effect.succeed(input.current),
+            hasProbed: Effect.succeed(input.hasProbed),
+            refresh: Effect.never,
+            streamChanges: Stream.empty,
+            applyUsageLimits: () => Effect.void,
+          },
+          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          textGeneration: {} as ProviderInstance["textGeneration"],
+        } satisfies ProviderInstance;
+        const layerInstanceRegistry = Layer.succeed(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          {
+            getInstance: (id) => Effect.succeed(id === instance.instanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+          },
+        );
+        const providers = yield* Effect.gen(function* () {
+          const registry = yield* ProviderRegistry.ProviderRegistry;
+          return yield* registry.getProviders;
+        }).pipe(
+          Effect.provide(ProviderRegistry.layer.pipe(Layer.provide(layerInstanceRegistry))),
+          Effect.scoped,
+        );
+        const persisted = yield* readProviderStatusCache(filePath);
+        return { providers, persisted };
+      });
+
       it.effect("keeps the cached status while the boot probe is still pending", () =>
         Effect.gen(function* () {
-          const config = yield* ServerConfig.ServerConfig;
-          const filePath = yield* resolveProviderStatusCachePath({
-            cacheDir: config.providerStatusCacheDir,
-            instanceId: cachedProvider.instanceId,
+          const { providers, persisted } = yield* bootFromCache({
+            cached: cachedProvider,
+            current: {
+              ...cachedProvider,
+              status: "warning",
+              installed: false,
+              version: null,
+              auth: { status: "unknown" },
+              message: "Codex provider status has not been checked in this session yet.",
+              models: [],
+            },
+            hasProbed: false,
           });
-          yield* writeProviderStatusCache({ filePath, provider: cachedProvider });
-          const uncheckedProvider = {
-            ...cachedProvider,
-            status: "warning",
-            installed: false,
-            version: null,
-            auth: { status: "unknown" },
-            message: "Codex provider status has not been checked in this session yet.",
-            models: [],
-          } satisfies ServerProvider;
-          const instance = {
-            instanceId: cachedProvider.instanceId,
-            driverKind: cachedProvider.driver,
-            continuationIdentity: {
-              driverKind: cachedProvider.driver,
-              continuationKey: "codex:instance:codex-personal",
-            },
-            displayName: undefined,
-            enabled: true,
-            snapshot: {
-              resolveMaintenance: () =>
-                Effect.succeed(
-                  makeManualOnlyProviderMaintenanceCapabilities({
-                    provider: cachedProvider.driver,
-                    packageName: null,
-                  }),
-                ),
-              getSnapshot: Effect.succeed(uncheckedProvider),
-              refresh: Effect.never,
-              streamChanges: Stream.empty,
-              applyUsageLimits: () => Effect.void,
-            },
-            orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
-            textGeneration: {} as ProviderInstance["textGeneration"],
-          } satisfies ProviderInstance;
-          const layerInstanceRegistry = Layer.succeed(
-            ProviderInstanceRegistry.ProviderInstanceRegistry,
-            {
-              getInstance: (id) =>
-                Effect.succeed(id === instance.instanceId ? instance : undefined),
-              listInstances: Effect.succeed([instance]),
-              listUnavailable: Effect.succeed([]),
-              streamChanges: Stream.empty,
-              subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
-            },
-          );
-          const lastKnownStatus = ({
-            status,
-            installed,
-            version,
-            auth,
-            message,
-          }: ServerProvider) => ({
-            status,
-            installed,
-            version,
-            auth,
-            message,
-          });
-
-          const providers = yield* Effect.gen(function* () {
-            const registry = yield* ProviderRegistry.ProviderRegistry;
-            return yield* registry.getProviders;
-          }).pipe(
-            Effect.provide(ProviderRegistry.layer.pipe(Layer.provide(layerInstanceRegistry))),
-            Effect.scoped,
-          );
 
           assert.deepStrictEqual(
             providers.map(lastKnownStatus),
             [lastKnownStatus(cachedProvider)],
             "the pending placeholder replaced the cached status before the probe finished",
           );
-          const persisted = yield* readProviderStatusCache(filePath);
           assert.deepStrictEqual(
             persisted && lastKnownStatus(persisted),
             lastKnownStatus(cachedProvider),
@@ -1180,6 +1185,38 @@ it.layer(
           Effect.provide(
             ServerConfig.layerTest(process.cwd(), {
               prefix: "t3-codex-pending-status-cache-",
+            }).pipe(Layer.provideMerge(NodeServices.layer)),
+          ),
+        ),
+      );
+
+      it.effect("lets a probe that finished before boot replace the cached status", () =>
+        Effect.gen(function* () {
+          const erroredProvider = {
+            ...cachedProvider,
+            status: "error",
+            message: "Codex CLI exited with code 1.",
+          } satisfies ServerProvider;
+          const unauthenticatedProvider = {
+            ...cachedProvider,
+            status: "error",
+            auth: { status: "unauthenticated" },
+            message: "Codex CLI is not authenticated.",
+          } satisfies ServerProvider;
+          const cases = [
+            { cached: cachedProvider, current: erroredProvider },
+            { cached: cachedProvider, current: unauthenticatedProvider },
+            { cached: erroredProvider, current: cachedProvider },
+          ];
+
+          for (const { cached, current } of cases) {
+            const { providers } = yield* bootFromCache({ cached, current, hasProbed: true });
+            assert.deepStrictEqual(providers.map(lastKnownStatus), [lastKnownStatus(current)]);
+          }
+        }).pipe(
+          Effect.provide(
+            ServerConfig.layerTest(process.cwd(), {
+              prefix: "t3-codex-probed-status-cache-",
             }).pipe(Layer.provideMerge(NodeServices.layer)),
           ),
         ),

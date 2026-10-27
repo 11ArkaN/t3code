@@ -422,6 +422,9 @@ export const layer = Layer.effect(
       new Map(),
     );
     const syncSemaphore = yield* Semaphore.make(1);
+    // Only the first sync defers to the cache; later syncs (added or rebuilt instances) read as usual.
+    const hydratedBootInstanceIds = new Set(cachedProviders.map(snapshotInstanceKey));
+    const pendingHydratedInstanceIdsRef = yield* Ref.make(hydratedBootInstanceIds);
 
     const getLiveSources: Effect.Effect<ReadonlyArray<ProviderSnapshotSource>> = Ref.get(
       liveSubsRef,
@@ -738,120 +741,123 @@ export const layer = Layer.effect(
       return yield* instance.snapshot.resolveMaintenance(options);
     });
 
-    const syncLiveSources = (
-      pendingBootSnapshots: ReadonlyMap<ProviderInstanceId, ServerProvider> = new Map(),
-    ) =>
-      syncSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const instances = yield* instanceRegistry.listInstances;
-          const unavailableProviders = yield* instanceRegistry.listUnavailable;
-          const nextByInstance = new Map<ProviderInstanceId, ProviderInstance>(
-            instances.map((instance) => [instance.instanceId, instance] as const),
-          );
-          const knownInstanceIds = new Set<ProviderInstanceId>(nextByInstance.keys());
-          for (const provider of unavailableProviders) {
-            knownInstanceIds.add(snapshotInstanceKey(provider));
+    const syncLiveSources = syncSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const instances = yield* instanceRegistry.listInstances;
+        const unavailableProviders = yield* instanceRegistry.listUnavailable;
+        const nextByInstance = new Map<ProviderInstanceId, ProviderInstance>(
+          instances.map((instance) => [instance.instanceId, instance] as const),
+        );
+        const knownInstanceIds = new Set<ProviderInstanceId>(nextByInstance.keys());
+        for (const provider of unavailableProviders) {
+          knownInstanceIds.add(snapshotInstanceKey(provider));
+        }
+        const previousSubs = yield* Ref.get(liveSubsRef);
+        const hydratedInstanceIds = yield* Ref.getAndSet(pendingHydratedInstanceIdsRef, new Set());
+
+        const carriedOver = new Map<ProviderInstanceId, ProviderInstance>();
+        for (const [instanceId, previousInstance] of previousSubs) {
+          const nextInstance = nextByInstance.get(instanceId);
+          if (nextInstance !== undefined && nextInstance === previousInstance) {
+            carriedOver.set(instanceId, previousInstance);
           }
-          const previousSubs = yield* Ref.get(liveSubsRef);
+        }
 
-          const carriedOver = new Map<ProviderInstanceId, ProviderInstance>();
-          for (const [instanceId, previousInstance] of previousSubs) {
-            const nextInstance = nextByInstance.get(instanceId);
-            if (nextInstance !== undefined && nextInstance === previousInstance) {
-              carriedOver.set(instanceId, previousInstance);
-            }
+        const newlyAdded: Array<readonly [ProviderInstanceId, ProviderInstance]> = [];
+        for (const [instanceId, instance] of nextByInstance) {
+          if (carriedOver.has(instanceId)) {
+            continue;
           }
+          newlyAdded.push([instanceId, instance] as const);
+        }
 
-          const newlyAdded: Array<readonly [ProviderInstanceId, ProviderInstance]> = [];
-          for (const [instanceId, instance] of nextByInstance) {
-            if (carriedOver.has(instanceId)) {
-              continue;
-            }
-            newlyAdded.push([instanceId, instance] as const);
-          }
-
-          const rebuiltInstanceIds = new Set(
-            newlyAdded
-              .map(([instanceId]) => instanceId)
-              .filter((instanceId) => previousSubs.has(instanceId)),
-          );
-          if (rebuiltInstanceIds.size > 0) {
-            const [previousProviders, providers] = yield* Ref.modify(
-              providersRef,
-              (previousProviders) => {
-                const providers = previousProviders.map((provider) => {
-                  if (!rebuiltInstanceIds.has(provider.instanceId)) return provider;
-                  const { workspaceSnapshots: _workspaceSnapshots, ...machineSnapshot } = provider;
-                  return machineSnapshot;
-                });
-                return [[previousProviders, providers] as const, providers];
-              },
-            );
-            if (haveProvidersChanged(previousProviders, providers)) {
-              yield* PubSub.publish(changesPubSub, providers);
-            }
-          }
-
-          // Subscribe before reading so a probe completing mid-sync is observed by at least one path.
-          for (const [, instance] of newlyAdded) {
-            const source = buildSnapshotSource(instance);
-            yield* Stream.runForEach(source.streamChanges, (provider) =>
-              correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
-            ).pipe(Effect.forkScoped);
-          }
-          yield* Effect.yieldNow;
-
-          yield* Effect.forEach(
-            newlyAdded,
-            ([, instance]) =>
-              Effect.gen(function* () {
-                const source = buildSnapshotSource(instance);
-                const provider = yield* source.getSnapshot;
-                // Until the boot probe reports, the hydrated cache entry is the better last-known status.
-                if (Equal.equals(provider, pendingBootSnapshots.get(source.instanceId))) return;
-                yield* correlateSnapshotWithSource(source, provider).pipe(
-                  Effect.flatMap(syncProvider),
-                );
-              }).pipe(Effect.ignoreCause({ log: true })),
-            { concurrency: "unbounded", discard: true },
-          );
-          yield* upsertProviders(unavailableProviders, {
-            persist: false,
-            replace: true,
-          });
-
-          const nextSubs = new Map(carriedOver);
-          for (const [instanceId, instance] of newlyAdded) {
-            nextSubs.set(instanceId, instance);
-          }
-          yield* Ref.set(liveSubsRef, nextSubs);
-
+        const rebuiltInstanceIds = new Set(
+          newlyAdded
+            .map(([instanceId]) => instanceId)
+            .filter((instanceId) => previousSubs.has(instanceId)),
+        );
+        if (rebuiltInstanceIds.size > 0) {
           const [previousProviders, providers] = yield* Ref.modify(
             providersRef,
             (previousProviders) => {
-              const providers = orderProviderSnapshots(
-                previousProviders.filter((provider) =>
-                  knownInstanceIds.has(snapshotInstanceKey(provider)),
-                ),
-              );
+              const providers = previousProviders.map((provider) => {
+                if (!rebuiltInstanceIds.has(provider.instanceId)) return provider;
+                const { workspaceSnapshots: _workspaceSnapshots, ...machineSnapshot } = provider;
+                return machineSnapshot;
+              });
               return [[previousProviders, providers] as const, providers];
             },
           );
           if (haveProvidersChanged(previousProviders, providers)) {
             yield* PubSub.publish(changesPubSub, providers);
           }
-          yield* Ref.update(maintenanceActionStatesRef, (previous) => {
-            const next = new Map(previous);
-            for (const instanceId of previous.keys()) {
-              if (!knownInstanceIds.has(instanceId)) {
-                next.delete(instanceId);
+        }
+
+        // Subscribe before reading so a probe completing mid-sync is observed by at least one path.
+        for (const [, instance] of newlyAdded) {
+          const source = buildSnapshotSource(instance);
+          yield* Stream.runForEach(source.streamChanges, (provider) =>
+            correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider)),
+          ).pipe(Effect.forkScoped);
+        }
+        yield* Effect.yieldNow;
+
+        yield* Effect.forEach(
+          newlyAdded,
+          ([instanceId, instance]) =>
+            Effect.gen(function* () {
+              // Until the first probe lands, the hydrated cache entry beats the pending placeholder.
+              if (
+                hydratedInstanceIds.has(instanceId) &&
+                !(yield* instance.snapshot.hasProbed ?? Effect.succeed(true))
+              ) {
+                return;
               }
+              const source = buildSnapshotSource(instance);
+              const provider = yield* source.getSnapshot;
+              yield* correlateSnapshotWithSource(source, provider).pipe(
+                Effect.flatMap(syncProvider),
+              );
+            }).pipe(Effect.ignoreCause({ log: true })),
+          { concurrency: "unbounded", discard: true },
+        );
+        yield* upsertProviders(unavailableProviders, {
+          persist: false,
+          replace: true,
+        });
+
+        const nextSubs = new Map(carriedOver);
+        for (const [instanceId, instance] of newlyAdded) {
+          nextSubs.set(instanceId, instance);
+        }
+        yield* Ref.set(liveSubsRef, nextSubs);
+
+        const [previousProviders, providers] = yield* Ref.modify(
+          providersRef,
+          (previousProviders) => {
+            const providers = orderProviderSnapshots(
+              previousProviders.filter((provider) =>
+                knownInstanceIds.has(snapshotInstanceKey(provider)),
+              ),
+            );
+            return [[previousProviders, providers] as const, providers];
+          },
+        );
+        if (haveProvidersChanged(previousProviders, providers)) {
+          yield* PubSub.publish(changesPubSub, providers);
+        }
+        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
+          const next = new Map(previous);
+          for (const instanceId of previous.keys()) {
+            if (!knownInstanceIds.has(instanceId)) {
+              next.delete(instanceId);
             }
-            return next;
-          });
-        }),
-      );
-    const syncLiveSourcesAndContinue = syncLiveSources().pipe(
+          }
+          return next;
+        });
+      }),
+    );
+    const syncLiveSourcesAndContinue = syncLiveSources.pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;
@@ -865,19 +871,14 @@ export const layer = Layer.effect(
       }),
     );
 
-    const hydratedInstanceIds = new Set(cachedProviders.map(snapshotInstanceKey));
     yield* upsertProviders(
       fallbackProviders.filter(
-        (provider) => !hydratedInstanceIds.has(snapshotInstanceKey(provider)),
+        (provider) => !hydratedBootInstanceIds.has(snapshotInstanceKey(provider)),
       ),
       { publish: false },
     );
     const instanceChanges = yield* instanceRegistry.subscribeChanges;
-    yield* syncLiveSources(
-      new Map(
-        [...fallbackByInstance].filter(([instanceId]) => hydratedInstanceIds.has(instanceId)),
-      ),
-    );
+    yield* syncLiveSources;
     yield* Stream.runForEach(
       Stream.fromSubscription(instanceChanges),
       () => syncLiveSourcesAndContinue,

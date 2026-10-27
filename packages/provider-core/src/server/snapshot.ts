@@ -9,6 +9,8 @@ export interface ManagedServerProvider {
     readonly fresh?: boolean;
   }) => Effect.Effect<ProviderMaintenanceCapabilities>;
   readonly getSnapshot: Effect.Effect<ServerProvider>;
+  /** False until the first provider check has been published; absent means already probed. */
+  readonly hasProbed?: Effect.Effect<boolean>;
   readonly refresh: Effect.Effect<ServerProvider>;
   readonly streamChanges: Stream.Stream<ServerProvider>;
   /** Merge windows by ID; updates with no usable window leave the snapshot untouched. */
