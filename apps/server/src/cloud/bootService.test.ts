@@ -5,6 +5,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -965,6 +966,26 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       yield* Fiber.join(reinstall);
 
       expect(control.launchd.loaded).toBe(true);
+    }),
+  );
+
+  it.effect("keeps the launch agent installed when it is still loaded at the stop deadline", () =>
+    Effect.gen(function* () {
+      const { service, control, fs } = yield* makeHarness("darwin");
+      const plan = yield* service.install();
+      control.launchd = { loaded: true, exitPrints: Number.POSITIVE_INFINITY };
+      const polling = yield* Deferred.make<void>();
+      control.onCommand = (command) =>
+        command.startsWith("launchctl print ")
+          ? Deferred.succeed(polling, undefined).pipe(Effect.asVoid)
+          : Effect.void;
+
+      const uninstall = yield* service.uninstall.pipe(Effect.exit, Effect.forkChild);
+      yield* Deferred.await(polling);
+      yield* TestClock.adjust("121 seconds");
+
+      expect(Exit.isFailure(yield* Fiber.join(uninstall))).toBe(true);
+      expect(yield* fs.exists(plan.unitPath)).toBe(true);
     }),
   );
 

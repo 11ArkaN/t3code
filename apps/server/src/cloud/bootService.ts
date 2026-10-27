@@ -303,11 +303,11 @@ function launchdManager(input: {
   // Unloaded jobs may reject bootout/enable. Bootstrap starts RunAtLoad/KeepAlive jobs; kickstart would restart them.
   // bootout can return (0, or 36 EINPROGRESS) while the job drains through ExitTimeOut, and a bootstrap
   // then fails EIO, so wait until `print` no longer finds the label. macOS 15 rejects `bootout --wait`.
+  // Not optional: an unloaded job passes the wait, and one still loaded at the deadline must stop the caller.
   const bootout = {
     command: "launchctl",
     args: ["bootout", serviceTarget],
     waitWhile: ["print", serviceTarget],
-    optional: true,
     timeout: STOP_STEP_TIMEOUT,
   };
   return {
