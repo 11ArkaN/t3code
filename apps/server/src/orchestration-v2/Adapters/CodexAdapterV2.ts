@@ -47,6 +47,7 @@ import {
 } from "@t3tools/shared/toolActivity";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { truncate } from "@t3tools/shared/String";
 import type {
   ChatAttachment,
   OrchestrationV2AppThread,
@@ -2369,6 +2370,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             readonly completedAt?: DateTime.Utc | null;
             readonly startedAt?: DateTime.Utc;
             readonly reopen?: boolean;
+            readonly progress?: string;
           }) {
             const now = yield* DateTime.now;
             const prior = input.subagent.task;
@@ -2379,8 +2381,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             const completedAt = isOrchestrationV2WorkActive(status)
               ? null
               : (prior.completedAt ?? input.completedAt ?? now);
+            const { progress: priorProgress, ...priorTask } = prior;
+            const progress = input.progress ?? (input.reopen ? undefined : priorProgress);
             const task = {
-              ...prior,
+              ...priorTask,
+              ...(progress === undefined ? {} : { progress }),
               status,
               ...(input.reopen
                 ? {
@@ -2427,8 +2432,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 childThreadId: task.childThreadId,
                 prompt: task.prompt,
                 result: task.result,
+                ...(task.progress === undefined ? {} : { progress: task.progress }),
               },
             });
+          });
+
+        const reportSubagentProgress =
+          /* Provider events include streaming deltas; avoid a span for each update. */
+          Effect.fnUntraced(function* (context: ActiveCodexTurnContext, text: string) {
+            const subagent = context.subagent;
+            if (subagent === null || !isOrchestrationV2WorkActive(subagent.task.status)) return;
+            const progress = truncate(text.trim().split("\n", 1)[0] ?? "", 120);
+            if (progress.length === 0 || progress === subagent.task.progress) return;
+            yield* emitSubagentTaskUpdate({ subagent, status: subagent.task.status, progress });
           });
 
         const emitSubagentProviderTurnStarted =
@@ -4692,6 +4708,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 driver: CODEX_PROVIDER,
                 turnItem: artifacts.turnItem,
               });
+              yield* reportSubagentProgress(context, payload.item.command);
               return;
             }
 
@@ -4710,6 +4727,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 driver: CODEX_PROVIDER,
                 turnItem: artifacts.turnItem,
               });
+              yield* reportSubagentProgress(context, artifacts.turnItem.title ?? payload.item.tool);
               return;
             }
 
@@ -5026,6 +5044,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               !finalAnswer ||
               completedTextsBefore.size === 0 ||
               (text.length > 0 && !completedTextsBefore.has(text));
+            if (!finalAnswer) yield* reportSubagentProgress(context, text);
             if (emitted && context.subagent !== null && finalAnswer) {
               yield* emitSubagentTaskUpdate({
                 subagent: context.subagent,

@@ -5421,6 +5421,82 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect("reports native child commentary as progress and drops it when the child resumes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const entries = resumeSubagentTranscript.entries;
+        const firstAnswer = entries.findIndex(
+          (entry) =>
+            entry.type === "emit_inbound" && entry.label === "item/completed/child-first-answer",
+        );
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: RESUME_SCENARIO,
+            entries: [
+              ...entries.slice(0, firstAnswer),
+              {
+                type: "emit_inbound",
+                label: "item/completed/child-commentary",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    item: {
+                      type: "agentMessage",
+                      id: "child-commentary",
+                      text: "  Checking the workspace\nthen reading every file",
+                      phase: "commentary",
+                      memoryCitation: null,
+                    },
+                    threadId: RESUME_CHILD_THREAD,
+                    turnId: RESUME_CHILD_TURN_1,
+                    completedAtMs: 1782622441900,
+                  },
+                },
+              },
+              ...entries.slice(firstAnswer),
+            ],
+          }),
+        );
+
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-codex-child-commentary"),
+            text: RESUME_PROMPT,
+          }),
+        );
+        yield* TestClock.adjust("100 millis");
+        yield* harness.awaitTerminal(1);
+        const progressUpdates = harness
+          .subagentUpdates()
+          .filter((event) => event.subagent.progress === "Checking the workspace");
+        assert.equal(progressUpdates[0]?.subagent.status, "running");
+        assert.isTrue(
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "subagent" &&
+              event.turnItem.progress === "Checking the workspace",
+          ),
+        );
+        const settledUpdateCount = harness.subagentUpdates().length;
+        assert.equal(harness.subagentUpdates().at(-1)?.subagent.status, "completed");
+
+        yield* TestClock.adjust("30 seconds");
+        yield* harness.until(() => harness.subagentUpdates().length > settledUpdateCount);
+        const reopened = harness.subagentUpdates()[settledUpdateCount]?.subagent;
+        assert.equal(reopened?.status, "running");
+        assert.isUndefined(reopened?.progress);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("reports a running native child's current command as subagent progress", () =>
     Effect.scoped(
       Effect.gen(function* () {
