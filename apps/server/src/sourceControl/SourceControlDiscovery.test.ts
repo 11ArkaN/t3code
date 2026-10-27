@@ -184,12 +184,12 @@ it.effect("explains a hosting CLI whose version probe failed instead of advising
     const authDetail = (name: string) => Option.getOrElse(item(name).auth.detail, () => "");
 
     assert.notInclude(item("slow").installHint, "Install slow.");
-    assert.match(item("slow").installHint, /timed out/i);
-    assert.notInclude(authDetail("slow"), "not found on the server PATH");
+    assert.include(item("slow").installHint, "timed out after 5000ms");
+    assert.strictEqual(authDetail("slow"), item("slow").installHint);
 
     assert.notInclude(item("broken").installHint, "Install broken.");
-    assert.match(item("broken").installHint, /exit\w*.*\b1\b/i);
-    assert.notInclude(authDetail("broken"), "not found on the server PATH");
+    assert.include(item("broken").installHint, "exited with status 1");
+    assert.strictEqual(authDetail("broken"), item("broken").installHint);
 
     assert.strictEqual(item("absent").installHint, "Install absent.");
   }).pipe(
