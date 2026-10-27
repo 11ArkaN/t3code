@@ -110,6 +110,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Exit from "effect/Exit";
@@ -4558,7 +4559,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const wakeBuffers = yield* Ref.make(
           new Map<
             string,
-            { readonly messages: ReadonlyArray<SDKMessage>; readonly detail: string | null }
+            {
+              readonly messages: ReadonlyArray<SDKMessage>;
+              readonly detail: string | null;
+              readonly wakeNotificationBufferedAtMs: number | null;
+            }
           >(),
         );
         // Wake results lack task ids and can follow queued prompts; retain reports for one user turn.
@@ -7608,12 +7613,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               childThreadId: registered?.childThreadId,
             });
           }
+          const bufferedAtMs = isPendingTaskNotification ? yield* Clock.currentTimeMillis : null;
           yield* Ref.update(wakeBuffers, (current) => {
             const existing = current.get(wakeInput.nativeThreadId);
             const updated = new Map(current);
             updated.set(wakeInput.nativeThreadId, {
               messages: [...(existing?.messages ?? []), message],
               detail: notificationSummary ?? existing?.detail ?? null,
+              wakeNotificationBufferedAtMs:
+                bufferedAtMs ?? existing?.wakeNotificationBufferedAtMs ?? null,
             });
             return updated;
           });
@@ -10565,11 +10573,23 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (nativeThreadId === undefined || nativeThreadId === null) {
               return false;
             }
-            return (
+            if (
               rosterForNativeThread(
                 yield* Ref.get(pendingBackgroundTasksByNativeThread),
                 nativeThreadId,
               ).size > 0
+            ) {
+              return true;
+            }
+            // A finished task's notification will wake Claude unless no wake frame ever follows.
+            const buffered = (yield* Ref.get(wakeBuffers)).get(nativeThreadId);
+            return (
+              buffered?.wakeNotificationBufferedAtMs != null &&
+              buffered.messages.some(
+                (message) => message.type === "system" && message.subtype === "task_notification",
+              ) &&
+              (yield* Clock.currentTimeMillis) - buffered.wakeNotificationBufferedAtMs <
+                Duration.toMillis(CLAUDE_WAKE_TURN_START_DEADLINE)
             );
           }),
           ensureThread: Effect.fn("ClaudeAdapterV2.ensureThread")(

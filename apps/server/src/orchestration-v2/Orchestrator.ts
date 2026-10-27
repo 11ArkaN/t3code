@@ -9152,6 +9152,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
   });
 
+  const stillReportsBackgroundWork = Effect.fn("Orchestrator.stillReportsBackgroundWork")(
+    function* (providerThread: OrchestrationV2ProviderThread) {
+      if (providerThread.providerSessionId == null) return false;
+      const session = yield* providerSessions
+        .get(providerThread.providerSessionId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      if (Option.isNone(session) || session.value.hasPendingBackgroundWorkForThread === undefined) {
+        return false;
+      }
+      return yield* session.value
+        .hasPendingBackgroundWorkForThread(providerThread)
+        // A failed probe cannot confirm that the work ended.
+        .pipe(Effect.catchCause(() => Effect.succeed(true)));
+    },
+  );
+
   const settleBackgroundWork = Effect.fn("Orchestrator.settleBackgroundWork")(function* (input: {
     readonly command: Extract<
       OrchestrationV2ServerCommand,
@@ -9191,21 +9207,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
       liveness.set(providerThreadId, live);
       return live;
-    });
-    const stillReportsBackgroundWork = Effect.fnUntraced(function* (
-      providerThread: OrchestrationV2ProviderThread,
-    ) {
-      if (providerThread.providerSessionId == null) return false;
-      const session = yield* providerSessions
-        .get(providerThread.providerSessionId)
-        .pipe(Effect.orElseSucceed(() => Option.none()));
-      if (Option.isNone(session) || session.value.hasPendingBackgroundWorkForThread === undefined) {
-        return false;
-      }
-      return yield* session.value
-        .hasPendingBackgroundWorkForThread(providerThread)
-        // A failed probe cannot confirm that the work ended.
-        .pipe(Effect.catchCause(() => Effect.succeed(true)));
     });
     for (const item of pendingBackgroundTurnItems({
       turnItems: input.projection.turnItems,
@@ -11835,6 +11836,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             commandType: command.type,
             cause: `Thread ${command.threadId} changed before automatic settlement.`,
           });
+        }
+        const { providerThreads } = yield* projectionStore
+          .getThreadRecords(command.threadId, ["providerThreads"])
+          .pipe(
+            Effect.mapError(
+              (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+            ),
+          );
+        for (const providerThread of providerThreads) {
+          if (yield* stillReportsBackgroundWork(providerThread)) {
+            return yield* new OrchestratorDispatchError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: `Thread ${command.threadId} still has background work.`,
+            });
+          }
         }
         yield* dispatchThreadMutation(
           {

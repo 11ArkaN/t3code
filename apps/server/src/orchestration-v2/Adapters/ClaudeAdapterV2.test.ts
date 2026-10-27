@@ -8903,44 +8903,65 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  const bufferNotificationAfterRosterEmpties = Effect.gen(function* () {
+    const harness = yield* makeWakeHarness;
+    const hasPendingBackgroundWorkForThread = harness.runtime.hasPendingBackgroundWorkForThread;
+    if (hasPendingBackgroundWorkForThread === undefined) {
+      return yield* Effect.die(
+        "Claude adapter runtime must expose hasPendingBackgroundWorkForThread.",
+      );
+    }
+    const now = yield* DateTime.now;
+
+    yield* harness.runtime.startTurn(
+      makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now,
+        attemptId: RunAttemptId.make("attempt-claude-wake-gap"),
+        text: "Run the build in the background.",
+        attachments: [],
+      }),
+    );
+    yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
+    yield* Queue.offer(harness.sdkMessages, turnOneResult);
+    yield* harness.awaitTerminal(1);
+    assert.isTrue(yield* hasPendingBackgroundWorkForThread(harness.providerThread));
+
+    yield* harness.offerAndWait(wakeNotification);
+    yield* harness.until(
+      () =>
+        (providerThreadRosterEvents(harness.events).at(-1)?.providerThread.pendingBackgroundTasks
+          ?.length ?? 0) === 0,
+    );
+    assert.lengthOf(harness.continuationRequests, 0);
+    return () => hasPendingBackgroundWorkForThread(harness.providerThread);
+  });
+
   it.effect("keeps the thread's background work pending until the wake turn claims it", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const harness = yield* makeWakeHarness;
-        const hasPendingBackgroundWorkForThread = harness.runtime.hasPendingBackgroundWorkForThread;
-        if (hasPendingBackgroundWorkForThread === undefined) {
-          return yield* Effect.die(
-            "Claude adapter runtime must expose hasPendingBackgroundWorkForThread.",
-          );
-        }
-        const now = yield* DateTime.now;
-
-        yield* harness.runtime.startTurn(
-          makeClaudeTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-claude-wake-gap"),
-            text: "Run the build in the background.",
-            attachments: [],
-          }),
-        );
-        yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
-        yield* Queue.offer(harness.sdkMessages, turnOneResult);
-        yield* harness.awaitTerminal(1);
-        assert.isTrue(yield* hasPendingBackgroundWorkForThread(harness.providerThread));
-
-        yield* harness.offerAndWait(wakeNotification);
-        yield* harness.until(
-          () =>
-            (providerThreadRosterEvents(harness.events).at(-1)?.providerThread
-              .pendingBackgroundTasks?.length ?? 0) === 0,
-        );
-        assert.lengthOf(harness.continuationRequests, 0);
+        const hasPendingWork = yield* bufferNotificationAfterRosterEmpties;
         assert.isTrue(
-          yield* hasPendingBackgroundWorkForThread(harness.providerThread),
+          yield* hasPendingWork(),
           "the buffered task notification will wake Claude, so the thread still has background work",
         );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("stops holding the thread for a notification whose wake turn never opens", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const hasPendingWork = yield* bufferNotificationAfterRosterEmpties;
+        yield* TestClock.adjust("119 seconds");
+        assert.isTrue(yield* hasPendingWork());
+        yield* TestClock.adjust("1 second");
+        assert.isFalse(yield* hasPendingWork());
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
