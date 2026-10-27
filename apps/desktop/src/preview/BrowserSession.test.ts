@@ -198,44 +198,44 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("denies geolocation on macOS, where it can never yield a position", () =>
-    Effect.gen(function* () {
-      const browserSessions = yield* BrowserSession.BrowserSession;
-      const partition = yield* browserSessions.getPartition("scope-a");
-      yield* browserSessions.getSession("scope-a");
+  it.effect(
+    "denies geolocation on macOS, where Electron cannot request location authorization",
+    () =>
+      Effect.gen(function* () {
+        const browserSessions = yield* BrowserSession.BrowserSession;
+        const partition = yield* browserSessions.getPartition("scope-a");
+        yield* browserSessions.getSession("scope-a");
 
-      const browserSession = sessions.get(partition);
-      assert.isDefined(browserSession);
-      const requestHandler = browserSession.setPermissionRequestHandler.mock.calls[0]?.[0];
-      const checkHandler = browserSession.setPermissionCheckHandler.mock.calls[0]?.[0];
-      assert.isFunction(requestHandler);
-      assert.isFunction(checkHandler);
+        const browserSession = sessions.get(partition);
+        assert.isDefined(browserSession);
+        const requestHandler = browserSession.setPermissionRequestHandler.mock.calls[0]?.[0];
+        const checkHandler = browserSession.setPermissionCheckHandler.mock.calls[0]?.[0];
+        assert.isFunction(requestHandler);
+        assert.isFunction(checkHandler);
 
-      const requestAllows = (permission: string): boolean => {
-        let granted: boolean | undefined;
-        requestHandler(null, permission, (value: boolean) => {
-          granted = value;
-        });
-        assert.isDefined(granted);
-        return granted;
-      };
+        const requestAllows = (permission: string): boolean => {
+          let granted: boolean | undefined;
+          requestHandler(null, permission, (value: boolean) => {
+            granted = value;
+          });
+          assert.isDefined(granted);
+          return granted;
+        };
 
-      // Chromium waits on CoreLocation app authorization that Electron cannot request,
-      // so a grant reports "granted" and then times out.
-      assert.isFalse(requestAllows("geolocation"), "request handler should deny geolocation");
-      assert.isFalse(
-        checkHandler(null, "geolocation") as boolean,
-        "check handler should deny geolocation",
-      );
-
-      for (const permission of ["clipboard-read", "clipboard-sanitized-write", "fullscreen"]) {
-        assert.isTrue(requestAllows(permission), `request handler should allow ${permission}`);
-        assert.isTrue(
-          checkHandler(null, permission) as boolean,
-          `check handler should allow ${permission}`,
+        assert.isFalse(requestAllows("geolocation"), "request handler should deny geolocation");
+        assert.isFalse(
+          checkHandler(null, "geolocation") as boolean,
+          "check handler should deny geolocation",
         );
-      }
-    }).pipe(Effect.provide(layerFor("darwin"))),
+
+        for (const permission of ["clipboard-read", "clipboard-sanitized-write", "fullscreen"]) {
+          assert.isTrue(requestAllows(permission), `request handler should allow ${permission}`);
+          assert.isTrue(
+            checkHandler(null, permission) as boolean,
+            `check handler should allow ${permission}`,
+          );
+        }
+      }).pipe(Effect.provide(layerFor("darwin"))),
   );
 
   it.effect("opens custom-scheme links externally only after the user confirms", () =>
