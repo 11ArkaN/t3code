@@ -245,6 +245,12 @@ export const AntigravityDriver: ProviderDriver<
           ? undefined
           : yield* serveAntigravityAuthorizationUrlSink(input.onAuthorizationUrl).pipe(
               Effect.provideService(Crypto.Crypto, crypto),
+              // The helper still reports the URL on stderr, which reaches T3 outside Windows.
+              Effect.catch((error) =>
+                Effect.logWarning("The Antigravity sign-in URL listener could not start.", {
+                  error,
+                }).pipe(Effect.as(undefined)),
+              ),
             );
       const runtime = yield* makeAntigravityAcpRuntime({
         ...input,
