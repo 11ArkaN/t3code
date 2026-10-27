@@ -39,6 +39,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UICollectionView {
+        context.coordinator.openURL = context.environment.openURL
         var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
         configuration.backgroundColor = T3Colors.uiBackground
         configuration.showsSeparators = false
@@ -63,6 +64,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
     }
 
     func updateUIView(_ collectionView: UICollectionView, context: Context) {
+        context.coordinator.openURL = context.environment.openURL
         context.coordinator.update(parent: self, collectionView: collectionView)
     }
 
@@ -85,6 +87,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
         }
 
         private var parent: HomeThreadCollectionView
+        var openURL = OpenURLAction { _ in .systemAction }
         private var dataSource: UICollectionViewDiffableDataSource<Section, HomeCollectionItem.ID>?
         private var registration: UICollectionView.CellRegistration<HomeCollectionCell, HomeCollectionItem.ID>?
         private var itemsByID: [HomeCollectionItem.ID: HomeCollectionItem] = [:]
@@ -102,6 +105,11 @@ struct HomeThreadCollectionView: UIViewRepresentable {
         init(parent: HomeThreadCollectionView) {
             self.parent = parent
             selectedThreadID = parent.selectedThreadID
+        }
+
+        private func openPullRequest(_ thread: FeatureThread, _ presentation: HomeThreadPullRequestPresentation) {
+            if case let .open(url) = presentation.action { openURL(url) }
+            else { parent.onOpenPullRequest(thread, presentation) }
         }
 
         func configure(_ collectionView: UICollectionView) {
@@ -399,7 +407,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
                     isSelected: identifier.threadID == selectedThreadID,
                     now: now,
                     onOpenPullRequest: { [weak self] thread, presentation in
-                        self?.parent.onOpenPullRequest(thread, presentation)
+                        self?.openPullRequest(thread, presentation)
                     },
                     onPullRequestChange: { [weak self, weak cell] pullRequest in
                         guard let self,
@@ -557,7 +565,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
             if let pullRequest = pullRequestsByThreadID[thread.id] {
                 let title = if case .open = pullRequest.action { "Open pull request" } else { "Show linked pull requests" }
                 actions.append(accessibilityAction(title, systemImage: "arrow.triangle.pull") { coordinator in
-                    coordinator.parent.onOpenPullRequest(thread, pullRequest)
+                    coordinator.openPullRequest(thread, pullRequest)
                 })
             }
             if let title = Self.newTaskOnBranchTitle(thread) {

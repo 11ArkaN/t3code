@@ -39,16 +39,33 @@ struct TranscriptViewportGeometryTests {
         #expect(view.contentOffset.y == 2_400)
         let button = try #require(view.subviews.compactMap { $0 as? UIButton }.first)
         #expect(button.isHidden)
+        view.contentOffset.y = 2_250
+        view.removeFromSuperview()
+        controller.view.addSubview(view)
+        view.layoutIfNeeded()
+        #expect(view.contentOffset.y == 2_400)
 
         view.maintainsBottomAnchor = false
         view.contentOffset.y = 500
         view.layoutIfNeeded()
+        view.removeFromSuperview()
+        controller.view.addSubview(view)
+        view.layoutIfNeeded()
+        #expect(view.contentOffset.y == 500)
+        #expect(!view.maintainsBottomAnchor)
         #expect(!button.isHidden)
         #expect(view.bounds.contains(button.frame))
         button.sendActions(for: .touchUpInside)
         #expect(view.contentOffset.y == 2_400)
         #expect(view.maintainsBottomAnchor)
         #expect(button.isHidden)
+
+        view.setContentOffset(CGPoint(x: 0, y: 1_900), animated: false)
+        view.layoutIfNeeded()
+        #expect(view.contentOffset.y == 1_900)
+        #expect(!view.maintainsBottomAnchor)
+        button.sendActions(for: .touchUpInside)
+        #expect(view.maintainsBottomAnchor)
 
         layout.height = 3_200
         layout.invalidateLayout()
@@ -58,6 +75,99 @@ struct TranscriptViewportGeometryTests {
         view.layoutIfNeeded()
         #expect(view.contentOffset.y == 2_850)
         #expect(button.isHidden)
+    }
+
+    @Test
+    @MainActor
+    func reflowKeepsTheVisibleCharacterInsideOneLongMessage() throws {
+        let viewport = UIScrollView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
+        viewport.contentInsetAdjustmentBehavior = .never
+        let cell = UIView()
+        let text = UITextView()
+        text.isScrollEnabled = false
+        text.font = .systemFont(ofSize: 17)
+        text.text = (0..<100).map { "Paragraph \($0): A long response wraps differently when the phone unfolds or rotates." }
+            .joined(separator: "\n\n")
+        cell.addSubview(text)
+        viewport.addSubview(cell)
+        func resize(_ width: CGFloat) {
+            viewport.frame.size.width = width
+            let height = text.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height
+            text.frame = CGRect(x: 0, y: 0, width: width, height: height)
+            cell.frame = text.frame
+            viewport.contentSize = cell.frame.size
+            text.layoutIfNeeded()
+        }
+        resize(400)
+        viewport.contentOffset.y = 700
+        let position = try #require(text.closestPosition(to: CGPoint(x: text.textContainerInset.left, y: 700)))
+        let character = text.offset(from: text.beginningOfDocument, to: position)
+        let offset = text.convert(text.caretRect(for: position), to: viewport).minY - viewport.contentOffset.y
+        let anchor = try #require(TranscriptTextAnchor.capture(in: cell, viewport: viewport))
+        resize(200)
+        viewport.contentOffset.y = try #require(anchor.targetOffset(in: cell, viewport: viewport))
+        let sameCharacter = try #require(text.position(from: text.beginningOfDocument, offset: character))
+        let newOffset = text.convert(text.caretRect(for: sameCharacter), to: viewport).minY - viewport.contentOffset.y
+        #expect(abs(newOffset - offset) < 1)
+        #expect(viewport.contentOffset.y > 1_000)
+    }
+
+    @Test
+    @MainActor
+    func widthChangesKeepTheSameMessageAtTheSameReadingPosition() {
+        let layout = ReflowingTranscriptLayout()
+        let view = BottomAnchoredTranscriptCollectionView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 600), collectionViewLayout: layout
+        )
+        let dataSource = FixedTranscriptDataSource(count: 20)
+        defer { withExtendedLifetime(dataSource) {} }
+        view.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "message")
+        view.dataSource = dataSource
+        view.contentInsetAdjustmentBehavior = .never
+        let controller = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.addSubview(view)
+        view.layoutIfNeeded()
+        view.maintainsBottomAnchor = false
+        view.contentOffset.y = 500
+        view.layoutIfNeeded()
+
+        // UIKit can repeat the current offset before starting a resize.
+        // That must not discard the reading position from the last layout.
+        view.setContentOffset(view.contentOffset, animated: false)
+
+        view.frame.size.width = 195
+        view.layoutIfNeeded()
+        #expect(abs(view.contentOffset.y - 900) < 1)
+        #expect(!view.maintainsBottomAnchor)
+
+        layout.heightBeforeRows = 120
+        layout.invalidateLayout()
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        #expect(abs(view.contentOffset.y - 1_020) < 1)
+
+        view.frame.size.width = 390
+        view.layoutIfNeeded()
+        #expect(abs(view.contentOffset.y - 620) < 1)
+        #expect(!view.maintainsBottomAnchor)
+
+        layout.heightBeforeRows = 0
+        layout.invalidateLayout()
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        #expect(abs(view.contentOffset.y - 500) < 1)
+
+        // Keyboard, accessibility, and prepend restoration use this UIKit API
+        // without a drag. A pending width anchor must yield to that scroll.
+        view.setContentOffset(CGPoint(x: 0, y: 200), animated: false)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        #expect(abs(view.contentOffset.y - 200) < 1)
+        #expect(!view.maintainsBottomAnchor)
     }
 
     @Test
@@ -297,8 +407,36 @@ private final class FixedTranscriptLayout: UICollectionViewLayout {
 
 @MainActor
 private final class FixedTranscriptDataSource: NSObject, UICollectionViewDataSource {
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { 1 }
+    let count: Int
+    init(count: Int = 1) { self.count = count }
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { count }
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         collectionView.dequeueReusableCell(withReuseIdentifier: "message", for: indexPath)
+    }
+}
+
+@MainActor
+private final class ReflowingTranscriptLayout: UICollectionViewLayout {
+    var heightBeforeRows: CGFloat = 0
+    private var rowHeight: CGFloat { 78_000 / max(1, collectionView?.bounds.width ?? 390) }
+
+    override var collectionViewContentSize: CGSize {
+        CGSize(width: collectionView?.bounds.width ?? 390, height: rowHeight * 20 + heightBeforeRows)
+    }
+
+    override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
+        newBounds.width != collectionView?.bounds.width
+    }
+
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        attributes.frame = CGRect(x: 0, y: CGFloat(indexPath.item) * rowHeight + heightBeforeRows,
+                                  width: collectionView?.bounds.width ?? 390, height: rowHeight)
+        return attributes
+    }
+
+    override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
+        (0..<20).compactMap { layoutAttributesForItem(at: IndexPath(item: $0, section: 0)) }
+            .filter { $0.frame.intersects(rect) }
     }
 }

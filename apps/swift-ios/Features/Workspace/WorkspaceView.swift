@@ -25,7 +25,9 @@ struct FeatureWorkspaceNavigationRequest: Equatable, Sendable {
 public struct WorkspaceView: View {
     @SwiftUI.Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @SwiftUI.Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @SwiftUI.Environment(\.openURL) private var openURL
+    @SwiftUI.Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @SwiftUI.Environment(FeatureWorkspaceActivity.self) private var workspaceActivity: FeatureWorkspaceActivity?
+    @SwiftUI.Environment(\.featureWorkspaceFoldSidebarWidth) private var foldSidebarWidth
 
     @Bindable var model: FeatureRootModel
     private let navigationRequest: FeatureWorkspaceNavigationRequest?
@@ -47,6 +49,15 @@ public struct WorkspaceView: View {
     @State private var paletteQuery = ""
     @State private var keyboardDispatcher = FeatureKeyboardDispatcher()
     @State private var columnVisibility = NavigationSplitViewVisibility.automatic
+    @State private var sidebarTiles = false
+    @State private var allowsInspector = false
+    @State private var hasWorkspaceGeometry = false
+    @State private var workspaceTool: FeatureThreadToolSurface?
+    @State private var workspaceToolPath = NavigationPath()
+    @State private var workspaceFileBrowser = FeatureFileBrowserState()
+    @State private var workspaceToolSheetIsVisible = false
+    @State private var workspaceInspectorIsVisible = false
+    @State private var sidebarBeforeInspector: NavigationSplitViewVisibility?
     @AppStorage("t3.swiftui.home.snoozedExpanded") private var isSnoozedExpanded = false
     @AppStorage("t3.swiftui.home.workingExpanded") private var isWorkingExpanded = false
     @AppStorage("t3.swiftui.home.settledExpanded") private var isSettledExpanded = true
@@ -63,6 +74,7 @@ public struct WorkspaceView: View {
     @State private var newTaskPresentation: NewTaskPresentation?
     @State private var pendingWorkspaceAction: (@MainActor () -> Void)?
     @State private var workspacePresentationIsVisible = false
+    @State private var workspaceIsVisible = false
     @State private var pendingNavigationRequest: FeatureWorkspaceNavigationRequest?
     @State private var consumedNavigationRequestID: UUID?
     @State private var rootNavigationDismissalID: UUID?
@@ -107,17 +119,50 @@ public struct WorkspaceView: View {
     }
 
     public var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility, preferredCompactColumn: $preferredCompactColumn) {
+        let hasRegularWidth = horizontalSizeClass == .regular
+        // Read presentation state here so changes update the keyboard host,
+        // including values otherwise read only by a hosted binding closure.
+        let visibility: NavigationSplitViewVisibility =
+            workspaceTool != nil && allowsInspector ? .detailOnly : columnVisibility
+        let showsInspector = workspaceTool != nil && allowsInspector && !workspaceToolSheetIsVisible
+        NavigationSplitView(columnVisibility: Binding(
+            get: { visibility },
+            set: { columnVisibility = $0 }
+        ), preferredCompactColumn: $preferredCompactColumn) {
             sidebar
                 .navigationSplitViewColumnWidth(
-                    min: T3Metrics.minimumSidebarWidth,
-                    ideal: T3Metrics.sidebarWidth,
-                    max: T3Metrics.maximumSidebarWidth
+                    min: foldSidebarWidth ?? T3Metrics.minimumSidebarWidth,
+                    ideal: foldSidebarWidth ?? T3Metrics.sidebarWidth,
+                    max: foldSidebarWidth ?? T3Metrics.maximumSidebarWidth
                 )
         } detail: {
             detail
         }
-        .navigationSplitViewStyle(.balanced)
+        .navigationSplitViewStyle(.automatic)
+        .inspector(isPresented: Binding(
+            get: { showsInspector },
+            // UIKit writes false while collapsing the column during rotation.
+            // Close controls own the tool selection; resizing must preserve it.
+            set: { _ in }
+        )) {
+            if allowsInspector {
+                workspaceToolView(isInspector: true)
+                    .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
+                    .onAppear { workspaceInspectorIsVisible = true }
+                    .onDisappear { workspaceInspectorIsVisible = false }
+            }
+        }
+        .onGeometryChange(for: Bool.self) { geometry in
+            geometry.size.width >= 720 && geometry.size.width > geometry.size.height
+        } action: { tilesSidebar in
+            sidebarTiles = tilesSidebar
+            if workspaceTool != nil { sidebarBeforeInspector = .all }
+            columnVisibility = (tilesSidebar && workspaceTool == nil) || selectedThreadID == nil ? .all : .detailOnly
+        }
+        .onGeometryChange(for: Bool.self) { $0.size.width >= 820 && hasRegularWidth } action: {
+            allowsInspector = $0
+            hasWorkspaceGeometry = true
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             PermissionUpdateNotice(environments: model.snapshot.environments.filter(\.isEnabled).map {
                 PermissionNoticeEnvironment(id: $0.id, label: $0.name, permissions: $0.permissions)
@@ -149,8 +194,7 @@ public struct WorkspaceView: View {
         }
         .sheet(item: $linkedPullRequestThread, onDismiss: finishWorkspaceDismissal) { thread in
             NavigationStack {
-                FeatureThreadPullRequestsView(model: model, threadID: thread.id, fallbackThread: thread,
-                    openURL: { openURL($0) })
+                FeatureThreadPullRequestsView(model: model, threadID: thread.id, fallbackThread: thread)
             }
             .preferredColorScheme(.dark)
             .onAppear { workspacePresentationIsVisible = true }
@@ -256,8 +300,10 @@ public struct WorkspaceView: View {
                 if let id = rootNavigationDismissalID { finishThreadNavigationDismissal(id) }
             }
         }
-        .onChange(of: selectedThreadID) { _, newValue in
+        .onChange(of: selectedThreadID) { oldValue, newValue in
+            if workspaceActivity?.isActive == false, let oldValue { model.releaseThread(oldValue) }
             preferredCompactColumn = newValue == nil ? .sidebar : .detail
+            if !sidebarTiles { columnVisibility = newValue == nil ? .all : .detailOnly }
         }
         .onChange(of: selectedProjectIsAvailable) { _, isAvailable in
             if !isAvailable { selectedProjectID = nil }
@@ -290,6 +336,12 @@ public struct WorkspaceView: View {
             onPaletteQueryChange: { paletteQuery = $0 },
             onCommand: handleKeyboardCommand
         )
+        .onAppear {
+            workspaceIsVisible = true
+            performPendingKeyboardCommand()
+        }
+        .onDisappear { workspaceIsVisible = false }
+        .onChange(of: workspaceActivity?.pendingCommand) { _, _ in performPendingKeyboardCommand() }
         .task(id: contentSearchRequest) {
             await contentSearch.search(
                 contentSearchRequest,
@@ -441,7 +493,8 @@ public struct WorkspaceView: View {
     }
 
     private var detail: some View {
-        NavigationStack(path: Binding(
+        let sheetTool = hasWorkspaceGeometry && !allowsInspector && !workspaceInspectorIsVisible ? workspaceTool : nil
+        return NavigationStack(path: Binding(
             get: { threadSelection.navigationPath },
             set: {
                 let previousID = selectedThreadID
@@ -450,6 +503,7 @@ public struct WorkspaceView: View {
                     requestedThreadDestination = nil
                     requestedThreadDestinationID = nil
                     activeToolDestination = nil
+                    setWorkspaceTool(nil)
                 }
             }
         )) {
@@ -457,6 +511,58 @@ public struct WorkspaceView: View {
                 .navigationDestination(for: String.self) { id in
                     threadDetail(id)
                 }
+        }
+        .sheet(item: Binding(
+            get: { sheetTool },
+            set: { if $0 == nil, !allowsInspector { setWorkspaceTool(nil) } }
+        ), onDismiss: {
+            workspaceToolSheetIsVisible = false
+            finishWorkspaceDismissal()
+        }) { surface in
+            workspaceToolView(surface: surface, isInspector: false)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .onAppear {
+                    workspaceToolSheetIsVisible = true
+                    workspacePresentationIsVisible = true
+                }
+        }
+    }
+
+    /// The panel and sidebar move in one update. Its path stays with the
+    /// workspace while the panel moves between a sheet and a trailing column.
+    private func setWorkspaceTool(_ tool: FeatureThreadToolSurface?) {
+        if let tool, tool != workspaceTool {
+            workspaceToolPath = NavigationPath()
+            workspaceFileBrowser = FeatureFileBrowserState()
+        }
+        if workspaceTool == nil, tool != nil {
+            sidebarBeforeInspector = columnVisibility
+            if sidebarTiles { columnVisibility = .detailOnly }
+        } else if workspaceTool != nil, tool == nil {
+            if sidebarTiles, let previous = sidebarBeforeInspector { columnVisibility = previous }
+            sidebarBeforeInspector = nil
+        }
+        workspaceTool = tool
+    }
+
+    @ViewBuilder
+    private func workspaceToolView(surface: FeatureThreadToolSurface? = nil, isInspector: Bool) -> some View {
+        if let surface = surface ?? workspaceTool,
+           let thread = model.snapshot.threads.first(where: { $0.id == selectedThreadID }) {
+            FeatureThreadInspector(
+                client: model.client, thread: thread, surface: surface,
+                workspaceRoot: thread.worktreePath ?? model.snapshot.projects.first(where: { $0.id == thread.projectID })?.path,
+                permissions: model.snapshot.environments.first(where: { $0.id == thread.environmentID })?.permissions,
+                browser: workspaceFileBrowser,
+                path: Binding(
+                    get: { workspaceToolPath },
+                    // Ignore teardown writes from the old stack during a handoff.
+                    set: { if workspaceTool != nil, isInspector == allowsInspector { workspaceToolPath = $0 } }
+                ), close: { setWorkspaceTool(nil) },
+                beforeRootAction: isInspector ? nil : { dismissTransientPresentations(before: $0) }
+            )
+            .id(surface.id)
         }
     }
 
@@ -478,6 +584,7 @@ public struct WorkspaceView: View {
                 onToolDestinationChange: { if id == selectedThreadID { activeToolDestination = $0 } },
                 rootNavigationDismissalID: id == selectedThreadID ? rootNavigationDismissalID : nil,
                 onRootNavigationDismissed: finishThreadNavigationDismissal,
+                onOpenWorkspaceTool: id == selectedThreadID ? { setWorkspaceTool(FeatureThreadToolSurface($0)) } : nil,
                 isPresentedThread: id == selectedThreadID
             )
             .id(id)
@@ -810,6 +917,7 @@ public struct WorkspaceView: View {
         case .newTask:
             openNewTaskOrProjectCreation()
         case .focusSearch:
+            setWorkspaceTool(nil)
             isSearching = true
             columnVisibility = .all
             preferredCompactColumn = .sidebar
@@ -821,14 +929,26 @@ public struct WorkspaceView: View {
                 searchText = ""
             } else { closeSelectedThread() }
         case .toggleSidebar:
-            columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-            preferredCompactColumn = preferredCompactColumn == .sidebar ? .detail : .sidebar
+            if workspaceTool != nil {
+                setWorkspaceTool(nil)
+                columnVisibility = .all
+                preferredCompactColumn = .sidebar
+            } else {
+                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                preferredCompactColumn = preferredCompactColumn == .sidebar ? .detail : .sidebar
+            }
         case let .threadJump(number):
             guard renderedThreads.indices.contains(number - 1) else { return }
             openThread(renderedThreads[number - 1].id)
         case .commandPalette, .cycleHost, .files, .terminal, .review, .copyThreadReference:
             break // Active screen scopes own these commands.
         }
+    }
+
+    private func performPendingKeyboardCommand() {
+        guard workspaceIsVisible, let workspaceActivity, workspaceActivity.isActive,
+              let request = workspaceActivity.pendingCommand else { return }
+        if keyboardDispatcher.perform(request.command) { workspaceActivity.pendingCommand = nil }
     }
 
     private var selectedProject: FeatureProject? {
@@ -887,6 +1007,7 @@ public struct WorkspaceView: View {
     }
 
     private func openThread(_ id: String) {
+        setWorkspaceTool(nil)
         requestedThreadPrompt = nil
         requestedThreadPromptID = nil
         requestedThreadDestination = nil
@@ -894,9 +1015,11 @@ public struct WorkspaceView: View {
         activeToolDestination = nil
         threadSelection.open(id)
         preferredCompactColumn = .detail
+        if !sidebarTiles { columnVisibility = .detailOnly }
     }
 
     private func closeSelectedThread() {
+        setWorkspaceTool(nil)
         requestedThreadDestination = nil
         requestedThreadDestinationID = nil
         activeToolDestination = nil
@@ -906,11 +1029,13 @@ public struct WorkspaceView: View {
 
     private func openRelatedThread(_ id: String) {
         guard availableThreadIDs.contains(id) else { return }
+        setWorkspaceTool(nil)
         requestedThreadDestination = nil
         requestedThreadDestinationID = nil
         activeToolDestination = nil
         threadSelection.push(id)
         preferredCompactColumn = .detail
+        if !sidebarTiles { columnVisibility = .detailOnly }
     }
 
     @MainActor
@@ -1064,10 +1189,7 @@ public struct WorkspaceView: View {
     }
 
     private func openPullRequest(_ thread: FeatureThread, presentation: HomeThreadPullRequestPresentation) {
-        switch presentation.action {
-        case let .open(url): openURL(url)
-        case .list: linkedPullRequestThread = thread
-        }
+        if case .list = presentation.action { linkedPullRequestThread = thread }
     }
 
     private func finishWorkspaceDismissal() {
@@ -1091,6 +1213,7 @@ public struct WorkspaceView: View {
         showingSettings = false
         showingUsageLimits = false
         showingThreadArrangement = false
+        setWorkspaceTool(nil)
         renamingThread = nil
         deletingThread = nil
         pendingDiscardRecoveryID = nil
