@@ -230,6 +230,16 @@ describe("decodePipelineJobChecksJson", () => {
       { name: "lint", status: "neutral" },
     ]);
   });
+
+  it("drops a job list whose trigger jobs are unreadable instead of showing part of it", () => {
+    expect(
+      decodePipelineJobChecksJson(
+        JSON.stringify([{ id: 1, name: "build", status: "success" }]),
+        "[{",
+        100,
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("decodeNotesJson", () => {
