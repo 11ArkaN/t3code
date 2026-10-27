@@ -2535,7 +2535,7 @@ const idleAcrossHostSleep = (input: { readonly timerCountsSleep: boolean }) =>
       sleptMs = input.timerCountsSleep ? 2 * 60 * 60_000 - 25 * 60_000 : 2 * 60 * 60_000;
       yield* TestClock.adjust("25 minutes");
       yield* Effect.yieldNow;
-      const releasedAtFirstDeadline = Option.isNone(yield* manager.get(providerSessionId));
+      const releasedAtFirstDeadline = !(yield* manager.isLive(providerSessionId));
       const closeCountAtFirstDeadline = (yield* Ref.get(state)).closeCount;
 
       yield* TestClock.adjust("30 minutes");
@@ -2543,7 +2543,7 @@ const idleAcrossHostSleep = (input: { readonly timerCountsSleep: boolean }) =>
       return {
         releasedAtFirstDeadline,
         closeCountAtFirstDeadline,
-        releasedAtSecondDeadline: Option.isNone(yield* manager.get(providerSessionId)),
+        releasedAtSecondDeadline: !(yield* manager.isLive(providerSessionId)),
         closeCountAtSecondDeadline: (yield* Ref.get(state)).closeCount,
       };
     });
