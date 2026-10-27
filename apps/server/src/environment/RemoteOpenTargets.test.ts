@@ -29,11 +29,15 @@ interface CommandResult {
   readonly stdout: string;
 }
 
-const layerSpawner = (input: { readonly status: CommandResult; readonly prefs: CommandResult }) =>
+const layerSpawner = (
+  input: { readonly status: CommandResult; readonly prefs: CommandResult },
+  spawnedArgs?: Array<ReadonlyArray<string>>,
+) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       const args = ChildProcess.isStandardCommand(command) ? command.args : [];
+      spawnedArgs?.push(args);
       const result = args[0] === "debug" ? input.prefs : input.status;
       return Effect.succeed(
         ChildProcessSpawner.makeHandle({
@@ -136,6 +140,35 @@ describe("RemoteOpenTargets", () => {
       expect(targets).toEqual([]);
     }),
   );
+
+  it.effect("reads Tailscale once across repeated resolves while nothing changes", () => {
+    const spawnedArgs: Array<ReadonlyArray<string>> = [];
+    return Effect.gen(function* () {
+      const service = yield* RemoteOpenTargets.RemoteOpenTargets;
+      for (let connect = 0; connect < 3; connect++) {
+        expect(yield* service.resolveTargets()).toEqual([
+          { kind: "tailscale", host: "bb-1.tail1234.ts.net", username: "t3-user" },
+        ]);
+      }
+      expect({
+        status: spawnedArgs.filter((args) => args[0] === "status").length,
+        debugPrefs: spawnedArgs.filter((args) => args[0] === "debug").length,
+      }).toEqual({ status: 1, debugPrefs: 1 });
+    }).pipe(
+      Effect.provideService(HostProcess.Hostname, "bb-1"),
+      Effect.provideService(HostProcess.Username, "t3-user"),
+      Effect.provide(
+        RemoteOpenTargets.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              layerNet({ ipv4: false, ipv6: false }),
+              layerSpawner(TAILSCALE_SSH, spawnedArgs),
+            ),
+          ),
+        ),
+      ),
+    );
+  });
 
   it.effect("accepts an sshd bound to IPv6 loopback only", () =>
     Effect.gen(function* () {
