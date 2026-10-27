@@ -77,7 +77,10 @@ const gitLayer = GitVcsDriver.layer.pipe(
 const makeFixture = Effect.fn("makeFixture")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const driver = yield* GitVcsDriver.GitVcsDriver;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "move-to-local-edge-" });
+  // Canonical, as the move resolves paths: macOS temp folders sit behind the /var symlink.
+  const root = yield* fs.realPath(
+    yield* fs.makeTempDirectoryScoped({ prefix: "move-to-local-edge-" }),
+  );
   const local = `${root}/repo space ü`;
   const worktree = `${root}/worktrees/feature space ü`;
   const git = (cwd: string, args: ReadonlyArray<string>) =>
