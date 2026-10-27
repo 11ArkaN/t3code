@@ -1419,20 +1419,22 @@ const make = Effect.gen(function* () {
     readiness: "load" | "domContentLoaded" | "none",
     timeout: number,
   ) => {
-    const navigation = tab.page.goto(url, {
-      timeout,
-      waitUntil:
-        readiness === "domContentLoaded"
-          ? "domcontentloaded"
-          : readiness === "none"
-            ? "commit"
-            : "load",
-    });
+    const startedAt = performance.now();
+    const navigation = tab.page.goto(url, { timeout, waitUntil: "commit" });
     if (readiness === "none") {
       tab.control.track(navigation);
       return;
     }
-    await navigation.catch((cause: unknown) => {
+    // Once the target commits, a stalled subresource only delays readiness; report the loading tab.
+    const ready = () =>
+      tab.page
+        .waitForLoadState(readiness === "domContentLoaded" ? "domcontentloaded" : "load", {
+          timeout: Math.max(1, timeout - (performance.now() - startedAt)),
+        })
+        .catch((cause: unknown) => {
+          if (!(cause instanceof Error && cause.name === "TimeoutError")) throw cause;
+        });
+    await navigation.then(ready).catch((cause: unknown) => {
       const message = cause instanceof Error ? cause.message : String(cause);
       if (message.includes("Download is starting")) {
         throw new ServerBrowserPage.ServerBrowserOperationError(
