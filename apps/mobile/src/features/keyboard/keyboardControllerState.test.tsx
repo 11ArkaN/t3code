@@ -40,24 +40,24 @@ function KeyboardState() {
   return <output>{JSON.stringify({ isVisible, height })}</output>;
 }
 
+// The library keeps keyboard state at module scope; every test starts and ends hidden.
 function setup() {
   emit("keyboardDidHide", 0);
+  return { [Symbol.dispose]: () => emit("keyboardDidHide", 0) };
+}
+
+function renderKeyboardState() {
   const container = document.createElement("div");
   const root = createRoot(container);
   act(() => root.render(<KeyboardState />));
-  return {
-    container,
-    [Symbol.dispose]() {
-      act(() => root.unmount());
-      emit("keyboardDidHide", 0);
-    },
-  };
+  return { container, [Symbol.dispose]: () => act(() => root.unmount()) };
 }
 
 // Android's syncKeyboardPosition repairs a nonanimated IME inset change with
 // keyboardDidHide then keyboardDidShow, and no keyboardWillShow.
 it("reports the keyboard shown after Android repairs the IME inset without keyboardWillShow", () => {
-  using screen = setup();
+  using _keyboard = setup();
+  using screen = renderKeyboardState();
 
   emit("keyboardDidShow", 376);
 
@@ -69,7 +69,7 @@ it("reports the keyboard shown after Android repairs the IME inset without keybo
 });
 
 it("waits for the native hide before dismiss resolves after a didShow-only repair", async () => {
-  using _screen = setup();
+  using _keyboard = setup();
   emit("keyboardDidShow", 376);
 
   let dismissed = false;
@@ -78,7 +78,7 @@ it("waits for the native hide before dismiss resolves after a didShow-only repai
   });
   await act(async () => {});
 
-  expect({ dismissedBeforeNativeHide: dismissed }).toEqual({ dismissedBeforeNativeHide: false });
+  expect(dismissed).toBe(false);
   emit("keyboardDidHide", 0);
   await dismissal;
 });
