@@ -189,10 +189,10 @@ function detailRoute(
 }
 
 /**
- * The root stack for opening a workspace tab. With columns the detail column must show
- * something, so the tab reopens the page it last showed (Settings falls back to its default);
- * without columns the tab opens on its list. Routes already on screen keep their keys, and
- * `overlays` (open sheets) stay on top.
+ * The root stack for opening a workspace tab. With columns the tab reopens the page it last showed
+ * (Settings falls back to its default); without columns it opens on its list. With `pages` (iOS),
+ * Usage, and the pull request list without columns, open as pages above Home. Routes on screen
+ * keep their keys, and `overlays` (open sheets) stay on top.
  */
 export function workspaceTabNavigationState<
   State extends { readonly routes: readonly RouteLike[] },
@@ -204,6 +204,7 @@ export function workspaceTabNavigationState<
     readonly columns: boolean;
     readonly check: WorkspaceSelectionCheck;
     readonly overlays?: readonly RouteLike[];
+    readonly pages?: boolean;
   },
 ) {
   const overlays = options.overlays ?? [];
@@ -219,8 +220,16 @@ export function workspaceTabNavigationState<
     return { ...settings, index: routes.length - 1, routes };
   }
   const home = state.routes.find((route) => route.name === "Home") ?? { name: "Home" };
-  const detail =
-    options.columns && tab !== "usage"
+  const page = !options.pages
+    ? undefined
+    : tab === "usage"
+      ? "SettingsUsage"
+      : tab === "pullRequests" && !options.columns
+        ? "PullRequests"
+        : undefined;
+  const detail = page
+    ? (state.routes.find((route) => route.name === page) ?? { name: page })
+    : options.columns && tab !== "usage"
       ? detailRoute(state, tab, selections, options.check)
       : undefined;
   const routes = [...[home, ...(detail ? [detail] : [])].map(keyed), ...overlays];

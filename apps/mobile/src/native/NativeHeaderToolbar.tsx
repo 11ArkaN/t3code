@@ -10,13 +10,11 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  use,
   type ReactElement,
   type ReactNode,
 } from "react";
 import type { ColorValue } from "react-native";
 import type { HeaderBarButtonSearchBarPlacementItem } from "react-native-screens";
-import { NativeWorkspaceTabActivityContext } from "./v5-workspace-context";
 import { NativeStackScreenOptions, useScreenOptionsWriter } from "./StackHeader";
 
 function labelFromChildren(children: ReactNode): string {
@@ -230,8 +228,6 @@ function NativeHeaderToolbarRoot(props: {
 }) {
   const setOptions = useScreenOptionsWriter();
   const route = useRoute();
-  const tabActivity = use(NativeWorkspaceTabActivityContext);
-  const isTabActive = tabActivity?.isActive;
   const committedHandlers = useRef<(() => void)[]>([]);
   const { items, handlers } = useMemo(() => {
     const handlers: (() => void)[] = [];
@@ -260,7 +256,6 @@ function NativeHeaderToolbarRoot(props: {
   useLayoutEffect(() => {
     if (!setOptions) return;
     return () => {
-      if (isTabActive && !isTabActive()) return;
       if (props.placement === "bottom") {
         setOptions({
           unstable_headerToolbarItems: () => [],
@@ -271,7 +266,7 @@ function NativeHeaderToolbarRoot(props: {
         setOptions({ unstable_headerRightItems: () => [] });
       }
     };
-  }, [setOptions, props.placement, isTabActive]);
+  }, [setOptions, props.placement]);
 
   return (
     <NativeStackScreenOptions

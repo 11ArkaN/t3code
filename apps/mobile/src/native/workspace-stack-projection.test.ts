@@ -134,6 +134,19 @@ describe("workspace router projection", () => {
     ).toMatchObject({ payload: { count: 1 } });
   });
 
+  it("pushes the Settings list as its own page without columns, and Back returns to Home", () => {
+    const environments = { key: "environments", name: "SettingsEnvironments" };
+    expect(
+      projectWorkspaceStack(history([home, settings, environments]), () => false, true),
+    ).toEqual({ primary: home, detail: [settings, environments], overlays: [] });
+    expect(nativeStackPopAction(history([home, settings]), settings.key, home.key)).toMatchObject({
+      payload: { count: 1 },
+    });
+    expect(nativeStackPopAction(history([home, settings]), settings.key)).toMatchObject({
+      payload: { count: 1 },
+    });
+  });
+
   it("retains a cold-linked detail route without changing the router history", () => {
     const state = history([thread, files]);
     expect(projectWorkspaceStack(state, () => false)).toEqual({

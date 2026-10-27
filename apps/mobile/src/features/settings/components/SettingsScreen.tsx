@@ -8,12 +8,8 @@ import { ScreenContent as SettingsScreenContent } from "../../../components/ui/S
 import { useWorkspaceTabs } from "../../workspace/WorkspaceTabsContext";
 import { useWorkspaceSurface } from "../../workspace/useWorkspaceSurface";
 import { useDeviceType } from "../../../native/native-layout-metrics";
-import { useCompactWorkspaceTabs } from "../../workspace/useSystemWorkspaceTabBar";
 import { useAdaptiveWorkspaceLayout } from "../../layout/adaptive-workspace-context";
-import {
-  ScreenScrollViewBottomInset,
-  ScreenScrollViewSurface,
-} from "../../../components/ui/ScreenScrollView";
+import { ScreenScrollViewSurface } from "../../../components/ui/ScreenScrollView";
 
 export { SettingsScreenContent };
 
@@ -29,7 +25,6 @@ export function SettingsScreen(
   const workspace = useWorkspaceTabs();
   const surface = useWorkspaceSurface();
   const deviceType = useDeviceType();
-  const compactTabs = useCompactWorkspaceTabs();
   const { layout } = useAdaptiveWorkspaceLayout();
   const cover = deviceType === "duo-folded";
   // Android opens Settings as a workspace tab; its root page has nothing to go back to.
@@ -52,19 +47,17 @@ export function SettingsScreen(
         onBack={workspaceRoot ? undefined : () => navigation.goBack()}
         hideBottomBorder={!props.formSheet}
       />
-      <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
-        <ScreenScrollViewSurface value={surfaceClassName}>
-          {props.formSheet ? (
-            props.children
-          ) : (
-            <SettingsScreenContent
-              insetHorizontal={Platform.OS === "android" && layout.usesSplitView}
-            >
-              {props.children}
-            </SettingsScreenContent>
-          )}
-        </ScreenScrollViewSurface>
-      </ScreenScrollViewBottomInset>
+      <ScreenScrollViewSurface value={surfaceClassName}>
+        {props.formSheet ? (
+          props.children
+        ) : (
+          <SettingsScreenContent
+            insetHorizontal={Platform.OS === "android" && layout.usesSplitView}
+          >
+            {props.children}
+          </SettingsScreenContent>
+        )}
+      </ScreenScrollViewSurface>
     </View>
   );
 }

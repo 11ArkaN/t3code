@@ -18,16 +18,20 @@ export function projectStackPresentation(
   };
 }
 
-/** Project one router history into native columns and a modal presentation stack. */
+/**
+ * Splits the root stack into Home, its detail pages, and the sheets above them. Beside a detail
+ * column the `Settings` route only selects what Home shows; without columns (`settingsPage`) it
+ * is the Settings list's own page above Home.
+ */
 export function projectWorkspaceStack(
   state: StackNavigationState<ParamListBase>,
   isOverlay: (route: Route) => boolean,
+  settingsPage = false,
 ) {
   const { workspace: workspaceRoutes, overlays } = projectStackPresentation(state, isOverlay);
   const primary = workspaceRoutes.find((route) => route.name === "Home");
-  // The Settings tab's route only selects what Home shows; its pages are the detail.
   const detail = workspaceRoutes.filter(
-    (route) => route.name !== "Home" && route.name !== "Settings",
+    (route) => route.name !== "Home" && (settingsPage || route.name !== "Settings"),
   );
   return { primary, detail, overlays };
 }
@@ -68,8 +72,12 @@ export function nativeStackPopAction(
     destinationKey === undefined
       ? sourceIndex - 1
       : state.routes.findIndex((route) => route.key === destinationKey);
-  // Home's screen draws the Settings list, so going back to it from a Settings page stops there.
-  if (destinationIndex >= 0 && state.routes[destinationIndex + 1]?.name === "Settings")
+  // Back from a Settings page stops at the Settings list, which Home may be drawing.
+  if (
+    destinationIndex >= 0 &&
+    destinationIndex + 1 < sourceIndex &&
+    state.routes[destinationIndex + 1]?.name === "Settings"
+  )
     destinationIndex += 1;
   if (
     sourceIndex <= 0 ||

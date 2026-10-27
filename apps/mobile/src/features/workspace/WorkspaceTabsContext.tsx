@@ -1,6 +1,7 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { createContext, use, useState, type Dispatch, type ReactNode } from "react";
+import { Platform } from "react-native";
 
 import { mobilePreferencesAtom } from "../../state/preferences";
 import {
@@ -40,8 +41,8 @@ function resolveWorkspaceTabsSelection(
   preferences: MobilePreferencesResult,
 ): WorkspaceTabsState {
   const saved = AsyncResult.isSuccess(preferences) ? preferences.value : undefined;
-  const order = resolveWorkspaceTabOrder(saved?.navigationTabOrder);
-  const hidden = navigationCustomizationAvailable()
+  const order = resolveWorkspaceTabOrder(Platform.OS, saved?.navigationTabOrder);
+  const hidden = navigationCustomizationAvailable(Platform.OS)
     ? resolveHiddenNavigationTabs(saved?.hiddenNavigationTabs)
     : [];
   const selected = resolveSelectedNavigationTab(order, hidden, state.selectedTab);

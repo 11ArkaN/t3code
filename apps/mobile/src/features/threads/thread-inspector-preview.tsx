@@ -14,7 +14,6 @@ import { SheetHeader } from "../../components/ui/SheetHeader";
 import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 import { createV5StackNavigator } from "../../native/createV5StackNavigator";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { WorkspaceSlotOptionsContext } from "../../native/v5-workspace-context";
 import { useMobileNavigationTheme } from "../../lib/useMobileNavigationTheme";
 import { DevicePreviewScreen } from "../devices/DevicePreviewRouteScreen";
 import {
@@ -61,13 +60,11 @@ const PreviewStack = createV5StackNavigator<{
 
 export function InspectorContentScope({ children }: { readonly children: ReactNode }) {
   return (
-    <WorkspaceSlotOptionsContext value={null}>
-      <WorkspaceContentWidthContext value={null}>
-        <WorkspaceSettledContentWidthContext value={null}>
-          {children}
-        </WorkspaceSettledContentWidthContext>
-      </WorkspaceContentWidthContext>
-    </WorkspaceSlotOptionsContext>
+    <WorkspaceContentWidthContext value={null}>
+      <WorkspaceSettledContentWidthContext value={null}>
+        {children}
+      </WorkspaceSettledContentWidthContext>
+    </WorkspaceContentWidthContext>
   );
 }
 

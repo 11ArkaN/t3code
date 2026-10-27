@@ -519,6 +519,7 @@ function AdaptiveWorkspaceLayoutContent(
         columns: workspaceTabColumns(Platform.OS, tab, options?.columns ?? layout.usesSplitView),
         check: workspaceSelectionCheck,
         overlays,
+        pages: Platform.OS === "ios",
       },
     );
     if (layout.primarySidebarOverlaysContent) {

@@ -103,6 +103,35 @@ describe("opening a workspace tab", () => {
     ]);
   });
 
+  it("opens Usage as a page on iOS, and the pull request list as one without columns", () => {
+    const state = { routes: [home, thread] };
+    const selections = { pullRequests: pullRequest.params };
+    const open = (tab: "usage" | "pullRequests", columns: boolean) =>
+      names(
+        workspaceTabNavigationState(state, tab, selections, {
+          columns,
+          check: available,
+          pages: true,
+        }),
+      );
+    expect(open("usage", true)).toEqual(["Home", "SettingsUsage"]);
+    expect(open("usage", false)).toEqual(["Home", "SettingsUsage"]);
+    expect(open("pullRequests", false)).toEqual(["Home", "PullRequests"]);
+    expect(open("pullRequests", true)).toEqual(["Home", "PullRequest"]);
+    const list = { key: "list", name: "PullRequests" };
+    const reopened = workspaceTabNavigationState(
+      { routes: [home, list] },
+      "pullRequests",
+      {},
+      {
+        columns: false,
+        check: available,
+        pages: true,
+      },
+    );
+    expect(reopened.routes[1]).toBe(list);
+  });
+
   it("keeps the route that is already open, so re-selecting a tab doesn't rebuild it", () => {
     const next = workspaceTabNavigationState(
       { routes: [home, thread] },

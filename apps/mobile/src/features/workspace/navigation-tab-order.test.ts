@@ -13,12 +13,11 @@ import {
 } from "./navigation-tab-order";
 
 describe("navigation tab order", () => {
-  it("enables customization only above four registered sections, excluding Settings", () => {
-    expect(navigationCustomizationAvailable()).toBe(false);
-    expect(navigationCustomizationAvailable(3)).toBe(false);
-    expect(navigationCustomizationAvailable(4)).toBe(false);
-    expect(navigationCustomizationAvailable(5)).toBe(true);
-    expect(navigationCustomizationAvailable(6)).toBe(true);
+  it("enables customization on Android only above four registered sections, never on iOS", () => {
+    expect(navigationCustomizationAvailable("android")).toBe(false);
+    expect(navigationCustomizationAvailable("android", 4)).toBe(false);
+    expect(navigationCustomizationAvailable("android", 5)).toBe(true);
+    expect(navigationCustomizationAvailable("ios", 6)).toBe(false);
   });
 
   it("fills missing sections and drops removed placeholders, duplicates, and Settings", () => {

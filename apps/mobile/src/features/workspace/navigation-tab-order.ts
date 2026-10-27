@@ -1,10 +1,12 @@
 export const NAVIGATION_TAB_ORDER = ["threads", "pullRequests", "usage"] as const;
 export type NavigationTab = (typeof NAVIGATION_TAB_ORDER)[number];
 
+/** Tab order and hidden tabs shape Android's tabs; iOS has no tabs to customize. */
 export function navigationCustomizationAvailable(
+  platform: string,
   registeredSections: number = NAVIGATION_TAB_ORDER.length,
 ) {
-  return registeredSections > 4;
+  return platform !== "ios" && registeredSections > 4;
 }
 
 export const NAVIGATION_TAB_LABELS: Readonly<Record<NavigationTab, string>> = {

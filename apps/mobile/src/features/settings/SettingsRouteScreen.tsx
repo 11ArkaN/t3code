@@ -1,10 +1,10 @@
 import {
+  NAVIGATION_TAB_LABELS,
   navigationCustomizationAvailable,
   overflowNavigationTabs,
 } from "../workspace/navigation-tab-order";
 import {
   NAVIGATION_TAB_ICONS,
-  WORKSPACE_TAB_LABELS,
   useNavigationTabOrder,
   useHiddenNavigationTabs,
 } from "../workspace/navigation-tabs";
@@ -241,7 +241,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
         page("SettingsOrganization", "gearshape", "General"),
         page("SettingsAppearance", "paintbrush", "Appearance"),
         page("SettingsFollowUp", "bubble.left.and.bubble.right", "Chat"),
-        ...(navigationCustomizationAvailable()
+        ...(navigationCustomizationAvailable(Platform.OS)
           ? [page("SettingsNavigation", "line.3.horizontal", "Navigation tabs")]
           : []),
         ...(Platform.OS === "ios"
@@ -294,7 +294,7 @@ function useOverflowRows(): SettingsListRow[] {
   return tabs.map((tab) => ({
     id: tab,
     icon: NAVIGATION_TAB_ICONS[tab],
-    label: WORKSPACE_TAB_LABELS[tab],
+    label: NAVIGATION_TAB_LABELS[tab],
     onPress: () => selectTab(tab),
   }));
 }

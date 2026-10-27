@@ -226,21 +226,23 @@ const THREAD_SETTINGS_SHEET_OPTIONS = {
 };
 
 // Settings pages are root routes so they share the workspace's columns and header. The
-// `Settings` route marks the Settings tab as open (see settings-navigation.ts).
+// `Settings` route marks Settings as open (see settings-navigation.ts). On iOS without columns
+// it is the Settings list's own page, which the workspace screen draws.
 const SETTINGS_PAGE_OPTIONS = SHEET_GLASS_HEADER_OPTIONS;
 
 const SETTINGS_SCREENS = {
   Settings: createNativeStackScreen({
-    screen: SettingsRouteScreen,
+    screen: Platform.OS === "android" ? SettingsRouteScreen : WorkspaceRootScreen,
     linking: "settings",
     options: {
       ...SETTINGS_PAGE_OPTIONS,
       title: "Settings",
-      ...(Platform.OS === "android" ? { animation: "none" as const } : {}),
+      ...(Platform.OS === "android"
+        ? { animation: "none" as const, headerBackVisible: false }
+        : {}),
       // Android draws its own app bar here. Hidden only from inside the screen, the native one
       // showed for the first frame of the Settings tab and pushed the page down.
       headerShown: Platform.OS !== "android",
-      headerBackVisible: false,
     },
   }),
   SettingsEnvironments: createNativeStackScreen({
@@ -623,6 +625,15 @@ const RootStackConfig = createWorkspaceStackNavigator({
         ...getCompactBrandHeaderOptions(),
       },
     }),
+    // iOS pushes the pull request list above Home when there are no columns.
+    ...(Platform.OS === "ios"
+      ? {
+          PullRequests: createNativeStackScreen({
+            screen: WorkspaceRootScreen,
+            options: { ...GLASS_HEADER_OPTIONS, ...FIXED_DUO_HEADER, title: "Pull requests" },
+          }),
+        }
+      : {}),
     PullRequest: createNativeStackScreen({
       screen: PullRequestRouteScreen,
       linking: {

@@ -1,17 +1,9 @@
-import {
-  NavigationContext,
-  NavigationRouteContext,
-  type ParamListBase,
-} from "@react-navigation/native";
+import { NavigationContext, type ParamListBase } from "@react-navigation/native";
 import type {
   NativeStackNavigationOptions,
   NativeStackNavigationProp,
 } from "@react-navigation/native-stack";
 import { isValidElement, use, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import {
-  NativeWorkspaceTabActivityContext,
-  WorkspaceSlotOptionsContext,
-} from "./v5-workspace-context";
 import type { ColorValue } from "react-native";
 
 export {
@@ -164,21 +156,14 @@ function stabilizeOptionFunctions(
   return value;
 }
 
-/**
- * Sets the current screen's options. Inside a workspace tab slot they're kept for that slot, so
- * slots rendering the same route never overwrite each other's header.
- */
+/** Sets the current screen's options. */
 export function useScreenOptionsWriter() {
   const navigation = useNativeStackNavigation();
-  const setSlotOptions = use(WorkspaceSlotOptionsContext)?.set;
-  const routeKey = use(NavigationRouteContext)?.key;
-  return useMemo(() => {
-    if (setSlotOptions && routeKey !== undefined)
-      return (options: NativeStackNavigationOptions) => setSlotOptions(routeKey, options);
-    return navigation
-      ? (options: NativeStackNavigationOptions) => navigation.setOptions(options)
-      : null;
-  }, [navigation, routeKey, setSlotOptions]);
+  return useMemo(
+    () =>
+      navigation ? (options: NativeStackNavigationOptions) => navigation.setOptions(options) : null,
+    [navigation],
+  );
 }
 
 export function NativeStackScreenOptions(props: {
@@ -190,15 +175,12 @@ export function NativeStackScreenOptions(props: {
 }) {
   const navigation = useNativeStackNavigation();
   const setOptions = useScreenOptionsWriter();
-  const tabActive = use(NativeWorkspaceTabActivityContext)?.active ?? true;
   const lastAppliedOptionsSignatureRef = useRef<string | undefined>(undefined);
   const latestOptionFunctionsRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
   const optionFunctionWrappersRef = useRef(new Map<string, (...args: unknown[]) => unknown>());
 
   // Stabilizing records each factory's latest closure, so it runs in the commit
   // phase: a render React discards must not leak its closures into the header.
-  // It runs before the tab check so wrappers already installed in an inactive
-  // tab's header still call the newest closures.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes stabilized header options to the navigator after commit so discarded renders leave no closures
   useLayoutEffect(() => {
     const normalizedOptions = normalizeScreenOptions(props.options);
@@ -210,10 +192,6 @@ export function NativeStackScreenOptions(props: {
           optionFunctionWrappersRef.current,
         )
       : undefined;
-    if (!tabActive) {
-      lastAppliedOptionsSignatureRef.current = undefined;
-      return;
-    }
     if (!setOptions || !normalizedOptions) {
       return;
     }
@@ -234,7 +212,7 @@ export function NativeStackScreenOptions(props: {
         optionFunctionWrappersRef.current,
       ) as NativeStackNavigationOptions,
     );
-  }, [setOptions, props.options, props.optionsVersion, tabActive]);
+  }, [setOptions, props.options, props.optionsVersion]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes the given listeners to navigator events for the screen's lifetime
   useEffect(() => {

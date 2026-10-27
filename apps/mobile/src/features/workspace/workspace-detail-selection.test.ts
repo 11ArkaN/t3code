@@ -28,6 +28,7 @@ const options = {
     "Thread",
     "ThreadFiles",
     "PullRequest",
+    "PullRequests",
     "PullRequestReviewers",
     "Settings",
     "SettingsAppearance",
@@ -97,6 +98,14 @@ describe("selectWorkspaceDetail", () => {
     const selected = select(settings, pullRequest);
     expect(page(selected)).toEqual({ names: ["Home", "PullRequest"], index: 1 });
     expect(selected.routes[0]?.key).toBe(settings.routes[0]?.key);
+  });
+
+  it("keeps the pull request list page under the pull request it opens, but not under a thread", () => {
+    const list = push(home(), "PullRequests");
+    const selected = select(list, pullRequest);
+    expect(page(selected)).toEqual({ names: ["Home", "PullRequests", "PullRequest"], index: 2 });
+    expect(selected.routes[1]?.key).toBe(list.routes[1]?.key);
+    expect(page(select(selected, threadA))).toEqual({ names: ["Home", "Thread"], index: 1 });
   });
 
   it("puts Home under a cold-linked page and a sheet over the selection", () => {

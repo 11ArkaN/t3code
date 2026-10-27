@@ -27,8 +27,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { WorkspaceTabsProvider, useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
-import { WorkspaceNativeTabs } from "../workspace/WorkspaceNativeTabs.ios";
-import { workspaceUsesColumns } from "../workspace/workspace-tabs-state";
 import { isSettingsRoute, settingsOpenIn } from "../settings/settings-navigation";
 import { workspaceRoutesOf } from "./workspace-overlay-routes";
 import { setNativelyPoppingWorkspaceRoute } from "../workspace/workspace-detail-selection";
@@ -61,8 +59,6 @@ import {
   NativePrimaryColumnContext,
   NativeWorkspaceInspectorContext,
   NativeWorkspaceModeContext,
-  WorkspaceSlotOptionsContext,
-  slotScreenOptions,
 } from "../../native/v5-workspace-context";
 
 type ViewProps = ComponentProps<typeof NativeStackView>;
@@ -90,12 +86,7 @@ function ColumnScreen(props: {
   readonly navigation: ViewProps["navigation"];
 }) {
   const { descriptor } = props;
-  // Options a screen set inside this workspace tab slot, over its route's.
-  const options = slotScreenOptions(
-    use(WorkspaceSlotOptionsContext),
-    descriptor.route.key,
-    descriptor.options,
-  );
+  const options = descriptor.options;
   const [presented, setPresented] = useState(false);
   const primaryColumn = props.primary
     ? {
@@ -318,16 +309,23 @@ function WorkspaceColumns(
         collapsed.current = false;
         setNativelyPoppingWorkspaceRoute(null);
         // Native callbacks can outlive the render that created them, so decide from the live
-        // router state. An expanded split has columns, so its tab gets a page beside the list.
+        // router state. An expanded split has columns, so the open section gets a page beside
+        // the list, and the pull request list page moves into the sidebar.
         const live = props.navigation.getState();
         const { workspace } = workspaceRoutesOf(live.routes.slice(0, live.index + 1));
-        if (workspace.some((route) => route.name !== "Home" && route.name !== "Settings")) return;
-        const tab = workspace.some((route) => route.name === "Settings")
-          ? "settings"
-          : (["threads", "pullRequests", "usage"] as const).find((candidate) =>
-              workspaceTabs?.isTabActive(candidate),
-            );
-        openWorkspaceTab(tab ?? "threads", { columns: true });
+        const pullRequests = workspace.some((route) => route.name === "PullRequests");
+        if (
+          !pullRequests &&
+          workspace.some((route) => route.name !== "Home" && route.name !== "Settings")
+        )
+          return;
+        const tab = pullRequests
+          ? "pullRequests"
+          : workspace.some((route) => route.name === "Settings")
+            ? "settings"
+            : "threads";
+        if (tab !== "settings") workspaceTabs?.dispatch({ type: "select", tab });
+        openWorkspaceTab(tab, { columns: true });
       }}
       preferredDisplayMode={
         sidebarByOrientation
@@ -481,23 +479,14 @@ function WorkspaceColumns(
 
 function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean }) {
   const { layout } = useAdaptiveWorkspaceLayout();
-  const workspace = useWorkspaceTabs()!;
-  // Native dismiss commits the route pop after the transition. Restore the dock
-  // when the primary screen starts appearing, including interactive back gestures.
-  const [primaryVisible, setPrimaryVisible] = useState(false);
-  const metrics = useNativeLayoutMetrics();
-  const projection = projectWorkspaceStack(props.state, (route) => {
-    const presentation = props.descriptors[route.key]?.options.presentation;
-    return presentation !== undefined && presentation !== "card";
-  });
-  // The root's willDisappear reaches JS frames into the push, so hide the dock in the commit that
-  // pushes; the native events still own every later change, including back gestures.
-  const topDetailKey = projection.detail.at(-1)?.key;
-  const [pushedDetailKey, setPushedDetailKey] = useState(topDetailKey);
-  if (pushedDetailKey !== topDetailKey) {
-    setPushedDetailKey(topDetailKey);
-    if (topDetailKey !== undefined && primaryVisible) setPrimaryVisible(false);
-  }
+  const projection = projectWorkspaceStack(
+    props.state,
+    (route) => {
+      const presentation = props.descriptors[route.key]?.options.presentation;
+      return presentation !== undefined && presentation !== "card";
+    },
+    !layout.usesSplitView,
+  );
   // Detail-only histories must stay single-stack: placeholder descriptors cannot own sidebar actions or setOptions.
   const primaryRoute = projection.primary;
   if (!primaryRoute) return <V5StackView {...props} />;
@@ -505,46 +494,33 @@ function WorkspaceStackView(props: ViewProps & { readonly nativeColumns: boolean
   const descriptors = props.descriptors;
   const baseRoute = { key: `${props.state.key}:workspace`, name: "Workspace" };
   const visibleRoute = projection.detail.at(-1) ?? primaryRoute;
-  const workspacePage = !workspaceUsesColumns(workspace.state.selectedTab, workspace.settingsOpen);
   const baseDescriptor: Descriptor = {
     ...primaryDescriptor,
     navigation: props.descriptors[visibleRoute.key]!.navigation,
     // Identify the real visible route under the stable envelope key, or useIsFocused closes media viewers.
     route: visibleRoute,
     options: { headerShown: false },
-    render: () => (
-      <WorkspaceNativeTabs
-        hidden={
-          !workspacePage &&
-          projection.detail.length > 0 &&
-          !primaryVisible &&
-          !layout.usesSplitView &&
-          (metrics?.verticalBarEdge ?? "none") === "none"
-        }
-      >
-        {props.nativeColumns && !workspacePage ? (
-          <WorkspaceColumns
-            {...props}
-            descriptors={descriptors}
-            primary={primaryRoute}
-            detail={projection.detail}
-          />
-        ) : (
-          <V5CardStackView
-            {...props}
-            onRootVisibilityChange={setPrimaryVisible}
-            onNativePopChange={setNativelyPoppingWorkspaceRoute}
-            descriptors={descriptors}
-            state={{
-              ...props.state,
-              routes: [primaryRoute, ...projection.detail],
-              index: projection.detail.length,
-              preloadedRoutes: [],
-            }}
-          />
-        )}
-      </WorkspaceNativeTabs>
-    ),
+    render: () =>
+      props.nativeColumns ? (
+        <WorkspaceColumns
+          {...props}
+          descriptors={descriptors}
+          primary={primaryRoute}
+          detail={projection.detail}
+        />
+      ) : (
+        <V5CardStackView
+          {...props}
+          onNativePopChange={setNativelyPoppingWorkspaceRoute}
+          descriptors={descriptors}
+          state={{
+            ...props.state,
+            routes: [primaryRoute, ...projection.detail],
+            index: projection.detail.length,
+            preloadedRoutes: [],
+          }}
+        />
+      ),
   };
   const overlays = partitionStackPresentations(projection.overlays, (route) => {
     const presentation = props.descriptors[route.key]?.options.presentation;

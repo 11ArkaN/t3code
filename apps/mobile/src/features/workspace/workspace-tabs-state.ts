@@ -5,8 +5,8 @@ import {
   type NavigationTab,
 } from "./navigation-tab-order";
 
-export function resolveWorkspaceTabOrder(saved: readonly unknown[] | undefined) {
-  return navigationCustomizationAvailable()
+export function resolveWorkspaceTabOrder(platform: string, saved: readonly unknown[] | undefined) {
+  return navigationCustomizationAvailable(platform)
     ? resolveNavigationTabOrder(saved)
     : NAVIGATION_TAB_ORDER;
 }
@@ -15,11 +15,6 @@ export type WorkspaceTab = NavigationTab;
 /** Lists with their own search: the searchable tabs and the Settings list. */
 export type WorkspaceSearchTab = WorkspaceTab | "settings";
 export type WorkspaceSearchMode = "resting" | "active" | "expanded";
-
-/** Settings, Chats and pull requests pair a list with a detail column; Usage is one page. */
-export function workspaceUsesColumns(tab: WorkspaceTab, settingsOpen = false) {
-  return settingsOpen || tab === "threads" || tab === "pullRequests";
-}
 
 export interface WorkspaceTabState {
   readonly query: string;
@@ -30,7 +25,6 @@ export interface WorkspaceTabState {
 
 export interface WorkspaceTabsState {
   readonly selectedTab: WorkspaceTab;
-  readonly selectionRevision: number;
   readonly tabs: Readonly<Record<WorkspaceSearchTab, WorkspaceTabState>>;
 }
 
@@ -41,7 +35,6 @@ function emptyTab(): WorkspaceTabState {
 export function initialWorkspaceTabsState(): WorkspaceTabsState {
   return {
     selectedTab: "threads",
-    selectionRevision: 0,
     tabs: {
       threads: emptyTab(),
       pullRequests: emptyTab(),
@@ -64,13 +57,7 @@ export function workspaceTabsReducer(
   action: WorkspaceTabsAction,
 ): WorkspaceTabsState {
   if (action.type === "select")
-    return action.tab === state.selectedTab
-      ? state
-      : {
-          ...state,
-          selectedTab: action.tab,
-          selectionRevision: state.selectionRevision + 1,
-        };
+    return action.tab === state.selectedTab ? state : { ...state, selectedTab: action.tab };
   const tab = action.tab ?? state.selectedTab;
   if (tab !== "threads" && tab !== "pullRequests" && tab !== "settings") return state;
   const current = state.tabs[tab];
@@ -105,48 +92,4 @@ export function workspaceTabsReducer(
       break;
   }
   return { ...state, tabs: { ...state.tabs, [tab]: next } };
-}
-
-export const WORKSPACE_TOOLBAR = { height: 48, expandedGap: 10, edge: 16, gap: 8 };
-export const WORKSPACE_DOCK = { height: 48, tabsWidth: 176, gap: 12, bottomGap: 6 };
-
-export function workspaceDockBottomClearance(input: {
-  readonly bottomInset: number;
-  readonly keyboardHeight: number;
-}) {
-  return 64 + Math.max(input.bottomInset, input.keyboardHeight) + 16;
-}
-
-export function workspaceSearchBottomClearance(input: {
-  readonly bottomInset: number;
-  readonly bottomBarInset?: number;
-  readonly keyboardHeight: number;
-}) {
-  const bottom = input.bottomBarInset ?? Math.max(input.bottomInset, 12);
-  // AboveKeyboard lifts the field to an 8-point gap above the keyboard.
-  return (
-    Math.max(bottom, input.keyboardHeight > 0 ? input.keyboardHeight + 8 : 0) +
-    WORKSPACE_TOOLBAR.height +
-    16
-  );
-}
-
-export function workspaceToolbarHeight(mode: WorkspaceSearchMode): number {
-  return mode === "expanded"
-    ? WORKSPACE_TOOLBAR.height * 2 + WORKSPACE_TOOLBAR.expandedGap
-    : WORKSPACE_TOOLBAR.height;
-}
-
-export const NATIVE_WORKSPACE_TAB_SLOTS = [
-  "first",
-  "second",
-  "third",
-  "fourth",
-  "settings",
-] as const;
-
-export function workspaceTabForNativeSlot(order: readonly WorkspaceTab[], slot: string) {
-  if (slot === "settings") return "settings";
-  const index = NATIVE_WORKSPACE_TAB_SLOTS.findIndex((candidate) => candidate === slot);
-  return order[index] ?? null;
 }

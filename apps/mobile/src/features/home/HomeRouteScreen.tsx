@@ -174,7 +174,7 @@ export function HomeRouteScreen() {
         {Platform.OS === "ios" ? (
           <Toolbar placement="left">
             <Toolbar.Button
-              accessibilityLabel="New task"
+              accessibilityLabel="New thread"
               icon="square.and.pencil"
               onPress={startNewTask}
             />

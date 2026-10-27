@@ -61,10 +61,13 @@ export function setNativelyPoppingWorkspaceRoute(key: string | null) {
   nativelyPoppingRoute = key;
 }
 
+// Lists a detail opens from. iOS pushes `PullRequests` above Home when there are no columns.
+const LIST_ROUTES: ReadonlySet<string> = new Set(["Home", "Settings", "PullRequests"]);
+
 /**
- * The root stack after selecting `detail`: Home, then the detail alone. The route already showing
- * it, or else the detail column's current page of the same kind, keeps its key, so the column
- * updates in place instead of pushing.
+ * The root stack after selecting `detail`: Home, then the detail alone, or above the pull request
+ * list page it was opened from. The route already showing it, or else the detail column's current
+ * page of the same kind, keeps its key, so the column updates in place instead of pushing.
  */
 function workspaceDetailState<
   State extends { readonly index: number; readonly routes: readonly RouteLike[] },
@@ -73,12 +76,15 @@ function workspaceDetailState<
   const leaving = workspace.findIndex((route) => route.key !== undefined && route.key === popping);
   const live = leaving < 0 ? workspace : workspace.slice(0, leaving);
   const home = live.find((route) => route.name === "Home") ?? { name: "Home" };
-  const page = live.find((route) => route.name !== "Home" && route.name !== "Settings");
+  const list =
+    detail.name === "PullRequest" ? live.find((route) => route.name === "PullRequests") : undefined;
+  const page = live.find((route) => !LIST_ROUTES.has(route.name));
   const reused =
     live.findLast((route) => showsDetail(route, detail)) ??
     (page?.name === detail.name ? page : undefined);
   const routes = [
     home,
+    ...(list ? [list] : []),
     reused ? { ...reused, params: detail.params } : { name: detail.name, params: detail.params },
     ...(sheet ? [sheet] : []),
   ];
