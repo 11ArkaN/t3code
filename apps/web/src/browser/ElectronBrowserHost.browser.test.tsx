@@ -196,4 +196,39 @@ describe("ElectronBrowserHost", () => {
 
     expect(document.activeElement, "a hidden preview webview still holds focus").not.toBe(webview);
   });
+
+  it("blurs a focused password field in a preview's page when focus moves into the app", async () => {
+    using _state = setup();
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot("tab_7", "2026-01-01T00:00:01.000Z")],
+      serverEpoch: "server-a",
+      revision: 1,
+    });
+    await using screen = await renderHost();
+    const webview = screen.container.querySelector("webview")!;
+
+    // A same-origin frame stands in for the guest page, with its password field in a nested frame.
+    // Unlike a guest page, a frame loses its focus when the host's moves, so only the blur is sent.
+    const guestFrame = document.createElement("iframe");
+    document.body.append(guestFrame);
+    using _guestFrame = { [Symbol.dispose]: () => guestFrame.remove() };
+    const guest = guestFrame.contentDocument!;
+    guest.body.innerHTML = `<input id="search" /><iframe></iframe>`;
+    const login = guest.querySelector("iframe")!.contentDocument!;
+    login.body.innerHTML = `<input id="password" type="password" />`;
+    const guestWindow = guestFrame.contentWindow as unknown as { eval: (code: string) => unknown };
+    webview.executeJavaScript = async (code) => guestWindow.eval(code);
+    const focusThenLeavePreview = (field: HTMLElement) => {
+      field.focus();
+      webview.dispatchEvent(new FocusEvent("blur"));
+    };
+
+    const search = guest.getElementById("search")!;
+    focusThenLeavePreview(search);
+    expect(guest.activeElement, "pages under test keep their non-password focus").toBe(search);
+
+    const password = login.getElementById("password")!;
+    focusThenLeavePreview(password);
+    await vi.waitFor(() => expect(login.activeElement).not.toBe(password));
+  });
 });

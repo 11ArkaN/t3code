@@ -40,6 +40,16 @@ interface ElectronWebview extends HTMLElement {
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
 
+// A focused guest password field keeps macOS Secure Event Input on while the app has focus elsewhere.
+// Cross-site frames are unreachable from the main frame and keep their focus.
+const BLUR_FOCUSED_PASSWORD = `(() => {
+  let active = document.activeElement;
+  while (active) {
+    if (active.tagName === "INPUT" && active.type === "password") active.blur();
+    active = active.shadowRoot?.activeElement ?? active.contentDocument?.activeElement ?? null;
+  }
+})()`;
+
 declare global {
   interface HTMLElementTagNameMap {
     webview: ElectronWebview;
@@ -178,10 +188,20 @@ export function HostedBrowserWebview(props: {
         new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }),
       );
     };
+    const releaseGuestPassword = () => {
+      // Leaving the app keeps the guest's focus so it returns there; macOS drops secure input itself.
+      if (!document.hasFocus()) return;
+      void (async () => {
+        try {
+          await webview.executeJavaScript(BLUR_FOCUSED_PASSWORD);
+        } catch {}
+      })();
+    };
     webview.addEventListener("did-attach", register);
     webview.addEventListener("dom-ready", register);
     webview.addEventListener("render-process-gone", recoverGuest);
     webview.addEventListener("focus", dismissHostPopups);
+    webview.addEventListener("blur", releaseGuestPassword);
     register();
     return () => {
       disposed = true;
@@ -190,6 +210,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("dom-ready", register);
       webview.removeEventListener("render-process-gone", recoverGuest);
       webview.removeEventListener("focus", dismissHostPopups);
+      webview.removeEventListener("blur", releaseGuestPassword);
     };
   }, [
     clientSettingsHydrated,
@@ -282,6 +303,12 @@ export function HostedBrowserWebview(props: {
     viewportHeight,
     viewportWidth,
   ]);
+
+  // oxlint-disable-next-line t3code/react-effect-budget -- An unshown preview stays mounted offscreen, where a focused webview keeps taking keys.
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!active && webview && document.activeElement === webview) webview.blur();
+  }, [active]);
 
   if (!clientSettingsHydrated || !config) return null;
 
