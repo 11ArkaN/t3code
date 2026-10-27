@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
+import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
@@ -185,10 +186,13 @@ export interface BootServiceStep {
   /** Non-zero exit is logged and ignored. */
   readonly optional?: boolean;
   readonly timeout?: Duration.Input;
+  /** After the command succeeds, rerun the command with these args until they fail, within `timeout`. */
+  readonly waitWhile?: ReadonlyArray<string>;
 }
 
 /** Must exceed systemd TimeoutStopSec and launchd ExitTimeOut (both 90s) to avoid shutdown races. */
 const STOP_STEP_TIMEOUT = Duration.seconds(120);
+const WAIT_WHILE_INTERVAL = Duration.millis(500);
 
 export interface BootServiceManager {
   readonly kind: "systemd" | "launchd";
@@ -294,6 +298,15 @@ function launchdManager(input: {
   const domainTarget = `gui/${input.uid}`;
   const serviceTarget = `${domainTarget}/${BOOT_SERVICE_LAUNCHD_LABEL}`;
   // Unloaded jobs may reject bootout/enable. Bootstrap starts RunAtLoad/KeepAlive jobs; kickstart would restart them.
+  // bootout can return while the job drains through ExitTimeOut, and a bootstrap then fails EIO,
+  // so wait until `print` no longer finds the label. macOS 15 rejects the undocumented `bootout --wait`.
+  const bootout = {
+    command: "launchctl",
+    args: ["bootout", serviceTarget],
+    waitWhile: ["print", serviceTarget],
+    optional: true,
+    timeout: STOP_STEP_TIMEOUT,
+  };
   return {
     kind: "launchd",
     unitPath,
@@ -302,16 +315,7 @@ function launchdManager(input: {
         homeDir: input.homeDir,
         environmentPath: input.environmentPath,
       }),
-    // bootout --wait is undocumented but waits through ExitTimeOut, preventing bootstrap EIO races.
-    stop: [
-      {
-        step: "stopping the installed launch agent",
-        command: "launchctl",
-        args: ["bootout", "--wait", serviceTarget],
-        optional: true,
-        timeout: STOP_STEP_TIMEOUT,
-      },
-    ],
+    stop: [{ step: "stopping the installed launch agent", ...bootout }],
     activate: [
       // A persisted `launchctl disable` override refuses bootstrap; clear it.
       {
@@ -334,15 +338,7 @@ function launchdManager(input: {
       },
     ],
     // Persisted launchctl disable overrides would block reinstall.
-    deactivate: [
-      {
-        step: "stopping the service",
-        command: "launchctl",
-        args: ["bootout", "--wait", serviceTarget],
-        optional: true,
-        timeout: STOP_STEP_TIMEOUT,
-      },
-    ],
+    deactivate: [{ step: "stopping the service", ...bootout }],
     finalize: [],
   };
 }
@@ -631,6 +627,23 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     );
   });
 
+  const probe = (command: string, args: ReadonlyArray<string>) =>
+    runner.run({ command, args, timeout: Duration.seconds(5) }).pipe(Effect.option);
+  const succeeded = (result: Option.Option<ProcessRunner.ProcessRunOutput>) =>
+    Option.isSome(result) && result.value.code === 0;
+
+  const waitWhile = (entry: BootServiceStep) =>
+    entry.waitWhile === undefined
+      ? Effect.void
+      : probe(entry.command, entry.waitWhile).pipe(
+          Effect.repeat({ while: succeeded, schedule: Schedule.spaced(WAIT_WHILE_INTERVAL) }),
+          Effect.timeoutOrElse({
+            duration: entry.timeout ?? STOP_STEP_TIMEOUT,
+            orElse: () => Effect.fail(new BootServiceCommandError({ step: entry.step })),
+          }),
+          Effect.tapError(logFailure),
+        );
+
   const runSteps = (steps: ReadonlyArray<BootServiceStep>) =>
     Effect.forEach(
       steps,
@@ -640,16 +653,12 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
           entry.command,
           entry.args,
           entry.timeout === undefined ? undefined : { timeout: entry.timeout },
-        );
+        ).pipe(Effect.andThen(waitWhile(entry)));
         return entry.optional === true ? run.pipe(Effect.ignore) : run.pipe(Effect.asVoid);
       },
       { discard: true },
     );
 
-  const probe = (command: string, args: ReadonlyArray<string>) =>
-    runner.run({ command, args, timeout: Duration.seconds(5) }).pipe(Effect.option);
-  const succeeded = (result: Option.Option<ProcessRunner.ProcessRunOutput>) =>
-    Option.isSome(result) && result.value.code === 0;
   const lingerArgs = [
     "show-user",
     ...(uid === undefined ? [] : [String(uid)]),
