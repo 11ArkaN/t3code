@@ -138,7 +138,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     enabled: boolean;
     active: boolean;
     launchd: LaunchdJob | undefined;
-    onCommand?: (command: string) => Effect.Effect<void>;
+    onCommand?: (command: string) => Effect.Effect<void, ProcessRunner.ProcessRunError>;
   } = {
     failCommand: undefined,
     linger: "yes",
@@ -936,6 +936,35 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       expect(control.launchd.loaded).toBe(true);
       expect(commands.filter((command) => command.startsWith("launchctl print "))).toHaveLength(3);
+    }),
+  );
+
+  it.effect("keeps waiting for a draining launch agent when a print times out", () =>
+    Effect.gen(function* () {
+      const { service, control } = yield* makeHarness("darwin");
+      yield* service.install();
+      control.launchd = { loaded: true, exitPrints: 1 };
+      const afterBootout = yield* Deferred.make<void>();
+      // The first print times out; a premature bootstrap also releases the clock.
+      control.onCommand = (command) =>
+        Effect.gen(function* () {
+          if (!/^launchctl (print|bootstrap) /.test(command)) return;
+          const first = yield* Deferred.succeed(afterBootout, undefined);
+          if (first && command.startsWith("launchctl print ")) {
+            return yield* new ProcessRunner.ProcessTimeoutError({
+              command: "launchctl",
+              argumentCount: 2,
+              timeoutMs: 5000,
+            });
+          }
+        });
+
+      const reinstall = yield* service.install().pipe(Effect.forkChild);
+      yield* Deferred.await(afterBootout);
+      yield* TestClock.adjust("1 second");
+      yield* Fiber.join(reinstall);
+
+      expect(control.launchd.loaded).toBe(true);
     }),
   );
 

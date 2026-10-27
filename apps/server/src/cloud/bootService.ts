@@ -187,8 +187,8 @@ export interface BootServiceStep {
   readonly optional?: boolean;
   readonly timeout?: Duration.Input;
   /**
-   * Then rerun the command with these args until they fail, within `timeout`. The step succeeds
-   * once they fail, whatever the first command exited with.
+   * Then rerun the command with these args until it runs and exits non-zero, within `timeout`.
+   * The step succeeds then, whatever the first command exited with.
    */
   readonly waitWhile?: ReadonlyArray<string>;
 }
@@ -637,7 +637,11 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
 
   const waitWhile = (entry: BootServiceStep, args: ReadonlyArray<string>) =>
     probe(entry.command, args).pipe(
-      Effect.repeat({ while: succeeded, schedule: Schedule.spaced(WAIT_WHILE_INTERVAL) }),
+      // A probe that fails to run or times out proves nothing about the job; keep waiting.
+      Effect.repeat({
+        while: (result) => Option.isNone(result) || result.value.code === 0,
+        schedule: Schedule.spaced(WAIT_WHILE_INTERVAL),
+      }),
       Effect.timeoutOrElse({
         duration: entry.timeout ?? STOP_STEP_TIMEOUT,
         orElse: () => Effect.fail(new BootServiceCommandError({ step: entry.step })),
