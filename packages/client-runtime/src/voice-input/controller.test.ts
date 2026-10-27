@@ -105,6 +105,29 @@ describe("resolveTranscriptCommit", () => {
       kind: "stale",
     });
   });
+
+  it("adds word spacing for other space-delimited languages", () => {
+    const korean = draft({ text: "코드를", selection: { start: 3, end: 3 } });
+    expect(resolveTranscriptCommit(korean, korean, "검토해 주세요", "ko_KR")).toMatchObject({
+      kind: "commit",
+      text: "코드를 검토해 주세요",
+    });
+
+    const combiningMark = draft({ text: "नमस्ते", selection: { start: 6, end: 6 } });
+    expect(resolveTranscriptCommit(combiningMark, combiningMark, "दुनिया", "hi-IN")).toMatchObject({
+      kind: "commit",
+      text: "नमस्ते दुनिया",
+    });
+  });
+
+  it("keeps spaceless languages spaceless", () => {
+    const text = "修正キャッシュ";
+    const cjk = draft({ text, selection: { start: text.length, end: text.length } });
+    expect(resolveTranscriptCommit(cjk, cjk, "テストも", "ja-JP")).toMatchObject({
+      kind: "commit",
+      text: "修正キャッシュテストも",
+    });
+  });
 });
 
 describe("VoiceInputController", () => {
@@ -302,6 +325,47 @@ describe("VoiceInputController", () => {
       await next.controller.interruptRecording();
     },
   );
+
+  it("records while the speech model prepares, then transcribes once it is ready", async () => {
+    const preparation = deferred<PreparedVoiceTranscription>();
+    const harness = createHarness({
+      getTranscriber: () => ({ prepare: () => preparation.promise }),
+    });
+
+    await harness.controller.start();
+    expect(harness.controller.currentState.phase).toBe("recording");
+    expect(harness.recorder.record).toHaveBeenCalledTimes(1);
+
+    const stopping = harness.controller.stop();
+    expect(harness.controller.currentState.phase).toBe("transcribing");
+    preparation.resolve(preparedTranscription());
+    await stopping;
+
+    expect(harness.commits.map((commit) => commit.text)).toEqual(["hello new text"]);
+  });
+
+  it("discards the recording when the speech model fails to prepare", async () => {
+    const preparation = deferred<PreparedVoiceTranscription>();
+    const deleted = deferred<string>();
+    const harness = createHarness({
+      getTranscriber: () => ({ prepare: () => preparation.promise }),
+      deleteRecording: deleted.resolve,
+    });
+    await harness.controller.start();
+
+    preparation.reject(Object.assign(new Error("unsupported"), { code: "unsupported-locale" }));
+
+    expect(await deleted.promise).toBe("file:///voice.m4a");
+    expect(harness.recorder.stop).toHaveBeenCalledTimes(1);
+    expect(harness.controller.currentState).toMatchObject({
+      phase: "error",
+      error: "Voice transcription is not available for this language.",
+    });
+    const next = createHarness();
+    await next.controller.start();
+    expect(next.controller.currentState.phase).toBe("recording");
+    await next.controller.interruptRecording();
+  });
 
   it("releases the microphone before transcription starts", async () => {
     const events: string[] = [];
