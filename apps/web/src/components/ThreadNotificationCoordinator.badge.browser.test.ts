@@ -247,22 +247,29 @@ it("holds a completion through a continuation gap and notifies once it settles",
   expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Thread completed"]);
 });
 
-it("notifies a pending approval once while runs queue behind it", async () => {
+it.each([
+  ["hasPendingApprovals", "Approval needed"],
+  ["hasPendingUserInput", "Input needed"],
+] as const)("announces a pending %s once while runs queue behind it", async (flag, title) => {
   await using app = setup();
   app.start();
   const waiting = (turnId: string, pendingRequestId = "request-1") => ({
-    hasPendingApprovals: true,
+    [flag]: true,
     pendingRequestId,
     latestTurn: { turnId, state: "running", completedAt: null },
   });
   state.shells.set("one", shell(waiting("turn-1")));
-  // Each queued message becomes the shell's latest run while the approval stays pending.
+  // Each queued message becomes the shell's latest run while the request stays pending.
   state.shells.set("one", shell(waiting("turn-2")));
   state.shells.set("one", shell(waiting("turn-3")));
-  expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Approval needed"]);
+  // The shell shows the newest of overlapping requests, then the older one again.
   state.shells.set("one", shell(waiting("turn-3", "request-2")));
-  expect(TestNotification.sent.map((sent) => sent.title)).toEqual([
-    "Approval needed",
-    "Approval needed",
-  ]);
+  state.shells.set("one", shell(waiting("turn-3")));
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual([title]);
+  state.shells.set(
+    "one",
+    shell({ latestTurn: { turnId: "turn-3", state: "running", completedAt: null } }),
+  );
+  state.shells.set("one", shell(waiting("turn-3", "request-3")));
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual([title, title]);
 });
