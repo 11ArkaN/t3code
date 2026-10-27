@@ -44,9 +44,16 @@ describe("togglePairingScopeSelection", () => {
 
 describe("missingTailscaleEndpointRow", () => {
   it("offers an unchecked switch when detection was skipped", () => {
-    const row = missingTailscaleEndpointRow({ mode: "local-only", tailscaleServeEnabled: false });
-    expect(row.switchChecked).toBe(false);
-    expect(row.description).not.toMatch(/Network access/u);
+    expect(
+      missingTailscaleEndpointRow({ mode: "local-only", tailscaleServeEnabled: false }),
+    ).toEqual({
+      description: "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL.",
+      switchChecked: false,
+    });
+  });
+
+  it("hides the switch while the exposure state is unknown", () => {
+    expect(missingTailscaleEndpointRow(null).switchChecked).toBeNull();
   });
 
   it("keeps a checked switch to turn Serve off when no endpoint was found", () => {
