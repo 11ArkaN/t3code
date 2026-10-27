@@ -5,6 +5,8 @@
  * through Metro's Hermes inspector for exact app state.
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -206,6 +208,17 @@ export function makeDevice(options: DeviceOptions) {
     y: Math.round(node.rect!.y + node.rect!.height / 2),
   });
 
+  const screenSize = run([
+    "screenshot",
+    NodePath.join(NodeOS.tmpdir(), "t3-mobile-behavior-screen.png"),
+    "--json",
+  ]).pipe(
+    Effect.map((out) => {
+      const { data } = JSON.parse(out) as { data: { logicalWidth: number; logicalHeight: number } };
+      return { width: data.logicalWidth, height: data.logicalHeight };
+    }),
+  );
+
   return {
     options,
     run,
@@ -243,8 +256,32 @@ export function makeDevice(options: DeviceOptions) {
     /** Drags from y1 to y2 at x; a downward drag scrolls the content up. */
     swipe: (x: number, y1: number, y2: number) =>
       run(["swipe", String(x), String(y1), String(x), String(y2)]),
+    /**
+     * Answers iOS's "Open in" prompt. XCTest cannot see the iOS 27.1 prompt, so when `alert` fails
+     * this taps where its Open button sits, just right of and below the screen's center.
+     */
+    acceptOpenPrompt: run(["alert", "accept"], 60_000).pipe(
+      Effect.catch(() =>
+        screenSize.pipe(
+          Effect.flatMap(({ width, height }) =>
+            run(["press", String(Math.round(width / 2 + 76)), String(Math.round(height / 2 + 8))]),
+          ),
+        ),
+      ),
+    ),
     home: run(["home"]),
-    fold: (pose: "closed" | "open") => run(["fold", pose]),
+    /** The Duo simulator often follows a fold without a hinge reading, so the screen's shape confirms it. */
+    fold: (pose: "closed" | "open") =>
+      run(["fold", pose]).pipe(
+        Effect.catch((error) =>
+          screenSize.pipe(
+            Effect.filterOrFail(
+              ({ width, height }) => (pose === "closed") === width < height,
+              () => error,
+            ),
+          ),
+        ),
+      ),
     back: run(["back"]),
   };
 }

@@ -294,7 +294,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "folded-duo-back-opens-right-thread",
     area: "wrong-thread",
-    kind: "bad",
+    kind: "guard",
     source: "#20633",
     experience: "On a folded iPhone Duo, after going back, the next thread opens off screen.",
     scenario: "duoBackThenOpen",

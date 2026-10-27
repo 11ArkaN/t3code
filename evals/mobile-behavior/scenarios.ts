@@ -518,8 +518,14 @@ export const SCENARIOS = {
     // A thread can mount in a hidden column, so its title must sit inside the visible screen.
     const nodes = yield* ctx.device.nodes;
     const screen = nodes[0]?.rect;
+    // The header title is a text node inside a navigation bar; a Home row with the title is not.
+    const bars = nodes.flatMap((node) =>
+      node.kind === "navigation-bar" && node.rect ? [node.rect] : [],
+    );
     const title = nodes.find(
-      (node) => node.kind === "navigation-bar" && node.label === `Duo next ${tag}`,
+      (node) =>
+        node.label === `Duo next ${tag}` &&
+        bars.some((bar) => node.rect && node.rect.y >= bar.y && node.rect.y < bar.y + bar.height),
     )?.rect;
     return {
       opensTarget: isThread(after, next),

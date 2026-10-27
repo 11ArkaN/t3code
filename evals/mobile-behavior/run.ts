@@ -208,7 +208,7 @@ const command = Command.make(
         .pipe(Effect.orElseSucceed(() => ""));
       if (loaded === "object") break;
       // iOS asks before a URL opens another app; busy hosts can miss the first accept.
-      if (attempt % 5 === 0) yield* device.run(["alert", "accept"], 60_000).pipe(Effect.ignore);
+      if (attempt % 5 === 0) yield* device.acceptOpenPrompt.pipe(Effect.ignore);
       if (attempt > 120)
         return yield* new DeviceError({
           message:
