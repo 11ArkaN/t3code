@@ -64,9 +64,8 @@ const UNLOAD_THREAD_TIMEOUT_MS = 10 * 1000;
 const HOST_SUSPEND_GRACE_MS = 60 * 1000;
 
 // Timers keep counting while Windows and macOS sleep, so an overshoot past the grace restarts the wait.
-const sleepWhileAwake = Effect.fn("ProviderSessionManager.sleepWhileAwake")(function* (
-  ms: number,
-): Effect.fn.Return<void> {
+// Untraced: every provider event re-arms the idle timer.
+const sleepWhileAwake = Effect.fnUntraced(function* (ms: number): Effect.fn.Return<void> {
   const startedAtMs = yield* Clock.currentTimeMillis;
   yield* Effect.sleep(Duration.millis(ms));
   const elapsedMs = (yield* Clock.currentTimeMillis) - startedAtMs;
