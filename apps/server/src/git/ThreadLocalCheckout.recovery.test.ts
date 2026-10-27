@@ -24,8 +24,9 @@ import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as ThreadLocalCheckout from "./ThreadLocalCheckout.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-// These need folders that differ only by case, which Windows' default volumes can't hold.
-const caseFoldingHost = HostProcess.Platform.defaultValue() === "win32";
+// These need folders that differ only by case, which the default volumes on Windows and macOS
+// can't hold; Linux runs them, and the code is the same on every platform.
+const caseFoldingHost = ["win32", "darwin"].includes(HostProcess.Platform.defaultValue());
 
 const threadId = ThreadId.make("thread-move-to-local");
 const projectId = ProjectId.make("project-move-to-local");
