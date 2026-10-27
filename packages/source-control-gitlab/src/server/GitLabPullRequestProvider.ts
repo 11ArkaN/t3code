@@ -145,10 +145,10 @@ export const make = Effect.gen(function* () {
 
     // Merge settings only affect the detail panel's actions.
     getChangeRequestPreview: (input) =>
-      cli.getMergeRequestDetail(input).pipe(Effect.mapError(fail("getChangeRequestPreview"))),
+      cli.getMergeRequest(input).pipe(Effect.mapError(fail("getChangeRequestPreview"))),
 
     getChangeRequestSummary: (input) =>
-      cli.getMergeRequestDetail(input).pipe(Effect.mapError(fail("getChangeRequestSummary"))),
+      cli.getMergeRequest(input).pipe(Effect.mapError(fail("getChangeRequestSummary"))),
 
     getChangeRequest: (input) =>
       Effect.all(

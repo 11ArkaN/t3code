@@ -66,13 +66,13 @@ describe("getChangeRequest base freshness", () => {
   };
 
   it.effect.each(["getChangeRequestPreview", "getChangeRequestSummary"] as const)(
-    "%s preserves merge request fields without fetching project settings",
+    "%s preserves merge request fields without fetching project settings or pipeline jobs",
     (operation) =>
       Effect.gen(function* () {
         const provider = yield* make.pipe(
           Effect.provide(
             Layer.mock(GitLabPullRequestCli.GitLabPullRequestCli)({
-              getMergeRequestDetail: () => Effect.succeed(detail),
+              getMergeRequest: () => Effect.succeed(detail),
             }),
           ),
         );
