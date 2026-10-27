@@ -799,6 +799,28 @@ describe("subagent worktree ownership", () => {
     }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
   );
 
+  it.effect("keeps a checkout two top-level threads store through a symlinked parent", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(NOW_MS);
+      const fixture = yield* cleanupFixture({
+        ...DEFAULT_SERVER_SETTINGS.storageCleanup,
+        worktreeSettledAfterDays: 8,
+      });
+      const linkedParent = `${yield* fixture.fs.makeTempDirectoryScoped({ prefix: "cleanup-link-" })}/worktrees`;
+      yield* fixture.fs.symlink(fixture.config.worktreesDir, linkedParent);
+      const settled = { branch: "feature", settledAt: at(-20 * DAY_MS) };
+      fixture.setThreads([
+        shell({ ...settled, worktreePath: fixture.worktree }),
+        shell({ ...settled, id: ThreadId.make("other"), worktreePath: `${linkedParent}/feature` }),
+      ]);
+      const report = yield* fixture.service.runNow;
+      expect(report.entries).toEqual([
+        expect.objectContaining({ outcome: "kept", reason: "Shared by 2 threads" }),
+      ]);
+      expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
+    }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
+  );
+
   it.live.each([
     "running",
     "pending",
