@@ -2,14 +2,13 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 export class DesktopPrimaryPaste extends Context.Service<
   DesktopPrimaryPaste,
   {
-    readonly enabled: Effect.Effect<boolean>;
+    readonly enabled: boolean;
   }
 >()("@t3tools/desktop/app/DesktopPrimaryPaste") {}
 
@@ -32,15 +31,10 @@ export const readGtkPrimaryPasteEnabled = Effect.gen(function* () {
 /** @public */
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
-  const enabled = yield* Ref.make(true);
-  if (platform !== "darwin" && platform !== "win32") {
-    // Read in the background: sync IPC cannot wait, and the renderer loads long after this.
-    yield* readGtkPrimaryPasteEnabled.pipe(
-      Effect.flatMap((value) => Ref.set(enabled, value)),
-      Effect.forkScoped,
-    );
-  }
-  return DesktopPrimaryPaste.of({ enabled: Ref.get(enabled) });
+  // Resolved before any window exists so the first preload never sees a provisional value.
+  const enabled =
+    platform === "darwin" || platform === "win32" ? true : yield* readGtkPrimaryPasteEnabled;
+  return DesktopPrimaryPaste.of({ enabled });
 });
 
 export const layer = Layer.effect(DesktopPrimaryPaste, make);

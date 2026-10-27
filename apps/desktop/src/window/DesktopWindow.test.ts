@@ -36,6 +36,7 @@ vi.mock("electron", async (importOriginal) => ({
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopPrimaryPaste from "../app/DesktopPrimaryPaste.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
@@ -323,6 +324,7 @@ function layerTest(input: {
         } satisfies ElectronShell.ElectronShell["Service"]),
         layerElectronTheme,
         layerElectronWindow,
+        Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, { enabled: true }),
         Layer.mock(PreviewPasskeys.PreviewPasskeys)({
           bridgeEnabled: false,
           installSessionHandlers: () => {},
@@ -433,6 +435,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           } satisfies ElectronShell.ElectronShell["Service"]),
           layerElectronTheme,
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
+          Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, { enabled: true }),
           Layer.mock(PreviewPasskeys.PreviewPasskeys)({
             bridgeEnabled: false,
             installSessionHandlers: () => {},

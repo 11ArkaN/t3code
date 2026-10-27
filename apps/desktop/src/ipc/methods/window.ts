@@ -95,7 +95,7 @@ export const getPrimaryPasteEnabled = DesktopIpc.makeSyncIpcMethod({
   result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.window.getPrimaryPasteEnabled")(function* () {
     const primaryPaste = yield* DesktopPrimaryPaste.DesktopPrimaryPaste;
-    return yield* primaryPaste.enabled;
+    return primaryPaste.enabled;
   }),
 });
 
