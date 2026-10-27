@@ -25,6 +25,7 @@ const input = {
   source,
   baseRef: "origin/release",
   ignoreWhitespace: true,
+  previewInput: undefined,
   scope: "commit-scope",
   requested: { scope: "previous-scope", indices: [4] },
 };
