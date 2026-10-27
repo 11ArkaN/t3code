@@ -16,34 +16,55 @@ vi.spyOn(chromium, "launch").mockImplementation(launches.launch);
 vi.spyOn(chromium, "launchPersistentContext").mockImplementation(launches.persistent);
 vi.mock("node:fs/promises", () => ({ mkdir: launches.mkdir, rm: launches.rm }));
 
+const makePage = (detach: () => void) => {
+  const page = Object.assign(new NodeEvents.EventEmitter(), {
+    closed: false,
+    isClosed: (): boolean => page.closed,
+    close: async (): Promise<void> => {
+      if (page.closed) return;
+      page.closed = true;
+      detach();
+      page.emit("close", page);
+    },
+  });
+  return page;
+};
+
 const makeContext = () => {
-  const events = new NodeEvents.EventEmitter();
-  let closed = false;
-  return {
-    on: vi.fn((event: string, listener: () => void) => events.on(event, listener)),
-    pages: vi.fn(() => []),
-    close: vi.fn(async () => {
-      if (!closed) {
-        closed = true;
-        events.emit("close");
-      }
+  const pages: ReturnType<typeof makePage>[] = [];
+  const context = Object.assign(new NodeEvents.EventEmitter(), {
+    closed: false,
+    pages: vi.fn(() => [...pages]),
+    newPage: vi.fn(async () => {
+      const page = makePage(() => pages.splice(pages.indexOf(page), 1));
+      pages.push(page);
+      context.emit("page", page);
+      return page;
     }),
-  };
+    close: vi.fn(async (): Promise<void> => {
+      if (context.closed) return;
+      context.closed = true;
+      while (pages[0]) await pages[0].close();
+      context.emit("close", context);
+    }),
+  });
+  return context;
 };
 
 const makeBrowser = () => {
   const events = new NodeEvents.EventEmitter();
-  const contexts: ReturnType<typeof makeContext>[] = [];
+  const opened: ReturnType<typeof makeContext>[] = [];
   return {
-    contexts,
+    opened,
     on: vi.fn((event: string, listener: () => void) => events.on(event, listener)),
+    contexts: vi.fn(() => opened.filter((context) => !context.closed)),
     newContext: vi.fn(async () => {
       const context = makeContext();
-      contexts.push(context);
+      opened.push(context);
       return context as unknown as BrowserContext;
     }),
     close: vi.fn(async () => {
-      for (const context of contexts) await context.close();
+      for (const context of opened) await context.close();
       events.emit("disconnected");
     }),
   };
@@ -86,7 +107,7 @@ describe("ServerBrowserContexts", () => {
     });
     await pool.close();
     expect(browser.close).toHaveBeenCalledTimes(1);
-    for (const context of browser.contexts) expect(context.close).toHaveBeenCalled();
+    for (const context of browser.opened) expect(context.close).toHaveBeenCalled();
   });
 
   it("keeps human profiles persistent without sharing their storage with agents", async () => {
@@ -126,7 +147,7 @@ describe("ServerBrowserContexts", () => {
       force: true,
     });
     expect(await pool.contextFor("work/team", "agent")).toBe(agent);
-    expect(browser.contexts[0]?.close).not.toHaveBeenCalled();
+    expect(browser.opened[0]?.close).not.toHaveBeenCalled();
     launches.persistent.mockResolvedValue(makeContext() as unknown as BrowserContext);
     expect(await pool.contextFor("work/team")).not.toBe(persistent);
     await pool.clearProfile("never-opened");
@@ -222,6 +243,55 @@ describe("ServerBrowserContexts", () => {
     await expect(pool.contextFor("default", "agent")).rejects.toThrow("closed");
     await pool.close();
     expect(browser.close).toHaveBeenCalledTimes(1);
-    expect(browser.contexts[0]?.close).toHaveBeenCalled();
+    expect(browser.opened[0]?.close).toHaveBeenCalled();
+  });
+
+  it("closes a profile's browser once it has had no open pages for the idle grace", async () => {
+    vi.useFakeTimers();
+    using _timers = { [Symbol.dispose]: () => vi.useRealTimers() };
+    const idle = makeContext();
+    const fresh = makeContext();
+    launches.persistent
+      .mockResolvedValueOnce(idle as unknown as BrowserContext)
+      .mockResolvedValueOnce(fresh as unknown as BrowserContext);
+    const pool = new ServerBrowserContexts(options());
+    await (await (await pool.contextFor("default")).newPage()).close();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const page = await (await pool.contextFor("default")).newPage();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(idle.close, "closed a profile with an open page").not.toHaveBeenCalled();
+    await page.close();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(idle.close, "closed a profile before the idle grace").not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(idle.close, "profile browser outlived its last page").toHaveBeenCalledTimes(1);
+    expect(await pool.contextFor("default")).toBe(fresh);
+    expect(launches.persistent).toHaveBeenCalledTimes(2);
+    await pool.close();
+  });
+
+  it("closes the shared browser once it has had no contexts for the idle grace", async () => {
+    vi.useFakeTimers();
+    using _timers = { [Symbol.dispose]: () => vi.useRealTimers() };
+    const idle = makeBrowser();
+    const fresh = makeBrowser();
+    launches.launch
+      .mockResolvedValueOnce(idle as unknown as Browser)
+      .mockResolvedValueOnce(fresh as unknown as Browser);
+    const pool = new ServerBrowserContexts(options());
+    const agent = await pool.contextFor("default", "agent");
+    const scratch = await pool.scratchPage();
+    await agent.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(idle.close, "closed the shared browser with an open context").not.toHaveBeenCalled();
+    await scratch.close();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(idle.close, "closed the shared browser before the idle grace").not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(idle.close, "shared browser outlived its last context").toHaveBeenCalledTimes(1);
+    await pool.contextFor("default", "agent");
+    expect(launches.launch).toHaveBeenCalledTimes(2);
+    expect(fresh.newContext).toHaveBeenCalledTimes(1);
+    await pool.close();
   });
 });
