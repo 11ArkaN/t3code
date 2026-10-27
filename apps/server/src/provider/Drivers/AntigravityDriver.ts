@@ -36,6 +36,7 @@ import {
   isAntigravitySignInRequiredError,
   prepareAntigravityProfile,
   resolveAntigravityInstanceDirectories,
+  serveAntigravityAuthorizationUrlSink,
   type AntigravityAuthConfig,
 } from "../antigravityAuthSupport.ts";
 import {
@@ -239,6 +240,12 @@ export const AntigravityDriver: ProviderDriver<
               ),
             ),
       );
+      const authorizationUrlSink =
+        input.onAuthorizationUrl === undefined
+          ? undefined
+          : yield* serveAntigravityAuthorizationUrlSink(input.onAuthorizationUrl).pipe(
+              Effect.provideService(Crypto.Crypto, crypto),
+            );
       const runtime = yield* makeAntigravityAcpRuntime({
         ...input,
         authMethod: auth.authMethod,
@@ -250,6 +257,7 @@ export const AntigravityDriver: ProviderDriver<
           baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
           auth,
           runtimeTempDirectory,
+          ...(authorizationUrlSink === undefined ? {} : { authorizationUrlSink }),
         }),
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
       return {
