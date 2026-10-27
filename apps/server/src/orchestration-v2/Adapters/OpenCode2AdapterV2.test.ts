@@ -315,7 +315,7 @@ const resumed = (
     readonly resolveExtractedTextPath?: (path: string) => Effect.Effect<string | undefined>;
     readonly fileSystem?: FileSystem.FileSystem;
     readonly onPrompt?: (input: unknown) => void;
-    readonly relend?: (connection: OpenCode2Connection) => OpenCode2Connection;
+    readonly relend?: (connection: OpenCode2Connection) => Effect.Effect<OpenCode2Connection>;
   },
 ) =>
   Effect.gen(function* () {
@@ -2269,7 +2269,22 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
   );
 
   // regression: #25751 a defect during reconnect left the session wedged until restart
-  it.effect("fails the session when reconnecting to the event stream dies", () =>
+  const overflow = new RangeError("Maximum call stack size exceeded");
+  it.effect.each([
+    {
+      name: "fails the session when reconnecting to the event stream dies",
+      relend: (connection: OpenCode2Connection, dropped: Deferred.Deferred<void>) =>
+        Effect.succeed({
+          ...connection,
+          events: Deferred.succeed(dropped, undefined).pipe(Effect.andThen(Effect.die(overflow))),
+        }),
+    },
+    {
+      name: "fails the session when borrowing the server to reconnect dies",
+      relend: (_: OpenCode2Connection, dropped: Deferred.Deferred<void>) =>
+        Deferred.succeed(dropped, undefined).pipe(Effect.andThen(Effect.die(overflow))),
+    },
+  ])("$name", ({ relend }) =>
     Effect.gen(function* () {
       const dropped = yield* Deferred.make<void>();
       const { runtime, thread } = yield* resumed(
@@ -2278,14 +2293,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           promptAccepted,
           { type: "runtime_exit", status: "success" } as const,
         ],
-        {
-          relend: (connection) => ({
-            ...connection,
-            events: Deferred.succeed(dropped, undefined).pipe(
-              Effect.andThen(Effect.die(new RangeError("Maximum call stack size exceeded"))),
-            ),
-          }),
-        },
+        { relend: (connection) => relend(connection, dropped) },
       );
       const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
       yield* runtime.startTurn(turnInput(thread));
