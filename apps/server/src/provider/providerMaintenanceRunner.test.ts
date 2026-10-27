@@ -736,6 +736,70 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
+  it.effect.each([
+    {
+      name: "merges an updater's NO_PROXY into the system proxy bypass list",
+      updateEnv: { NO_PROXY: "registry.corp" },
+      expected: ["scutil", "npm"],
+    },
+    {
+      name: "does not read the macOS system proxy when NO_PROXY bypasses everything",
+      updateEnv: { no_proxy: "*" },
+      expected: ["npm"],
+    },
+  ])("$name", ({ updateEnv, expected }) => {
+    const spawns: Array<{ command: string; env: NodeJS.ProcessEnv | undefined }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed({
+            ...lifecycleFor(provider),
+            update: {
+              command: "npm install -g @openai/codex@latest",
+              executable: "npm",
+              args: ["install", "-g", "@openai/codex@latest"],
+              lockKey: "npm-global",
+              env: updateEnv,
+            },
+          }),
+      });
+
+      yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.deepStrictEqual(
+        spawns.map(({ command }) => command.split("/").pop()),
+        expected,
+      );
+      const updaterEnv = spawns.at(-1)?.env;
+      if (expected.includes("scutil")) {
+        assert.strictEqual(updaterEnv?.HTTPS_PROXY, "http://127.0.0.1:7890");
+        assert.strictEqual(updaterEnv?.NO_PROXY, updaterEnv?.no_proxy);
+        assert.match(updaterEnv?.NO_PROXY ?? "", /^registry\.corp,localhost,/);
+      } else {
+        assert.deepStrictEqual(updaterEnv, updateEnv);
+      }
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcess.Platform, "darwin"),
+          Layer.succeed(HostProcess.Environment, { PATH: "/usr/bin:/bin" }),
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((command, _args, options) => {
+            spawns.push({ command, env: options.env });
+            return command.endsWith("scutil")
+              ? {
+                  stdout:
+                    "<dictionary> {\n  HTTPSEnable : 1\n  HTTPSPort : 7890\n  HTTPSProxy : 127.0.0.1\n}\n",
+                }
+              : { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("passes the macOS system proxy to the updater when the env has none", () => {
     const updaterEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
     return Effect.gen(function* () {

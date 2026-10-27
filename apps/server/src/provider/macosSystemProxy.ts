@@ -82,10 +82,14 @@ export const readMacosSystemProxyEnv = Effect.fn("MacosSystemProxy.readEnv")(fun
   commandEnv: NodeJS.ProcessEnv = {},
 ) {
   const inherited = yield* HostProcess.Environment;
+  // curl reads the lowercase form first.
+  const noProxy =
+    commandEnv.no_proxy || commandEnv.NO_PROXY || inherited.no_proxy || inherited.NO_PROXY || "";
   if (
     (yield* HostProcess.Platform) !== "darwin" ||
     hasProxyEnv(inherited) ||
-    hasProxyEnv(commandEnv)
+    hasProxyEnv(commandEnv) ||
+    noProxy.trim() === "*"
   ) {
     return {};
   }
@@ -97,5 +101,5 @@ export const readMacosSystemProxyEnv = Effect.fn("MacosSystemProxy.readEnv")(fun
       Effect.timeout("2 seconds"),
       Effect.orElseSucceed(() => ""),
     );
-  return parseScutilProxy(output, inherited.NO_PROXY || inherited.no_proxy);
+  return parseScutilProxy(output, noProxy);
 });

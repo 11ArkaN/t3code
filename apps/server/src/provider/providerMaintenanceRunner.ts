@@ -303,7 +303,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       onProgress: (line: string) => Effect.Effect<void>,
     ) {
       // Read per update: the user may toggle the system proxy while T3 Code runs.
-      const env = { ...(yield* readMacosSystemProxyEnv(spawner, update.env)), ...update.env };
+      const env = { ...update.env, ...(yield* readMacosSystemProxyEnv(spawner, update.env)) };
       return yield* runProviderMaintenanceCommandWithSpawner({
         spawner,
         command: update.executable,
