@@ -89,7 +89,7 @@ import {
   subagentThreadTitle,
 } from "@t3tools/provider-core/server/subagentProjection";
 import { turnScopedSelectionTransition } from "@t3tools/provider-core/server/selectionTransition";
-import { museItemStatus, museToolPresentation } from "./itemPresentation.ts";
+import { museCommandLabel, museItemStatus, museToolPresentation } from "./itemPresentation.ts";
 
 const MUSE_PROVIDER = ProviderDriverKind.make("muse");
 const isOpenSessionError = Schema.is(ProviderAdapter.ProviderAdapterOpenSessionError);
@@ -256,6 +256,20 @@ const INFORMATIONAL_NOTIFICATIONS = new Set([
   "usage/changed",
 ]);
 const TOOLS_WITH_NATIVE_ROWS = new Set(["write_todos", "request_user_input", "workflow"]);
+// Muse returns a command to the model once `yield_time_ms` passes, keeps it running, and wakes
+// the agent when it exits. It marks the call with this status line.
+const isYieldedCommand = (item: MuseItem) =>
+  item.kind === "toolCall" && item.statusLine === "terminal process running";
+const backgroundKind = (item: MuseItem | undefined) =>
+  item?.kind === "subagent"
+    ? ("subagent" as const)
+    : item?.kind === "toolCall"
+      ? ("command" as const)
+      : ("background_task" as const);
+const backgroundLabel = (item: MuseItem | undefined) =>
+  item?.kind === "toolCall"
+    ? museCommandLabel(item)
+    : (item?.objective ?? item?.entryId ?? item?.fallbackText);
 const responseAnswerSchema = Schema.Union([Schema.String, Schema.Array(Schema.String)]);
 
 export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
@@ -675,12 +689,14 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         yield* updateThread({
           pendingBackgroundTasks: [...observedChildren].flatMap(([itemId, owner]) => {
             const item = owner.items.get(itemId);
-            const description = item?.objective ?? item?.entryId ?? item?.fallbackText;
+            const kind = backgroundKind(item);
+            const description = backgroundLabel(item);
             return [
               {
                 taskId: itemId,
-                kind:
-                  item?.kind === "subagent" ? ("subagent" as const) : ("background_task" as const),
+                kind,
+                // Muse always wakes the agent when a yielded command exits.
+                ...(kind === "command" ? { awaited: true as const } : {}),
                 ...(description ? { description } : {}),
               },
             ];
@@ -703,13 +719,19 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           return;
         const time = yield* DateTime.now;
         const status = terminal ?? itemStatus(item);
-        if (item.kind === "subagent" || item.kind === "workflow") {
+        if (
+          item.kind === "subagent" ||
+          item.kind === "workflow" ||
+          isYieldedCommand(item) ||
+          observedChildren.has(item.itemId)
+        ) {
           const wasRunning = observedChildren.has(item.itemId);
           if (status === "running") observedChildren.set(item.itemId, turn);
-          else if (observedChildren.delete(item.itemId) && active !== turn)
+          // Work that ends during another run reaches that run, not a later wake.
+          else if (observedChildren.delete(item.itemId) && active === undefined)
             finishedBackground.push({
-              kind: item.kind === "subagent" ? "subagent" : "background_task",
-              label: item.objective ?? item.entryId ?? item.fallbackText,
+              kind: backgroundKind(item),
+              label: backgroundLabel(item),
               outcome:
                 status === "completed"
                   ? "completed"
@@ -946,7 +968,9 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         const completedAt = yield* DateTime.now;
         for (const item of turn.items.values()) {
           if (
-            (item.kind === "subagent" || item.kind === "workflow") &&
+            (item.kind === "subagent" ||
+              item.kind === "workflow" ||
+              observedChildren.has(item.itemId)) &&
             item.status === "inProgress" &&
             status === "completed" &&
             disposition === "reusable"
@@ -1328,7 +1352,12 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           : undefined;
         if (itemEvent) {
           const owner = observedChildren.get(itemEvent.itemId);
-          if (owner && owner !== active && itemEvent.turnId === owner.nativeId) {
+          if (
+            owner &&
+            owner !== active &&
+            typeof itemEvent.turnId === "string" &&
+            owns(owner, itemEvent.turnId)
+          ) {
             const previous = owner.items.get(itemEvent.itemId);
             if (!previous || itemEvent.revision > previous.revision) {
               owner.items.set(itemEvent.itemId, itemEvent);
@@ -2149,7 +2178,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         providerSession: session,
         events: Stream.fromQueue(events),
         backgroundTasksEndWithProcess: true,
-        // A running workflow or a held Muse turn keeps the host: idle release must wait.
+        // Running background work or a held Muse turn keeps the host: idle release must wait.
         hasPendingBackgroundWork: Effect.sync(
           () => observedChildren.size > 0 || wake !== undefined,
         ),
