@@ -1994,7 +1994,7 @@ describe("mobile composer drafts", () => {
     expect(findResumableNewTaskDraftKey(withoutFree, project, exclude)).toBeNull();
   });
 
-  it("keeps a fresh draft the user is attaching to, so a resume cannot strand the attachment", () => {
+  it("keeps a fresh draft the user started in, even with a running picker or only whitespace", () => {
     const key = createNewTaskDraft({
       environmentId: EnvironmentId.make("environment-1"),
       projectId: ProjectId.make("project-1"),
@@ -2006,7 +2006,7 @@ describe("mobile composer drafts", () => {
     picker.finish();
     expect(isComposerDraftInUse(key)).toBe(false);
 
-    setComposerDraftText(key, "typed before drafts loaded");
+    setComposerDraftText(key, " ");
     expect(isComposerDraftInUse(key)).toBe(true);
   });
 

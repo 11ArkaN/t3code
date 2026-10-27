@@ -1951,7 +1951,10 @@ export function findResumableNewTaskDraftKey(
 
 /** Whether the user is already working in a draft: content, or a picker or import still writing to it. */
 export function isComposerDraftInUse(draftKey: string): boolean {
-  return hasUserContent(getComposerDraftSnapshot(draftKey)) || hasComposerDraftOperations(draftKey);
+  const draft = getComposerDraftSnapshot(draftKey);
+  return (
+    draft.text.length > 0 || draft.attachments.length > 0 || hasComposerDraftOperations(draftKey)
+  );
 }
 
 export async function clearComposerDraftsEnvironment(environmentId: EnvironmentId): Promise<void> {
