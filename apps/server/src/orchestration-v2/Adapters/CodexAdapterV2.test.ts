@@ -5421,6 +5421,98 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect("reports a running native child's current command as subagent progress", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const command = "sleep 8 && echo CHILD_STEP_ONE";
+        const commandItemId = "child-command-step-one";
+        const harness = yield* makeCodexReplayHarness(
+          makeCodexReplayTranscript({
+            scenario: RESUME_SCENARIO,
+            entries: [
+              ...lateChildPrefix().spawned,
+              {
+                type: "emit_inbound",
+                label: "item/started/child-command",
+                frame: {
+                  method: "item/started",
+                  params: {
+                    threadId: RESUME_CHILD_THREAD,
+                    turnId: RESUME_CHILD_TURN_1,
+                    startedAtMs: 1782622441500,
+                    item: {
+                      type: "commandExecution",
+                      id: commandItemId,
+                      command,
+                      cwd: "/workspace",
+                      processId: "4343",
+                      source: "unifiedExecStartup",
+                      status: "inProgress",
+                      commandActions: [{ type: "unknown", command }],
+                      aggregatedOutput: null,
+                      exitCode: null,
+                      durationMs: null,
+                    },
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "item/completed/progress-marker",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    threadId: RESUME_NATIVE_THREAD,
+                    turnId: RESUME_NATIVE_TURN,
+                    item: {
+                      type: "agentMessage",
+                      id: "progress-marker",
+                      text: "PROGRESS_MARKER",
+                      phase: "commentary",
+                      memoryCitation: null,
+                    },
+                  },
+                },
+              },
+            ],
+          }),
+        );
+
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-codex-child-progress"),
+            text: RESUME_PROMPT,
+          }),
+        );
+        yield* harness.until(() =>
+          harness.events.some(
+            (event) => event.type === "message.updated" && event.message.text === "PROGRESS_MARKER",
+          ),
+        );
+        assert.isTrue(
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.nativeItemRef?.nativeId === commandItemId,
+          ),
+        );
+        const latest = harness.subagentUpdates().at(-1)?.subagent;
+        assert.equal(latest?.status, "running");
+        assert.isTrue(
+          latest?.progress?.includes(command) === true,
+          `parent subagent task should name the child's running command, got progress ${String(latest?.progress)}`,
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect.each([
     ["shutdown", "cancelled"],
     ["activity-completed", "completed"],
