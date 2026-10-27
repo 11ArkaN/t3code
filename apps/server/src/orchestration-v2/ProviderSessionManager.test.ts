@@ -18,6 +18,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -2491,6 +2492,63 @@ it.effect(
         ),
       );
     }),
+);
+
+// regression: #11805 sessions were released right after the computer woke from sleep
+it.effect("ProviderSessionManagerV2 does not count host sleep toward the idle timeout", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const testClock = yield* TestClock.testClockWith(Effect.succeed);
+    // Libuv's clock keeps counting while Windows and macOS sleep, so an idle timer
+    // that came due during sleep fires on resume with the clock far past its due time.
+    let sleptMs = 0;
+    const sleptNanos = () => BigInt(sleptMs) * BigInt(1_000_000);
+    const hostClock: TestClock.TestClock = {
+      ...testClock,
+      currentTimeMillisUnsafe: () => testClock.currentTimeMillisUnsafe() + sleptMs,
+      currentTimeMillis: Effect.sync(() => testClock.currentTimeMillisUnsafe() + sleptMs),
+      currentTimeNanosUnsafe: () => testClock.currentTimeNanosUnsafe() + sleptNanos(),
+      currentTimeNanos: Effect.sync(() => testClock.currentTimeNanosUnsafe() + sleptNanos()),
+      monotonicTimeNanosUnsafe: () => testClock.monotonicTimeNanosUnsafe() + sleptNanos(),
+      monotonicTimeNanos: Effect.sync(() => testClock.monotonicTimeNanosUnsafe() + sleptNanos()),
+    };
+    const effect = Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread-provider-session-manager-host-sleep");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* eventSink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+      });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+
+      yield* TestClock.adjust("5 minutes");
+      // Two hours of sleep: the overdue timer fires on the first tick after resume.
+      sleptMs = 2 * 60 * 60_000 - 25 * 60_000;
+      yield* TestClock.adjust("25 minutes");
+      yield* Effect.yieldNow;
+      assert.isTrue(
+        Option.isSome(yield* manager.get(providerSessionId)),
+        "session was idle-released on resume after only 5 awake minutes of a 30 minute timeout",
+      );
+      assert.equal((yield* Ref.get(state)).closeCount, 0);
+
+      yield* TestClock.adjust("30 minutes");
+      yield* Effect.yieldNow;
+      assert.isTrue(Option.isNone(yield* manager.get(providerSessionId)));
+      assert.equal((yield* Ref.get(state)).closeCount, 1);
+    });
+
+    yield* effect.pipe(
+      Effect.provide(layerTest({ state, idleTimeoutMs: 30 * 60_000 })),
+      Effect.provideService(Clock.Clock, hostClock),
+    );
+  }),
 );
 
 it.effect("ProviderSessionManagerV2 releases sessions when provider event streams fail", () =>
