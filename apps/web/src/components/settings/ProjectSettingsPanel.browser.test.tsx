@@ -537,6 +537,30 @@ describe("project settings scope", () => {
   });
 });
 
+it("lists every environment's scratch project under one No project row", async () => {
+  setup();
+  state.projects = state.projects.map(({ repositoryIdentity: _, ...project }) => ({
+    ...project,
+    id: ProjectId.make(`scratch-${project.environmentId}`),
+    title: "No project",
+    workspaceRoot: `/home/${project.environmentId}/scratch`,
+    isScratch: true,
+  }));
+  await using _screen = await mountSettings({});
+
+  const rows = page.getByRole("button", { name: /^No project/ });
+  await expect.element(rows.first()).toBeVisible();
+  expect(rows.elements()).toHaveLength(1);
+
+  await userEvent.click(rows.first());
+  await expect
+    .element(page.getByRole("button", { name: "Remove checkout /home/primary/scratch" }))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("button", { name: "Remove checkout /home/remote/scratch" }))
+    .toBeVisible();
+});
+
 it("returns to the project overview after removal, clearing the selection but keeping the environment", async () => {
   setup();
   state.projects = [state.projects[1]!];
