@@ -1846,6 +1846,9 @@ describe("git reporting success it didn't achieve", () => {
   );
 });
 
+// Any fixed time well before the test runs.
+const LONG_AGO = 1_700_000_000;
+
 describe("a file another program holds open", () => {
   it.effect.skipIf(!windows)("fails and restores the checkout instead of moving halfway", () =>
     Effect.gen(function* () {
@@ -1858,6 +1861,12 @@ describe("a file another program holds open", () => {
       yield* fs.writeFileString(`${f.worktree}/lock.txt`, "changed by branch\n");
       yield* f.git(f.worktree, ["commit", "-am", "branch changes lock"]);
       yield* fs.writeFileString(`${f.worktree}/shared.txt`, "carried\n");
+      // Git rereads a file whose timestamp is as new as its index ("racy git"), and a locked file
+      // can't be read, so status would call it modified and the move would stop at that check.
+      // An older timestamp plus a refreshed index lets the move reach the switch, as it does
+      // for a file someone opened long after it last changed.
+      yield* fs.utimes(`${f.local}/lock.txt`, LONG_AGO, LONG_AGO);
+      yield* f.git(f.local, ["update-index", "--really-refresh"]);
       const lockPath = `${f.local}/lock.txt`.replaceAll("/", "\\");
       const exit = yield* Effect.scoped(
         Effect.gen(function* () {
