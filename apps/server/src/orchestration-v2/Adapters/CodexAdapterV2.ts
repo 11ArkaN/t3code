@@ -170,28 +170,21 @@ function codexFileChangeApprovalPrompt(input: {
     left.localeCompare(right),
   );
   if (entries.length > 0) {
-    return joinApprovalLines(
-      entries.map(([path, change]) => {
-        const movePath = change.type === "update" ? change.move_path : undefined;
-        return movePath ? `${change.type} ${path} -> ${movePath}` : `${change.type} ${path}`;
-      }),
-    );
+    const described = entries.slice(0, 20).map(([path, change]) => {
+      const movePath = change.type === "update" ? change.move_path : undefined;
+      return movePath ? `${change.type} ${path} -> ${movePath}` : `${change.type} ${path}`;
+    });
+    const remaining = entries.length - described.length;
+    return remaining > 0 ? `${described.join("\n")}\n+${remaining} more` : described.join("\n");
   }
   return input.grantRoot?.trim() || undefined;
-}
-
-function joinApprovalLines(lines: ReadonlyArray<string>): string | undefined {
-  if (lines.length === 0) return undefined;
-  const described = lines.slice(0, 20);
-  const remaining = lines.length - described.length;
-  return remaining > 0 ? `${described.join("\n")}\n+${remaining} more` : described.join("\n");
 }
 
 function codexFileSystemPathLabel(
   path: CodexSchema.PermissionsRequestApprovalParams__FileSystemPath,
 ): string {
   if (path.type === "path") return path.path;
-  if (path.type === "glob_pattern") return path.pattern;
+  if (path.type === "glob_pattern") return `glob ${path.pattern}`;
   const special = path.value;
   switch (special.kind) {
     case "root":
@@ -220,10 +213,9 @@ function codexPermissionsApprovalPrompt(
     ...(fileSystem?.write ?? []).map((path) => `write ${path}`),
     ...(fileSystem?.read ?? []).map((path) => `read ${path}`),
   ]);
-  return joinApprovalLines([
-    ...(permissions.network?.enabled === true ? ["Network access"] : []),
-    ...grants,
-  ]);
+  // Accepting grants every line, so none are truncated.
+  const lines = [...(permissions.network?.enabled === true ? ["Network access"] : []), ...grants];
+  return lines.length > 0 ? lines.join("\n") : undefined;
 }
 
 // Reasoning-effort changes preserve the tokenizer and context window; other changes need fresh telemetry.

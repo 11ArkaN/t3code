@@ -6848,8 +6848,13 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             fileSystem: {
               read: ["/w/docs"],
               entries: [
+                { access: "read", path: { type: "path", path: "/w/docs" } },
                 { access: "write", path: { type: "path", path: "/w/out" } },
                 { access: "deny", path: { type: "path", path: "/w/secrets" } },
+                ...Array.from({ length: 20 }, (_, index) => ({
+                  access: "read" as const,
+                  path: { type: "path" as const, path: `/w/extra-${index}` },
+                })),
               ],
             },
           },
@@ -6862,6 +6867,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           for (const fact of ["/w/docs", "read", "/w/out", "write", "/w/secrets", "deny"]) {
             assert.include(described, fact);
           }
+          assert.equal(described.split("/w/docs").length - 1, 1);
+          assert.include(described, "/w/extra-19");
           assert.isUndefined(event.turnItem.reason);
         }
       }).pipe(
