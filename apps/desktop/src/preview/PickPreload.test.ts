@@ -51,3 +51,14 @@ it("switches tools from the keyboard after a toolbar button is clicked", async (
     "V should switch to Select while focus is on a toolbar button",
   ).toBe("select");
 });
+
+it("keeps the tool while typing a tool key in the comment", async () => {
+  const shadowRoot = await startAnnotation();
+  const comment = shadowRoot.querySelector("textarea");
+  if (!comment) throw new Error("comment textarea not found");
+
+  comment.focus();
+  comment.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true, composed: true }));
+
+  expect(document.documentElement.getAttribute("data-t3code-annotation-tool")).toBe("select");
+});
