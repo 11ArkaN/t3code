@@ -120,6 +120,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
+import { useSideChatFocusStore } from "../sideChatStore";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
@@ -646,10 +648,21 @@ export default function ChatView(props: ChatViewProps) {
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
     useState<HTMLDivElement | null>(null);
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
+  const acquireComposer = () => {
+    flushSync(() => {
+      const focus = useSideChatFocusStore.getState();
+      if (sideChat !== undefined) {
+        focus.focus(scopedThreadKey(sideChat.parentRef), threadId);
+      } else {
+        focus.release(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+      }
+    });
+  };
   const citeAssistantText = (
     citation: AssistantCitation,
     sourceAnchor: AssistantCitationSourceAnchor,
   ) => {
+    acquireComposer();
     const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
     if (!inserted) {
       toastManager.add({
@@ -1817,6 +1830,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const scheduleComposerFocusStable = useStableCallback(scheduleComposerFocus);
   const insertArtifactTemplate = (template: CodexArtifactTemplate) => {
+    acquireComposer();
     const composer = composerRef.current;
     if (!composer) return;
 
@@ -3008,7 +3022,10 @@ export default function ChatView(props: ChatViewProps) {
           editBlockedReason={queuedRunEditBlockedReason({
             openQuestionCount: pendingUserInputs.length,
           })}
-          onEditQueuedRun={queuedRunEdit.beginEdit}
+          onEditQueuedRun={(request) => {
+            acquireComposer();
+            queuedRunEdit.beginEdit(request);
+          }}
           onCancelEdit={queuedRunEdit.cancelEdit}
         />
       </>
