@@ -654,7 +654,12 @@ export default function ChatView(props: ChatViewProps) {
       if (sideChat !== undefined) {
         focus.focus(scopedThreadKey(sideChat.parentRef), threadId);
       } else {
-        focus.release(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
+        const threadRef = scopeThreadRef(environmentId, threadId);
+        if (focusedSideChatId !== null) {
+          useRightPanelStore.getState().setMaximized(threadRef, false);
+          if (shouldUsePlanSidebarSheet) useRightPanelStore.getState().close(threadRef);
+        }
+        focus.release(scopedThreadKey(threadRef));
       }
     });
   };
