@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off - The recovery fixtures use Chromium OSCrypt ciphertext.
+import * as NodeCrypto from "node:crypto";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
@@ -10,12 +13,90 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/process";
+import { vi } from "vite-plus/test";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
+import { LinuxBrowserSecretPath } from "../preview/BrowserImport/LinuxBrowserSecret.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopConnectionCatalogStore from "./DesktopConnectionCatalogStore.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+
+const { keychainPassword } = vi.hoisted(() => ({
+  keychainPassword: vi.fn<(service: string, account: string) => string | null>(),
+}));
+
+vi.mock("@napi-rs/keyring", () => ({
+  Entry: class {
+    readonly getPassword;
+    constructor(service: string, account: string) {
+      this.getPassword = () => keychainPassword(service, account);
+    }
+  },
+}));
+
+const NIGHTLY_VERSION = "0.1.3-nightly.20261023.3553";
+const OLD_SAFE_STORAGE_NAME = "T3 Code (Nightly)";
+const OLD_SAFE_STORAGE_SECRET = "nightly-rename-secret";
+
+const savedCatalog = JSON.stringify({
+  schemaVersion: 1,
+  targets: [
+    { _tag: "RelayConnectionTarget", environmentId: "relay-environment", label: "Saved relay" },
+  ],
+  profiles: [],
+  credentials: [],
+  remoteDpopTokens: [],
+  disabledEnvironmentIds: [],
+});
+
+// Electron safeStorage output: v10 on macOS (Keychain secret), v11 on Linux (libsecret secret).
+const encryptWithOldSafeStorageName = (platform: "darwin" | "linux") => {
+  const key = NodeCrypto.pbkdf2Sync(
+    OLD_SAFE_STORAGE_SECRET,
+    "saltysalt",
+    platform === "darwin" ? 1003 : 1,
+    16,
+    "sha1",
+  );
+  const cipher = NodeCrypto.createCipheriv("aes-128-cbc", key, Buffer.alloc(16, " "));
+  return Buffer.concat([
+    Buffer.from(platform === "darwin" ? "v10" : "v11"),
+    cipher.update(savedCatalog, "utf8"),
+    cipher.final(),
+  ]);
+};
+
+const layerLinuxSecretHelper = (lookups: Ref.Ref<ReadonlyArray<string>>) =>
+  Layer.merge(
+    Layer.succeed(LinuxBrowserSecretPath, "/bundled/browser-secret/t3-browser-secret"),
+    Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make((command) =>
+        Effect.gen(function* () {
+          const application = command._tag === "StandardCommand" ? command.args[0] : undefined;
+          yield* Ref.update(lookups, (all) => [...all, application ?? ""]);
+          const secret = application === OLD_SAFE_STORAGE_NAME ? OLD_SAFE_STORAGE_SECRET : null;
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(secret === null ? 2 : 0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.drain,
+            stdout: Stream.encodeText(Stream.make(secret ?? "")),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          });
+        }),
+      ),
+    ),
+  );
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -54,16 +135,21 @@ function layerFor(
   encryptionAvailable = true,
   failDecrypt: Ref.Ref<boolean> | null = null,
   fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = NodeServices.layer,
+  host: {
+    readonly platform: NodeJS.Platform;
+    readonly appVersion: string;
+    readonly linuxSecretLookups?: Ref.Ref<ReadonlyArray<string>>;
+  } = { platform: "darwin", appVersion: "1.2.3" },
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
     homeDirectory: baseDir,
-    platform: "darwin",
+    platform: host.platform,
     processArch: "arm64",
-    appVersion: "1.2.3",
+    appVersion: host.appVersion,
     appPath: "/repo",
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath: host.linuxSecretLookups ? `${baseDir}/resources` : "/missing/resources",
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -76,6 +162,7 @@ function layerFor(
     layerSafeStorage,
     NodeServices.layer,
     fileSystemLayer,
+    host.linuxSecretLookups ? layerLinuxSecretHelper(host.linuxSecretLookups) : Layer.empty,
   );
   const layerSavedEnvironments = DesktopSavedEnvironments.layer.pipe(
     Layer.provideMerge(layerDependencies),
@@ -300,5 +387,91 @@ describe("DesktopConnectionCatalogStore", () => {
       yield* Ref.set(failDecrypt, false);
       assert.deepStrictEqual(yield* store.get, Option.some('{"schemaVersion":1,"targets":[]}'));
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  const writeOldNightlyCatalog = (baseDir: string, platform: "darwin" | "linux") =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const stateDir = `${baseDir}/userdata`;
+      const catalogPath = `${stateDir}/connection-catalog.json`;
+      const contents = `${JSON.stringify({
+        version: 1,
+        encryptedCatalog: Base64.encode(encryptWithOldSafeStorageName(platform)),
+      })}\n`;
+      yield* fileSystem.makeDirectory(stateDir, { recursive: true });
+      yield* fileSystem.writeFileString(catalogPath, contents);
+      return { catalogPath, contents };
+    });
+
+  it.effect(
+    "recovers a Linux catalog saved under the T3 Code (Nightly) safe storage name and re-encrypts it",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-desktop-connection-catalog-test-",
+        });
+        // The packaged libsecret helper; the spawner below answers for it.
+        yield* fileSystem.makeDirectory(`${baseDir}/resources/browser-secret`, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${baseDir}/resources/browser-secret/t3-browser-secret`,
+          "",
+        );
+        const { catalogPath, contents } = yield* writeOldNightlyCatalog(baseDir, "linux");
+        const lookups = yield* Ref.make<ReadonlyArray<string>>([]);
+        const host = {
+          platform: "linux",
+          appVersion: NIGHTLY_VERSION,
+          linuxSecretLookups: lookups,
+        } as const;
+
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+          Effect.provide(layerFor(baseDir, true, null, NodeServices.layer, host)),
+        );
+        assert.deepStrictEqual(yield* store.get, Option.some(savedCatalog));
+        assert.include(yield* Ref.get(lookups), OLD_SAFE_STORAGE_NAME);
+        assert.notEqual(yield* fileSystem.readFileString(catalogPath), contents);
+
+        yield* Ref.set(lookups, []);
+        const reopened = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+          Effect.provide(layerFor(baseDir, true, null, NodeServices.layer, host)),
+        );
+        assert.deepStrictEqual(yield* reopened.get, Option.some(savedCatalog));
+        assert.notInclude(yield* Ref.get(lookups), OLD_SAFE_STORAGE_NAME);
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect(
+    "recovers a macOS catalog saved under the T3 Code (Nightly) safe storage name and re-encrypts it",
+    () =>
+      Effect.gen(function* () {
+        keychainPassword
+          .mockReset()
+          .mockImplementation((service, account) =>
+            service === `${OLD_SAFE_STORAGE_NAME} Safe Storage` &&
+            account === `${OLD_SAFE_STORAGE_NAME} Key`
+              ? OLD_SAFE_STORAGE_SECRET
+              : null,
+          );
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-desktop-connection-catalog-test-",
+        });
+        const { catalogPath, contents } = yield* writeOldNightlyCatalog(baseDir, "darwin");
+        const host = { platform: "darwin", appVersion: NIGHTLY_VERSION } as const;
+
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+          Effect.provide(layerFor(baseDir, true, null, NodeServices.layer, host)),
+        );
+        assert.deepStrictEqual(yield* store.get, Option.some(savedCatalog));
+        assert.notEqual(yield* fileSystem.readFileString(catalogPath), contents);
+
+        keychainPassword.mockClear();
+        const reopened = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+          Effect.provide(layerFor(baseDir, true, null, NodeServices.layer, host)),
+        );
+        assert.deepStrictEqual(yield* reopened.get, Option.some(savedCatalog));
+        assert.equal(keychainPassword.mock.calls.length, 0);
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
