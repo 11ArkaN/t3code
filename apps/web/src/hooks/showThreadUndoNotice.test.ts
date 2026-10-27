@@ -88,4 +88,13 @@ describe("thread undo notice", () => {
     await notice().undo();
     expect(cancelAnnouncement).toHaveBeenCalledWith("thread-undo-notice");
   });
+
+  it("announces that the undo happened, naming the undone action", async () => {
+    const { options } = setup();
+    showThreadUndoNotice(options);
+    vi.mocked(announce).mockClear();
+    await notice().undo();
+    const spoken = vi.mocked(announce).mock.calls.map(([message]) => message);
+    expect(spoken).toContainEqual(expect.stringMatching(/unpin/i));
+  });
 });
