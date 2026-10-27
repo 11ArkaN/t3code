@@ -192,6 +192,7 @@ describe("ElectronBrowserHost", () => {
       surface.present(rect, false);
     });
     expect(webview.getAttribute("aria-hidden")).toBe("true");
+    // Lay out first so Chromium's own focus fixup has run before the check.
     webview.getBoundingClientRect();
 
     expect(document.activeElement, "a hidden preview webview still holds focus").not.toBe(webview);
@@ -199,6 +200,7 @@ describe("ElectronBrowserHost", () => {
 
   it("blurs a focused password field in a preview's page when focus moves into the app", async () => {
     using _state = setup();
+    using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     reconcilePreviewServerSessions(threadRef, {
       sessions: [snapshot("tab_7", "2026-01-01T00:00:01.000Z")],
       serverEpoch: "server-a",
@@ -208,27 +210,46 @@ describe("ElectronBrowserHost", () => {
     const webview = screen.container.querySelector("webview")!;
 
     // A same-origin frame stands in for the guest page, with its password field in a nested frame.
-    // Unlike a guest page, a frame loses its focus when the host's moves, so only the blur is sent.
+    // A frame drops its focused element when the host's focus moves and a guest page does not, so
+    // the field stays focused and the guest's page focus is set by hand.
     const guestFrame = document.createElement("iframe");
     document.body.append(guestFrame);
     using _guestFrame = { [Symbol.dispose]: () => guestFrame.remove() };
     const guest = guestFrame.contentDocument!;
+    let guestHasFocus = true;
+    guest.hasFocus = () => guestHasFocus;
     guest.body.innerHTML = `<input id="search" /><iframe></iframe>`;
     const login = guest.querySelector("iframe")!.contentDocument!;
     login.body.innerHTML = `<input id="password" type="password" />`;
     const guestWindow = guestFrame.contentWindow as unknown as { eval: (code: string) => unknown };
-    webview.executeJavaScript = async (code) => guestWindow.eval(code);
+    // Electron defers guest scripts while the page loads; the test runs each one when it chooses.
+    const pendingScripts: Array<() => void> = [];
+    webview.executeJavaScript = (code) =>
+      new Promise((resolve) => pendingScripts.push(() => resolve(guestWindow.eval(code))));
+    const runPendingScripts = () => {
+      for (const run of pendingScripts.splice(0)) run();
+    };
     const focusThenLeavePreview = (field: HTMLElement) => {
       field.focus();
+      guestHasFocus = false;
       webview.dispatchEvent(new FocusEvent("blur"));
     };
 
     const search = guest.getElementById("search")!;
     focusThenLeavePreview(search);
+    runPendingScripts();
     expect(guest.activeElement, "pages under test keep their non-password focus").toBe(search);
 
     const password = login.getElementById("password")!;
     focusThenLeavePreview(password);
-    await vi.waitFor(() => expect(login.activeElement).not.toBe(password));
+    guestHasFocus = true;
+    runPendingScripts();
+    expect(login.activeElement, "a late script blurred a field the user went back to").toBe(
+      password,
+    );
+
+    focusThenLeavePreview(password);
+    runPendingScripts();
+    expect(login.activeElement, "the guest kept its focused password field").not.toBe(password);
   });
 });
