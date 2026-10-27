@@ -419,7 +419,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
   const unrecorded: Array<string> = [];
   const targets: Array<string> = [];
   for (const launcher of [...recorded, ...found]) {
-    // A runtime's own entry, reached through a version directory on the service PATH.
+    // A runtime's own entry, on the macOS service PATH or recorded by an earlier prune, is no launcher.
     if (inVersionsDir(launcher)) continue;
     const target =
       platform === "win32"

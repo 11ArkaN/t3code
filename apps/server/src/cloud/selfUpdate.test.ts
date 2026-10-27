@@ -407,6 +407,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     readonly executable: "own runtime" | "elsewhere";
     readonly managed?: boolean;
     readonly symlinkedHome?: boolean;
+    readonly servicePlistStarts?: string;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -424,6 +425,16 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       yield* fs.utimes(sentinel, 0, 0);
     }
     if (input.symlinkedHome) yield* fs.symlink(realHome, baseDir);
+    const userHome = path.join(tempDir, "user");
+    if (input.servicePlistStarts !== undefined) {
+      const agentsDir = path.join(userHome, "Library", "LaunchAgents");
+      yield* fs.makeDirectory(agentsDir, { recursive: true });
+      const program = path.join(versionsDir, input.servicePlistStarts, "t3");
+      yield* fs.writeFileString(
+        path.join(agentsDir, "com.t3tools.t3code.service.plist"),
+        `<plist><dict>\n<key>ProgramArguments</key>\n<array>\n<string>${program}</string>\n<string>__service-launcher</string>\n</array>\n</dict></plist>\n`,
+      );
+    }
     // Like `process.execPath`, the running runtime is reported by its real path.
     const executablePath =
       input.executable === "own runtime"
@@ -436,6 +447,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
       Effect.provideService(HostProcess.ExecutablePath, executablePath),
       Effect.provideService(HostProcess.Platform, "darwin"),
       Effect.provideService(HostProcess.Environment, {}),
+      Effect.provideService(HostProcess.HomeDirectory, userHome),
       Effect.provideService(ProcessRunner.ProcessRunner, otherProcesses),
     );
     return { removed, remaining: (yield* fs.readDirectory(versionsDir)).toSorted() };
@@ -461,6 +473,18 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     Effect.gen(function* () {
       const { removed } = yield* pruneOnStart({ executable: "elsewhere", managed: true });
       expect(removed).toEqual([staleVersion]);
+    }),
+  );
+
+  // In-place updates move the active version but leave the launch agent on the launcher's runtime.
+  it.effect("keeps the runtime a stopped service's launch agent starts", () =>
+    Effect.gen(function* () {
+      const { removed, remaining } = yield* pruneOnStart({
+        executable: "own runtime",
+        servicePlistStarts: staleVersion,
+      });
+      expect(removed).toEqual([]);
+      expect(remaining).toEqual([staleVersion, packageJson.version].toSorted());
     }),
   );
 
