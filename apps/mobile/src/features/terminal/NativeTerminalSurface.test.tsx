@@ -167,21 +167,15 @@ it.each([null, 1])(
   },
 );
 
-it.each([
-  { isRunning: true, readOnly: false, delivered: ["one\ntwo"] },
-  { isRunning: true, readOnly: true, delivered: [] },
-  { isRunning: false, readOnly: false, delivered: [] },
-])(
-  "native paste delivers multi-line clipboard text only to a writable running terminal: %j",
-  async ({ isRunning, readOnly, delivered }) => {
-    await using harness = setup(1);
-    const pasted: string[] = [];
-    await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, {
-      isRunning,
-      readOnly,
-      onPaste: (text) => pasted.push(text),
-    });
-    mocks.paste("one\ntwo");
-    expect(pasted).toEqual(delivered);
-  },
-);
+it("forwards a native paste only while the terminal is writable and running", async () => {
+  await using harness = setup(1);
+  const pasted: string[] = [];
+  const onPaste = (text: string) => pasted.push(text);
+  await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, { onPaste });
+  mocks.paste("one\ntwo");
+  await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, { onPaste, readOnly: true });
+  mocks.paste("read-only");
+  await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, { onPaste, isRunning: false });
+  mocks.paste("exited");
+  expect(pasted).toEqual(["one\ntwo"]);
+});
