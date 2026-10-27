@@ -110,13 +110,24 @@ export function unsentDraftResumeDue(input: {
   return flow.projectKey === scopedProjectKey(selectedProject.environmentId, selectedProject.id);
 }
 
-/** Draft keys bound by any draft route's flow on the stack. */
-export function boundNewTaskDraftKeys(): ReadonlySet<string> {
-  return new Set(
+/**
+ * Draft keys held by draft routes on the stack: bound by a flow, or still only
+ * named by a route whose flow has not written yet.
+ */
+export function boundNewTaskDraftKeys(state: NavigationRoutes | undefined): ReadonlySet<string> {
+  const keys = new Set(
     Object.values(appAtomRegistry.get(flowStatesAtom)).flatMap((flow) =>
       flow.draftKey === null ? [] : [flow.draftKey],
     ),
   );
+  for (const route of state?.routes ?? []) {
+    const draftId = isDraftThreadRoute(route)
+      ? (route.params as { draft: NewTaskDraftRouteParams }).draft.draftId
+      : undefined;
+    const key = Array.isArray(draftId) ? draftId[0] : draftId;
+    if (key !== undefined) keys.add(key);
+  }
+  return keys;
 }
 
 /**

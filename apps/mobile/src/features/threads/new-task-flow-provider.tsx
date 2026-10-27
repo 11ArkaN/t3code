@@ -36,6 +36,7 @@ import {
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useAtomValue } from "@effect/atom-react";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { rootNavigationRef } from "../../lib/rootNavigation";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -419,7 +420,7 @@ export function NewTaskFlowProvider(
       : findResumableNewTaskDraftKey(
           appAtomRegistry.get(composerDraftsAtom),
           project,
-          boundNewTaskDraftKeys(),
+          boundNewTaskDraftKeys(rootNavigationRef.getRootState()),
         );
     updateNewTaskFlowState(flowKey, {
       unsentDraftChecked: true,

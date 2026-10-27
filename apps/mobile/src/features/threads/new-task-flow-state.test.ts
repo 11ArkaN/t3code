@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
+  boundNewTaskDraftKeys,
   INITIAL_NEW_TASK_FLOW_STATE,
   newTaskFlowKey,
   newTaskFlowStateAtom,
@@ -155,6 +156,15 @@ describe("stampedEnvironmentProjectsLoading", () => {
 });
 
 describe("unsentDraftResumeDue", () => {
+  it("holds a covered route's draft before its flow writes, so a plain route above skips it", () => {
+    const covered = draftRoute("route-covered", "new-task:covered");
+    const plain = { key: "route-plain", name: "Thread", params: { draft: {} } };
+    const state = { routes: [{ key: "home", name: "Home" }, covered, plain] };
+    pruneNewTaskFlowStates(state);
+    updateNewTaskFlowState(newTaskFlowKey(plain)!, { draftKey: "new-task:fresh" });
+
+    expect(boundNewTaskDraftKeys(state)).toEqual(new Set(["new-task:fresh", "new-task:covered"]));
+  });
   const routeProject = { environmentId: EnvironmentId.make("env"), id: ProjectId.make("route") };
   const fallbackProject = { environmentId: EnvironmentId.make("env"), id: ProjectId.make("first") };
   const flow = { ...INITIAL_NEW_TASK_FLOW_STATE, draftKey: "new-task:fresh" };
