@@ -11,6 +11,7 @@ struct FeatureThreadInspector: View {
     let browser: FeatureFileBrowserState
     @Binding var path: NavigationPath
     let close: () -> Void
+    let openFile: (String) -> Void
     let beforeRootAction: ((@escaping @MainActor () -> Void) -> Void)?
 
     var body: some View {
@@ -39,6 +40,25 @@ struct FeatureThreadInspector: View {
                 if path.isEmpty { close() } else { path.removeLast() }
             }
         )
+        .modifier(FeatureWorkspaceToolOpenURL(workspaceRoot: workspaceRoot, openFile: openFile))
+    }
+}
+
+private struct FeatureWorkspaceToolOpenURL: ViewModifier {
+    @SwiftUI.Environment(\.openURL) private var parent
+    let workspaceRoot: String?
+    let openFile: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content.environment(\.openURL, OpenURLAction { url in
+            if let workspaceRoot,
+               let path = MarkdownWorkspaceFileLink.relativePath(for: url, workspaceRoot: workspaceRoot) {
+                openFile(path)
+            } else {
+                parent(url)
+            }
+            return .handled
+        })
     }
 }
 

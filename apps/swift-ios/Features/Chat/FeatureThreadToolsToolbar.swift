@@ -39,18 +39,18 @@ struct FeatureThreadNavigationChrome: ViewModifier {
                 ToolbarItem(placement: .topBarTrailing) { actions }
             }
             .modifier(FeatureThreadToolbarBehavior())
-            .modifier(FeatureThreadTabBarVisibility())
     }
 }
 
-private struct FeatureThreadTabBarVisibility: ViewModifier {
+struct FeatureWorkspaceTabBarVisibility: ViewModifier {
     @SwiftUI.Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let showsThread: Bool
 
     func body(content: Content) -> some View {
         if #available(iOS 27.1, *) {
-            content.modifier(FeatureThreadDuoTabBarVisibility(isCompact: horizontalSizeClass == .compact))
+            content.modifier(FeatureThreadDuoTabBarVisibility(isCompact: showsThread && horizontalSizeClass == .compact))
         } else {
-            content.toolbar(horizontalSizeClass == .compact ? .hidden : .visible, for: .tabBar)
+            content.toolbar(showsThread && horizontalSizeClass == .compact ? .hidden : .visible, for: .tabBar)
         }
     }
 }

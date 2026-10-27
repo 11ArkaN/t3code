@@ -62,6 +62,7 @@ public struct ThreadDetailView: View {
     @State private var draftRestoreBaseline: FeatureComposerDraft?
     @State private var missingFileRecoverySnapshot: FeatureComposerDraft?
     @State private var draftSaveTask: Task<Void, Never>?
+    @State private var workflowTask: Task<Void, Never>?
     @State private var draftSaveError: String?
     @State private var toolSurface: FeatureThreadToolSurface?
     @State private var appliedToolRequest: FeatureThreadToolRequest?
@@ -366,11 +367,15 @@ public struct ThreadDetailView: View {
                 persistDraftBeforeLeaving()
             }
         }
+        .onChange(of: isPresentedThread) { _, isPresented in
+            if !isPresented { workflowTask?.cancel() }
+        }
         .onDisappear {
             clearVisibleThread()
             onToolDestinationChange(nil)
             persistDraftBeforeLeaving()
             if workspaceActivity?.isActive != false {
+                workflowTask?.cancel()
                 model.releaseThread(thread.id)
                 didLoadDetail = false
             }
@@ -1795,7 +1800,7 @@ public struct ThreadDetailView: View {
     private func openRelatedThread(_ id: String) {
         guard !isUpdatingWorkflow else { return }
         isUpdatingWorkflow = true
-        Task {
+        workflowTask = Task {
             defer { isUpdatingWorkflow = false }
             do {
                 try await model.prepareRelatedThread(id: id, from: thread.id)
@@ -1810,9 +1815,9 @@ public struct ThreadDetailView: View {
     private func performWorkflow(_ action: @escaping @MainActor (any FeatureThreadWorkflowClient) async throws -> String) {
         guard !isUpdatingWorkflow, let client = model.client as? any FeatureThreadWorkflowClient else { return }
         isUpdatingWorkflow = true
-        // Requested workflows continue when tabs change. The workspace checks
-        // that this thread is still selected before applying their navigation.
-        Task {
+        // Tab changes keep this work. Leaving the thread cancels it before
+        // loading a related thread can replace the active detail stream.
+        workflowTask = Task {
             defer { isUpdatingWorkflow = false }
             do {
                 let id = try await action(client)

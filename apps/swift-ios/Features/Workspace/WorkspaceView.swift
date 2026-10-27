@@ -104,6 +104,10 @@ public struct WorkspaceView: View {
     @State private var homePresentationCache = HomePresentationCache()
     @FocusState private var isSearchFocused: Bool
 
+    private var usesInspector: Bool {
+        allowsInspector && horizontalSizeClass == .regular
+    }
+
     /// Both submit paths go through `FeatureRootModel`, which owns the outbox
     /// and optimistic rows. Views never call the client to send a turn.
     init(
@@ -123,8 +127,8 @@ public struct WorkspaceView: View {
         // Read presentation state here so changes update the keyboard host,
         // including values otherwise read only by a hosted binding closure.
         let visibility: NavigationSplitViewVisibility =
-            workspaceTool != nil && allowsInspector ? .detailOnly : columnVisibility
-        let showsInspector = workspaceTool != nil && allowsInspector && !workspaceToolSheetIsVisible
+            workspaceTool != nil && usesInspector ? .detailOnly : columnVisibility
+        let showsInspector = workspaceTool != nil && usesInspector && !workspaceToolSheetIsVisible
         NavigationSplitView(columnVisibility: Binding(
             get: { visibility },
             set: { columnVisibility = $0 }
@@ -145,7 +149,7 @@ public struct WorkspaceView: View {
             // Close controls own the tool selection; resizing must preserve it.
             set: { _ in }
         )) {
-            if allowsInspector {
+            if usesInspector {
                 workspaceToolView(isInspector: true)
                     .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
                     .onAppear { workspaceInspectorIsVisible = true }
@@ -329,6 +333,9 @@ public struct WorkspaceView: View {
         .task(id: paletteSearchRequest) {
             await paletteSearch.search(paletteSearchRequest, using: model.client as? any FeatureThreadContentSearching)
         }
+        .modifier(FeatureWorkspaceTabBarVisibility(
+            showsThread: selectedThreadID != nil && preferredCompactColumn == .detail
+        ))
         .featureKeyboardCommands(
             dispatcher: keyboardDispatcher,
             context: keyboardContext,
@@ -493,7 +500,7 @@ public struct WorkspaceView: View {
     }
 
     private var detail: some View {
-        let sheetTool = hasWorkspaceGeometry && !allowsInspector && !workspaceInspectorIsVisible ? workspaceTool : nil
+        let sheetTool = hasWorkspaceGeometry && !usesInspector && !workspaceInspectorIsVisible ? workspaceTool : nil
         return NavigationStack(path: Binding(
             get: { threadSelection.navigationPath },
             set: {
@@ -514,9 +521,12 @@ public struct WorkspaceView: View {
         }
         .sheet(item: Binding(
             get: { sheetTool },
-            set: { if $0 == nil, !allowsInspector { setWorkspaceTool(nil) } }
+            // A handoff can write nil before the new geometry is published.
+            // Clear an actual dismissal only once that transition completes.
+            set: { _ in }
         ), onDismiss: {
             workspaceToolSheetIsVisible = false
+            if !allowsInspector { setWorkspaceTool(nil) }
             finishWorkspaceDismissal()
         }) { surface in
             workspaceToolView(surface: surface, isInspector: false)
@@ -560,6 +570,7 @@ public struct WorkspaceView: View {
                     // Ignore teardown writes from the old stack during a handoff.
                     set: { if workspaceTool != nil, isInspector == allowsInspector { workspaceToolPath = $0 } }
                 ), close: { setWorkspaceTool(nil) },
+                openFile: { setWorkspaceTool(.file($0, line: nil)) },
                 beforeRootAction: isInspector ? nil : { dismissTransientPresentations(before: $0) }
             )
             .id(surface.id)
