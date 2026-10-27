@@ -1222,7 +1222,7 @@ describe("orphan worktree reports", () => {
         expect(
           report.entries
             .map((entry) => ({ path: entry.path, reason: entry.reason }))
-            .sort((left, right) => left.path.localeCompare(right.path)),
+            .sort((left, right) => String(left.path).localeCompare(String(right.path))),
         ).toEqual(worktrees.map((path) => ({ path, reason: "No thread uses this worktree" })));
       }),
     ),

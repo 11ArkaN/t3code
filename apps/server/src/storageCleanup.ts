@@ -452,6 +452,25 @@ const make = Effect.gen(function* () {
       },
       Effect.orElseSucceed(() => undefined),
     );
+    // Linked worktrees can sit deeper inside a plain folder, like <repository>/replay/<n>.
+    // Read at most 64 plain folders per candidate, nearest first, so a large non-git tree stays cheap.
+    const nestedWorktrees = Effect.fnUntraced(
+      function* (folder: string, managedRoot: string) {
+        if (yield* fs.exists(path.join(folder, ".git"))) return [];
+        const found: string[] = [];
+        const pending = [folder];
+        for (let read = 0; read < 64 && read < pending.length; read++) {
+          for (const directory of yield* directories(pending[read]!, managedRoot)) {
+            if (referenced.has(pathKey(directory))) continue;
+            const gitPath = path.join(directory, ".git");
+            if (!(yield* fs.exists(gitPath))) pending.push(directory);
+            else if ((yield* fs.stat(gitPath)).type === "File") found.push(directory);
+          }
+        }
+        return found;
+      },
+      Effect.orElseSucceed((): string[] => []),
+    );
     for (const root of roots) {
       // Worktrees can be <root>/<repository>/<branch> or explicitly <root>/<name>.
       for (const projectDirectory of yield* directories(root, root)) {
@@ -463,7 +482,8 @@ const make = Effect.gen(function* () {
             return;
           }
           for (const worktreePath of yield* directories(projectDirectory, root)) {
-            yield* report(worktreePath);
+            const nested = yield* nestedWorktrees(worktreePath, root);
+            for (const target of nested.length > 0 ? nested : [worktreePath]) yield* report(target);
           }
         }).pipe(Effect.orElseSucceed(() => undefined));
       }
