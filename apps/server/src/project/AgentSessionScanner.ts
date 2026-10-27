@@ -281,12 +281,20 @@ function foldClaudeFields(fields: ClaudeFields, record: DecodedTranscriptRecord)
 const CODEX_TITLE_PREAMBLE =
   /^(?:\s*(?:<(recommended_plugins|environment_context|user_instructions|INSTRUCTIONS|in-app-browser-context)(?:\s[^>]*)?>[\s\S]*?<\/\1>|# AGENTS\.md instructions\b[^\n]*))+/;
 
-// Codex's USER_MESSAGE_BEGIN line: attachments and context precede it, the typed request follows.
-const CODEX_REQUEST_MARKER = /(?:^|\n)## My request for Codex:(?=\n|$)/;
+// Codex prompts that open with generated context end it at the last request line
+// (its extract_prompt_request); unwrapped prompts are the user's own text.
+const CODEX_CONTEXT_OPENERS = [
+  "# Context from my IDE setup:",
+  "# Files mentioned by the user:",
+  "<in-app-browser-context",
+];
+const CODEX_REQUEST_MARKER = /\n## My request for Codex:(?=\n|$)/g;
 
 function codexRequestText(text: string): string {
-  const marker = CODEX_REQUEST_MARKER.exec(text);
-  return marker === null ? text : text.slice(marker.index + marker[0].length).trim();
+  const opening = text.trimStart();
+  if (!CODEX_CONTEXT_OPENERS.some((opener) => opening.startsWith(opener))) return text;
+  const marker = Array.from(text.matchAll(CODEX_REQUEST_MARKER)).at(-1);
+  return marker === undefined ? text : text.slice(marker.index + marker[0].length).trim();
 }
 
 const CODEX_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>";

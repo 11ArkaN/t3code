@@ -2338,9 +2338,46 @@ describe("parseAgentSessionTranscript", () => {
     },
   );
 
-  it("keeps a Codex request that mentions the request marker in prose", () => {
-    const prompt =
-      "Explain why Codex adds ## My request for Codex: to prompts.\nShow where it is defined.";
+  it.each([
+    {
+      name: "keeps a request that mentions the marker in prose",
+      prompt:
+        "Explain why Codex adds ## My request for Codex: to prompts.\nShow where it is defined.",
+      expected:
+        "Explain why Codex adds ## My request for Codex: to prompts.\nShow where it is defined.",
+    },
+    {
+      name: "keeps a request that quotes the marker line in a code block",
+      prompt: [
+        "Fix this template without dropping its introduction:",
+        "```markdown",
+        "## My request for Codex:",
+        "Write the introduction",
+        "```",
+      ].join("\n"),
+      expected: [
+        "Fix this template without dropping its introduction:",
+        "```markdown",
+        "## My request for Codex:",
+        "Write the introduction",
+        "```",
+      ].join("\n"),
+    },
+    {
+      name: "takes the request after the last marker when IDE context selects one",
+      prompt: [
+        "# Context from my IDE setup:",
+        "",
+        "## Active selection of the file:",
+        "## My request for Codex:",
+        "Old selected template text",
+        "",
+        "## My request for Codex:",
+        "Please fix this parser",
+      ].join("\n"),
+      expected: "Please fix this parser",
+    },
+  ])("$name", ({ prompt, expected }) => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: [
         encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
@@ -2355,8 +2392,8 @@ describe("parseAgentSessionTranscript", () => {
       lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
     });
 
-    expect(thread?.title).toBe("Explain why Codex adds ## My request for Codex: to prompts.");
-    expect(thread?.messages.map((message) => message.text)).toEqual([prompt]);
+    expect(thread?.title).toBe(expected.split("\n")[0]);
+    expect(thread?.messages.map((message) => message.text)).toEqual([expected]);
   });
 
   it("keeps Claude prose that mentions a command tag", () => {
