@@ -95,7 +95,7 @@ export function PullRequestGuideTab({
     ) : null;
   // A failed run's detail can be hundreds of lines of CLI stderr.
   const failureDetail =
-    failure === null ? null : (
+    failure === null || running ? null : (
       <div className="max-h-40 w-full overflow-y-auto text-left font-mono text-xs whitespace-pre-wrap wrap-anywhere">
         {failure}
       </div>
@@ -110,12 +110,12 @@ export function PullRequestGuideTab({
       );
     }
     return (
-      <div className="flex max-h-full min-h-48 flex-col items-center justify-center-safe gap-2 overflow-y-auto scrollbar-gutter-both px-4 py-10 text-center [&>*]:shrink-0">
+      <div className="flex max-h-full min-h-[min(12rem,100%)] flex-col items-center justify-center-safe gap-2 overflow-y-auto scrollbar-gutter-both px-4 py-10 text-center [&>*]:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {running ? "Writing a review guide" : "No review guide yet"}
         </p>
         <p className="max-w-md text-xs text-muted-foreground">
-          {failure !== null
+          {failureDetail !== null
             ? "The last attempt failed."
             : (query.error ??
               (running
@@ -140,7 +140,7 @@ export function PullRequestGuideTab({
             : failure !== null
               ? "The last rewrite failed."
               : "Written before the latest push."}
-          {running ? null : failureDetail}
+          {failureDetail}
         </AlertDescription>
         {!running && canWrite ? <AlertAction>{writeButton("Rewrite", "xs")}</AlertAction> : null}
       </Alert>
