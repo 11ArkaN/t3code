@@ -1220,10 +1220,18 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
         (entry) => entry.path,
       );
       const atPrevious = yield* treeEntries(localPath, previousLocalHead, leftover);
-      const onDisk = yield* workingEntries(localPath, leftover);
-      const onlyStaleCopies =
-        leftover.length > 0 &&
-        leftover.every((relative) => sameWorking(onDisk.get(relative), atPrevious.get(relative)));
+      // A file another program holds open can't be read here, and for the same reason the forced
+      // switch can't write it, so it can't lose anything; every readable one must be stale.
+      let onlyStaleCopies = leftover.length > 0;
+      for (const relative of leftover) {
+        const onDisk = yield* workingEntries(localPath, [relative]).pipe(Effect.option);
+        if (
+          Option.isSome(onDisk) &&
+          !sameWorking(onDisk.value.get(relative), atPrevious.get(relative))
+        ) {
+          onlyStaleCopies = false;
+        }
+      }
       // --force also writes the previous commit's files over untracked and ignored ones.
       const arriving = (yield* run("restoreAdds", localPath, [
         "diff",
