@@ -6614,9 +6614,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           resumeThread: Effect.fn("CodexAdapterV2.resumeThread")(
             function* (threadInput) {
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
-              // Codex resumes an active goal's turns right after the response; own them before it.
-              rootProviderThreads.set(nativeThreadId, threadInput.providerThread);
-              goalUpdatesHeld.add(nativeThreadId);
               // excludeTurns is not in the generated request schema yet.
               const resume = client.raw.request("thread/resume", {
                 threadId: nativeThreadId,
@@ -6633,6 +6630,10 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     : { runtimePolicy: threadInput.runtimePolicy }),
                 }),
               });
+              // Codex resumes an active goal's turns right after the response; own them before it.
+              const previousRoot = rootProviderThreads.get(nativeThreadId);
+              rootProviderThreads.set(nativeThreadId, threadInput.providerThread);
+              goalUpdatesHeld.add(nativeThreadId);
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(
                   resume.pipe(
@@ -6655,7 +6656,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 Effect.flatMap(decodeCodexResumeMetadata),
                 Effect.onError(() =>
                   Effect.sync(() => {
-                    rootProviderThreads.delete(nativeThreadId);
+                    if (previousRoot === undefined) rootProviderThreads.delete(nativeThreadId);
+                    else rootProviderThreads.set(nativeThreadId, previousRoot);
                     goalUpdatesHeld.delete(nativeThreadId);
                   }),
                 ),
