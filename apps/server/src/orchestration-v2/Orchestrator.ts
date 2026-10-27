@@ -12949,7 +12949,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const dispatchWithReceipt = Effect.fnUntraced(function* (command: OrchestrationV2ServerCommand) {
     const dispatch = threadDispatch.withLock(
       commandThreadId(command),
-      dispatchWithReceiptEffect(command),
+      command.type === "thread.delete"
+        ? threadDispatch.withDeletionLock(dispatchWithReceiptEffect(command))
+        : dispatchWithReceiptEffect(command),
     );
     // Answering a message-mode question can also start a follow-up.
     if (
