@@ -326,8 +326,9 @@ a task that is only queued can be cancelled; other queued prompts in the child
 stay held for Resume. A nonterminal task is rejected when it has no active run,
 no queued turn of its own, and nothing it is still waiting on: a running
 delegate, a delegate result its parent has not received, or a background task. A
-terminal task returns its existing status, and its child thread still stops,
-including later runs and watch wakes. In both cases, a follow-up that lost its
+terminal task returns its existing status, and its child thread still stops the
+same way: a later running turn, including a watch wake, is interrupted, and later
+queued prompts are held, not discarded. In both cases, a follow-up that lost its
 child run but still shows as running on the parent is cancelled there and
 reported as `cancelled`. Published task results remain available. It accepts an
 optional cancellation reason.
