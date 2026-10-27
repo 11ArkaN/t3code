@@ -2,9 +2,13 @@ import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { HomeProjectScope } from "../home/homeThreadList";
+import { buildHomeProjectScopes, type HomeProjectScope } from "../home/homeThreadList";
 import {
+  getProjectScopeSelectionTarget,
+  listedProjectKey,
   newTaskDestination,
+  orderSuggestedProjectFirst,
+  pickerProjectScopes,
   resolveDraftProjectSelection,
   resolveEnvironmentProjectMatch,
 } from "./new-task-project-selection";
@@ -40,10 +44,15 @@ function makeProject(
   };
 }
 
-function makeScope(projects: ReadonlyArray<EnvironmentProject>): HomeProjectScope {
+const NONE_CONNECTED: ReadonlySet<EnvironmentId> = new Set();
+
+function makeScope(
+  projects: ReadonlyArray<EnvironmentProject>,
+  key = "github.com/t3tools/t3code",
+): HomeProjectScope {
   return {
-    key: "github.com/t3tools/t3code",
-    title: "T3 Code",
+    key,
+    title: key,
     representative: projects[0]!,
     projects,
     projectRefs: projects.map((project) => ({
@@ -115,26 +124,145 @@ describe("resolveDraftProjectSelection", () => {
 });
 
 describe("newTaskDestination", () => {
-  it("opens the current thread's project directly in split view", () => {
-    const projects = [makeProject("first"), makeProject("current", "other-environment")];
-    expect(newTaskDestination(true, projects, projects[1], "request")).toEqual({
-      draft: { requestId: "request", environmentId: "other-environment", projectId: "current" },
+  const projects = [makeProject("first"), makeProject("current", "other-environment")];
+  const scopes = projects.map((project) => makeScope([project], project.id));
+
+  it("asks for a project before opening a draft, listing the current project first", () => {
+    const destination = newTaskDestination(
+      scopes,
+      "other-environment:current",
+      "request",
+      NONE_CONNECTED,
+    );
+    expect(destination).toEqual({
+      kind: "pick",
+      picker: { requestId: "request", suggestedProjectKey: "other-environment:current" },
+    });
+    expect(
+      orderSuggestedProjectFirst(scopes, "other-environment:current").map((scope) => scope.key),
+    ).toEqual(["current", "first"]);
+  });
+
+  it("asks for a project in the existing order with nothing open", () => {
+    expect(newTaskDestination(scopes, undefined, "request", NONE_CONNECTED)).toEqual({
+      kind: "pick",
+      picker: { requestId: "request" },
+    });
+    expect(orderSuggestedProjectFirst(scopes, undefined)).toEqual(scopes);
+  });
+
+  it("opens the draft directly in the only selectable project", () => {
+    const only = makeProject("only");
+    expect(newTaskDestination([makeScope([only])], undefined, "request", NONE_CONNECTED)).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "environment", projectId: "only" },
     });
   });
-  it("uses an available project when split view has no current project", () => {
-    expect(newTaskDestination(true, [makeProject("first")], undefined, "request")).toEqual({
-      draft: { requestId: "request", environmentId: "environment", projectId: "first" },
+
+  it("counts only the projects the picker lists, not projectless threads", () => {
+    const real = makeScope([makeProject("only")], "only");
+    const scratch = makeScope([
+      makeProject("scratch", "environment", { workspaceRoot: "/scratch" }),
+    ]);
+    const serverConfigs = new Map([
+      [EnvironmentId.make("environment"), { scratchWorkspaceRoot: "/scratch" }],
+    ]);
+    expect(
+      newTaskDestination(
+        pickerProjectScopes([real, scratch], serverConfigs),
+        undefined,
+        "request",
+        NONE_CONNECTED,
+      ),
+    ).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "environment", projectId: "only" },
+    });
+    // With no real project the picker still opens, offering "No project" and Add project.
+    expect(
+      newTaskDestination(
+        pickerProjectScopes([scratch], serverConfigs),
+        undefined,
+        "request",
+        NONE_CONNECTED,
+      ),
+    ).toEqual({ kind: "pick", picker: { requestId: "request" } });
+  });
+
+  it("keeps the current workspace when the only project spans environments", () => {
+    const scope = makeScope([makeProject("t3code", "mac"), makeProject("t3code", "server")]);
+    expect(newTaskDestination([scope], "server:t3code", "request", NONE_CONNECTED)).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "server", projectId: "t3code" },
+    });
+    expect(newTaskDestination([scope], undefined, "request", NONE_CONNECTED)).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "mac", projectId: "t3code" },
     });
   });
-  it("keeps the picker when there are no projects", () => {
-    expect(newTaskDestination(true, [], undefined, "request")).toEqual({
-      draft: { requestId: "request" },
+
+  it("keeps the current project's workspace when its scope is picked", () => {
+    const mac = makeProject("t3code", "mac");
+    const server = makeProject("t3code", "server");
+    const scope = makeScope([mac, server]);
+    expect(orderSuggestedProjectFirst([scopes[0]!, scope], "server:t3code")[0]).toBe(scope);
+    expect(
+      getProjectScopeSelectionTarget(scope, {
+        preferredEnvironmentId: EnvironmentId.make("mac"),
+        suggestedProjectKey: "server:t3code",
+        connectedEnvironmentIds: new Set([EnvironmentId.make("mac"), EnvironmentId.make("server")]),
+      }),
+    ).toBe(server);
+  });
+
+  it("prefers a connected copy of a project that spans environments", () => {
+    const mac = makeProject("t3code", "mac");
+    const server = makeProject("t3code", "server");
+    const scope = makeScope([mac, server]);
+    const target = (connected: ReadonlyArray<string>, suggestedProjectKey?: string) =>
+      getProjectScopeSelectionTarget(scope, {
+        preferredEnvironmentId: EnvironmentId.make("mac"),
+        suggestedProjectKey,
+        connectedEnvironmentIds: new Set(connected.map((id) => EnvironmentId.make(id))),
+      });
+    expect(target(["server"])).toBe(server);
+    expect(target(["mac"], "server:t3code")).toBe(mac);
+    // With nothing connected, the usual order still applies.
+    expect(target([])).toBe(mac);
+    expect(
+      newTaskDestination([scope], undefined, "request", new Set([EnvironmentId.make("server")])),
+    ).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "server", projectId: "t3code" },
     });
   });
-  it("opens the same draft route in compact view", () => {
-    const project = makeProject("current");
-    expect(newTaskDestination(false, [project], project, "request")).toEqual({
-      draft: { requestId: "request", environmentId: "environment", projectId: "current" },
+
+  it("resolves a thread's older registration to the one listed at the same path", () => {
+    const repository = { repositoryKey: "github.com/t3tools/t3code" };
+    const mac = makeProject("mac-t3code", "mac", { ...repository, workspaceRoot: "/mac/t3code" });
+    const older = {
+      ...makeProject("server-old", "server", { ...repository, workspaceRoot: "/srv/t3code" }),
+      updatedAt: "2026-06-01T00:00:00.000Z",
+    };
+    const newer = makeProject("server-new", "server", {
+      ...repository,
+      workspaceRoot: "/srv/t3code",
     });
+    const projects = [mac, older, newer];
+    const scopes = buildHomeProjectScopes({
+      projects,
+      environmentId: null,
+      projectGroupingMode: "repository",
+    });
+    expect(scopes.map((scope) => scope.representative)).toEqual([mac]);
+
+    const currentProjectKey = listedProjectKey(scopes, projects, "server:server-old");
+    expect(currentProjectKey).toBe("server:server-new");
+    expect(newTaskDestination(scopes, currentProjectKey, "request", NONE_CONNECTED)).toEqual({
+      kind: "draft",
+      draft: { requestId: "request", environmentId: "server", projectId: "server-new" },
+    });
+    expect(listedProjectKey(scopes, projects, "mac:mac-t3code")).toBe("mac:mac-t3code");
+    expect(listedProjectKey(scopes, projects, undefined)).toBeUndefined();
   });
 });

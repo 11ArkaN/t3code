@@ -1,4 +1,4 @@
-import { ActiveNewTaskContext } from "../../state/active-new-task";
+import { ActiveNewTaskContext, activeNewTaskProjectKeyAtom } from "../../state/active-new-task";
 import * as Dialog from "../../components/ui/Dialog";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
@@ -321,13 +321,14 @@ export function NewTaskFlowProvider(
     if (props.active === false || activeDraftKey !== null || selectedProject === null) {
       return;
     }
+    const draftKey = createNewTaskDraft({
+      environmentId: selectedProject.environmentId,
+      projectId: selectedProject.id,
+    });
+    // The draft screen's setProject runs earlier in this commit and may already have created the
+    // route project's draft; this effect still sees the selection from before it, so keep that key.
     // oxlint-disable-next-line react/set-state-in-effect -- Creates the persistent draft once the project selection is ready; the key must exist before the composer mounts.
-    setActiveDraftKey(
-      createNewTaskDraft({
-        environmentId: selectedProject.environmentId,
-        projectId: selectedProject.id,
-      }),
-    );
+    setActiveDraftKey((current) => current ?? draftKey);
   }, [activeDraftKey, selectedProject, props.active]);
   const activePendingKey =
     props.active === false
@@ -341,6 +342,14 @@ export function NewTaskFlowProvider(
     () => (props.active === false ? null : { pendingKey: activePendingKey }),
     [props.active, activePendingKey],
   );
+  const activeProjectKey =
+    props.active !== false && selectedProject
+      ? scopedProjectKey(selectedProject.environmentId, selectedProject.id)
+      : null;
+  // oxlint-disable-next-line t3code/react-effect-budget -- Publishes the derived selection to an atom read at press time, so readers don't re-render on every draft change.
+  useEffect(() => {
+    appAtomRegistry.set(activeNewTaskProjectKeyAtom, activeProjectKey);
+  }, [activeProjectKey]);
   const selectedProjectDraft = useComposerDraft(selectedProjectDraftKey);
   const prompt = selectedProjectDraft.text;
   const attachments = selectedProjectDraft.attachments;

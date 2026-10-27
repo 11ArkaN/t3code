@@ -7,11 +7,12 @@ import {
   StackActions,
   useIsFocused,
   useNavigation,
+  useNavigationState,
+  useRoute,
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -36,7 +37,12 @@ import { useWorkspaceState } from "../../state/workspace";
 import { usePromptLinkResolver } from "../prompt-links/usePromptLinkResolver";
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
 import { useNewTaskFlow } from "./new-task-flow-provider";
-import { filterProjectScopes, getProjectScopeSelectionTarget } from "./new-task-project-selection";
+import {
+  filterProjectScopes,
+  getProjectScopeSelectionTarget,
+  orderSuggestedProjectFirst,
+  pickerProjectScopes,
+} from "./new-task-project-selection";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 type NewTaskRouteParams = {
@@ -46,6 +52,9 @@ type NewTaskRouteParams = {
   readonly pr?: string | string[];
   readonly provider?: string | string[];
   readonly model?: string | string[];
+  /** Set by a global "New thread": the chosen project opens a new draft with this request. */
+  readonly requestId?: string;
+  readonly suggestedProjectKey?: string;
 };
 
 function deriveProjectEmptyState(catalogState: WorkspaceState): {
@@ -115,6 +124,13 @@ function NewTaskHeader(props: {
   readonly onSearchTextChange: (text: string) => void;
 }) {
   const navigation = useNavigation();
+  const routeKey = useRoute().key;
+  // Split view's detail column leaves out Home and Settings, so a picker opened over either is the
+  // column's first page, with no native back button.
+  const firstDetailPage = useNavigationState((state) => {
+    const below = state.routes[state.routes.findIndex((route) => route.key === routeKey) - 1];
+    return below === undefined || below.name === "Home" || below.name === "Settings";
+  });
   const goBack = () => {
     if (navigation.canGoBack()) navigation.goBack();
     else navigation.getParent()?.goBack();
@@ -128,6 +144,9 @@ function NewTaskHeader(props: {
         options={{ headerBackVisible: true }}
         hideBottomBorder
         onBack={goBack}
+        backInSplitView={
+          firstDetailPage ? { accessibilityLabel: "Cancel", icon: "xmark" } : undefined
+        }
         actions={
           props.canAddProject
             ? [
@@ -174,11 +193,10 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const projectEmptyState = deriveProjectEmptyState(catalogState);
   const serverConfigs = useServerConfigs();
-  const listScopes = projectScopes.filter(
-    (scope) =>
-      !scope.projects.every((project) =>
-        isScratchProject(project, serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot),
-      ),
+  const suggestedProjectKey = route.params?.suggestedProjectKey;
+  const listScopes = orderSuggestedProjectFirst(
+    pickerProjectScopes(projectScopes, serverConfigs),
+    suggestedProjectKey,
   );
   const visibleScopes = filterProjectScopes(listScopes, searchText);
   const resumedDestinationKeyRef = useRef<string | null>(null);
@@ -190,6 +208,11 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       ) ?? null)
     : null;
   const { connectedEnvironments } = useRemoteConnectionStatus();
+  const connectedEnvironmentIds = new Set(
+    connectedEnvironments
+      .filter((environment) => environment.connectionState === "connected")
+      .map((environment) => environment.environmentId),
+  );
   const openScratch = useAtomCommand(projectEnvironment.openScratch, {
     reportFailure: false,
   });
@@ -228,7 +251,8 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       : navigation.getParent();
     const rootState = root?.getState();
     const threadRoute = rootState?.routes[rootState.index - 1];
-    if (isDraftThreadRoute(threadRoute)) {
+    const requestId = route.params?.requestId;
+    if (!requestId && isDraftThreadRoute(threadRoute)) {
       setProject(project);
       root?.goBack();
       return;
@@ -237,6 +261,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       name: "Thread",
       params: {
         draft: {
+          requestId,
           environmentId: String(project.environmentId),
           projectId: String(project.id),
           incomingShareId: incomingShare?.id,
@@ -460,10 +485,11 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             >
               {visibleScopes.map((scope, scopeIndex) => {
                 const hasMultipleProjects = scope.projects.length > 1;
-                const selectionTarget = getProjectScopeSelectionTarget(
-                  scope,
-                  selectedEnvironmentId,
-                );
+                const selectionTarget = getProjectScopeSelectionTarget(scope, {
+                  preferredEnvironmentId: selectedEnvironmentId,
+                  suggestedProjectKey,
+                  connectedEnvironmentIds,
+                });
                 if (Platform.OS === "android") {
                   return (
                     <NavigationRow
