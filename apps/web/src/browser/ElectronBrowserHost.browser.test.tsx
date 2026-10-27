@@ -57,6 +57,7 @@ import {
 } from "~/hooks/useSettings";
 import { reconcilePreviewServerSessions, resetPreviewStateForTests } from "~/previewStateStore";
 import { AppAtomRegistryProvider } from "~/rpc/atomRegistry";
+import { acquireBrowserSurface } from "./browserSurfaceStore";
 import { ElectronBrowserHost } from "./ElectronBrowserHost";
 
 const threadRef = scopeThreadRef(
@@ -159,5 +160,40 @@ describe("ElectronBrowserHost", () => {
     const after = webviews();
     expect(after).toHaveLength(2);
     expect(after.every((node, index) => node.isSameNode(before[index]!))).toBe(true);
+  });
+
+  it("releases a preview's focus when the preview stops being shown", async () => {
+    using _state = setup();
+    // macOS keeps inactive previews paintable offscreen instead of hiding them.
+    using _platform = vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    reconcilePreviewServerSessions(threadRef, {
+      sessions: [snapshot("tab_7", "2026-01-01T00:00:01.000Z")],
+      serverEpoch: "server-a",
+      revision: 1,
+    });
+    await using screen = await renderHost();
+
+    const webview = screen.container.querySelector("webview")!;
+    const surface = acquireBrowserSurface(webview.getAttribute("data-preview-tab")!);
+    using _surface = { [Symbol.dispose]: surface.release };
+    const rect = { x: 0, y: 0, width: 800, height: 600 };
+    await act(async () => {
+      surface.present(rect, true);
+    });
+    expect(webview.getAttribute("aria-hidden")).toBeNull();
+    // Electron's <webview> takes host focus when its guest page does; a test browser's does not.
+    webview.tabIndex = -1;
+    webview.focus();
+    expect(document.activeElement).toBe(webview);
+
+    // Closing the panel or switching tabs keeps the webview mounted offscreen. A guest that keeps
+    // focus there keeps its password field focused, which holds macOS Secure Event Input on.
+    await act(async () => {
+      surface.present(rect, false);
+    });
+    expect(webview.getAttribute("aria-hidden")).toBe("true");
+    webview.getBoundingClientRect();
+
+    expect(document.activeElement, "a hidden preview webview still holds focus").not.toBe(webview);
   });
 });
