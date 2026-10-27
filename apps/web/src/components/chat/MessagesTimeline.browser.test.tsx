@@ -385,6 +385,52 @@ describe("MessagesTimeline messages", () => {
     await click(screen.button("Safe details"));
     expect((globalThis as { __t3Xss?: number }).__t3Xss).toBeUndefined();
   });
+
+  it("loads private repository images in chat messages through the server", async () => {
+    const signed = "https://assets.example/signed-shot.png";
+    audioAsset.url = signed;
+    onTestFinished(() => {
+      audioAsset.url = "";
+    });
+    const blob = "https://github.com/acme/private/blob/abc123/docs/shot.png?raw=true";
+    const raw = "https://raw.githubusercontent.com/acme/private/abc123/docs/shot.png";
+    const upload =
+      "https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef";
+    const props = baseProps();
+    await using screen = await renderTimeline(
+      [
+        message(
+          [
+            `![After](${blob})`,
+            `![Raw](${raw})`,
+            `![Upload](${upload})`,
+            "![Public](https://example.com/public.png)",
+          ].join("\n\n"),
+          { role: "assistant" },
+          "assistant-images",
+        ),
+        message(`![Pasted](${blob})`, { role: "user" }, "user-image"),
+      ],
+      { ...props, markdownCwd: "/repo/private" },
+    );
+    const src = (name: string) =>
+      screen.container.querySelector(`img[alt="${name}"]`)?.getAttribute("src");
+    expect(src("After")).toBe(signed);
+    expect(src("Raw")).toBe(signed);
+    expect(src("Upload")).toBe(signed);
+    expect(src("Pasted")).toBe(signed);
+    expect(src("Public")).toBe("https://example.com/public.png");
+    expect(screen.text()).not.toContain("Image unavailable");
+
+    await screen.rerender(
+      <MessagesTimeline
+        {...props}
+        markdownCwd={undefined}
+        timelineEntries={[message(`![After](${blob})`, { role: "assistant" }, "assistant-images")]}
+      />,
+    );
+    expect(src("After")).toBe(blob);
+  });
 });
 
 const CITATION_REQUEST = {
