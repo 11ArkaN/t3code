@@ -1533,6 +1533,43 @@ describe("buildThreadListV2ListItems row-state stamps", () => {
     expect(settledOpen.type === "v2-thread" && settledOpen.canMoveUp).toBe(false);
     expect(threadListV2ListItemsAreEqual(settledOpen, settledClosed)).toBe(true);
   });
+
+  it("tells a cached row from an unreachable environment apart from a live one", () => {
+    const unreachableEnvironmentId = EnvironmentId.make("environment-unreachable");
+    const layout = buildThreadListV2Items({
+      threads: [
+        makeThread({ id: ThreadId.make("stamp-live"), title: "New thread" }),
+        makeThreadShellFixture({
+          environmentId: unreachableEnvironmentId,
+          id: ThreadId.make("stamp-cached"),
+          title: "Mac thread",
+        }),
+      ],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+    });
+    const rows = (connectedEnvironmentIds: ReadonlySet<EnvironmentId>) =>
+      itemsByThreadKey(
+        buildThreadListV2ListItems({
+          items: layout.items,
+          pendingTasks: [],
+          connectedEnvironmentIds,
+        }),
+      );
+    const bothConnected = rows(new Set([environmentId, unreachableEnvironmentId]));
+    const oneUnreachable = rows(new Set([environmentId]));
+    const liveKey = `v2-thread:${environmentId}:stamp-live`;
+    const cachedKey = `v2-thread:${unreachableEnvironmentId}:stamp-cached`;
+
+    expect(
+      threadListV2ListItemsAreEqual(bothConnected.get(liveKey)!, oneUnreachable.get(liveKey)!),
+    ).toBe(true);
+    expect(
+      threadListV2ListItemsAreEqual(bothConnected.get(cachedKey)!, oneUnreachable.get(cachedKey)!),
+      "a cached row from an unreachable environment is indistinguishable from a live row",
+    ).toBe(false);
+  });
 });
 
 describe("Working section beta", () => {
