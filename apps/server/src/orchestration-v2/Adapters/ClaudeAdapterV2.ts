@@ -526,14 +526,23 @@ export interface ClaudeAgentSdkQuerySession {
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
 
+const CLAUDE_SETTINGS_NOTICE_MAX_LINES = 5;
+
 function claudeSettingsErrorsNotice(errors: ReadonlyArray<SDKSettingsParseError>): string | null {
-  const lines = errors.map((error) => {
-    const file = error.file ?? "a settings file";
-    const location = error.path === "" ? "" : ` (${error.path})`;
-    const message = error.message.endsWith(".") ? error.message.slice(0, -1) : error.message;
-    return `Claude Code skipped ${file}${location}: ${message}. Its settings are not applied.`;
-  });
-  return lines.length === 0 ? null : [...new Set(lines)].join("\n");
+  const lines = [
+    ...new Set(
+      errors.map((error) => {
+        const file = error.file ?? "a settings file";
+        const location = error.path === "" ? "" : ` (${error.path})`;
+        const message = error.message.endsWith(".") ? error.message.slice(0, -1) : error.message;
+        return `Claude Code skipped ${file}${location}: ${message}. Its settings are not applied.`;
+      }),
+    ),
+  ];
+  if (lines.length === 0) return null;
+  const shown = lines.slice(0, CLAUDE_SETTINGS_NOTICE_MAX_LINES);
+  const hidden = lines.length - shown.length;
+  return [...shown, ...(hidden > 0 ? [`…and ${hidden} more.`] : [])].join("\n");
 }
 
 // The SDK Query implements get_settings but does not declare it.
@@ -3888,7 +3897,7 @@ interface ClaudeLiveQueryContext {
   receivedInit: boolean;
   permissionMode: PermissionMode;
   stopping: boolean;
-  settingsErrorsChecked: boolean;
+  settingsErrorsUnanswered: boolean;
   readonly subagentsFromEarlierProcesses: ReadonlySet<ActiveClaudeSubagent>;
 }
 
@@ -9858,7 +9867,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             receivedInit: false,
             permissionMode: queryOptions.permissionMode,
             stopping: false,
-            settingsErrorsChecked: false,
+            settingsErrorsUnanswered: false,
             subagentsFromEarlierProcesses: new Set(
               [...(yield* Ref.get(sessionSubagentsByTaskId)).values()].filter(
                 (subagent) => subagent.task.status === "running",
@@ -10099,13 +10108,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }),
               });
             });
-            // Asked once per query after the prompt is queued, so a slow reply holds only startTurn, bounded.
+            // Asked every user turn after the prompt is queued, because the CLI reloads edited settings
+            // mid-query; a CLI that never answers is not asked again by this query.
             const announceSettingsErrors = Effect.gen(function* () {
               const readSettingsErrors = querySession.query.settingsErrors;
-              if (readSettingsErrors === undefined || querySession.settingsErrorsChecked) return;
-              querySession.settingsErrorsChecked = true;
+              if (readSettingsErrors === undefined || querySession.settingsErrorsUnanswered) return;
               yield* readSettingsErrors.pipe(
                 Effect.timeout("2 seconds"),
+                Effect.tapErrorTag("TimeoutError", () =>
+                  Effect.sync(() => {
+                    querySession.settingsErrorsUnanswered = true;
+                  }),
+                ),
                 Effect.flatMap((errors) =>
                   sdkMessageLock.withPermits(1)(
                     Effect.gen(function* () {

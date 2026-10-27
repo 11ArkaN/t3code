@@ -64,6 +64,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -2634,13 +2635,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly freshQueueOnReopen?: boolean;
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
-    readonly settingsErrors?: ReadonlyArray<ClaudeSdk.SDKSettingsParseError>;
+    readonly settingsErrors?: Effect.Effect<ReadonlyArray<ClaudeSdk.SDKSettingsParseError>>;
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       // Mirrors the CLI's get_settings control response, which lists skipped settings files.
-      const settingsErrors = Effect.succeed(options?.settingsErrors ?? []);
+      const settingsErrors = options?.settingsErrors ?? Effect.succeed([]);
       const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-claude-v2-wake-",
       });
@@ -3337,40 +3338,58 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
     );
 
-    it.effect("shows a notice naming a settings file Claude skipped as malformed", () =>
+    it.effect("shows a notice once per thread when Claude skips a malformed settings file", () =>
       Effect.gen(function* () {
         const settingsFile = "/home/user/.claude/settings.json";
+        const settingsErrors = yield* Ref.make<ReadonlyArray<ClaudeSdk.SDKSettingsParseError>>([]);
         const harness = yield* makeWakeHarnessWithOptions({
-          settingsErrors: [{ file: settingsFile, path: "", message: "Invalid or malformed JSON" }],
+          settingsErrors: Ref.get(settingsErrors),
         });
         const now = yield* DateTime.now;
-        yield* harness.runtime.startTurn(
-          makeClaudeTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-settings-error"),
-            text: "Add a commit.",
-            attachments: [],
-          }),
-        );
-        yield* harness.offerAndWait(
-          makeResultFrame({ uuid: "settings-error-result", result: "Done." }),
-        );
-        yield* Queue.take(harness.terminalReceipts);
+        let ordinal = 0;
+        const runTurn = Effect.gen(function* () {
+          ordinal += 1;
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make(`attempt-settings-error-${ordinal}`),
+              providerTurnOrdinal: ordinal,
+              text: "Add a commit.",
+              attachments: [],
+            }),
+          );
+          yield* harness.offerAndWait(
+            makeResultFrame({ uuid: `settings-error-result-${ordinal}`, result: "Done." }),
+          );
+          yield* Queue.take(harness.terminalReceipts);
+        });
+        const notices = () =>
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+              ? [event.turnItem.message]
+              : [],
+          );
 
-        const notices = harness.events.flatMap((event) =>
-          event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
-            ? [event.turnItem.message]
-            : [],
-        );
+        yield* runTurn;
+        assert.deepEqual(notices(), []);
+
+        // The user breaks the file while the query stays open.
+        yield* Ref.set(settingsErrors, [
+          { file: settingsFile, path: "", message: "Invalid or malformed JSON" },
+        ]);
+        yield* runTurn;
         assert.isTrue(
-          notices.some(
+          notices().some(
             (message) =>
               message.includes(settingsFile) && message.includes("Invalid or malformed JSON"),
           ),
-          `Claude skipped ${settingsFile} as malformed JSON, but the thread showed no notice; notices: ${JSON.stringify(notices)}`,
+          `Claude skipped ${settingsFile} as malformed JSON, but the thread showed no notice; notices: ${JSON.stringify(notices())}`,
         );
+
+        yield* runTurn;
+        assert.equal(notices().length, 1, "the same skipped file is announced once per thread");
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
