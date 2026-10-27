@@ -359,6 +359,8 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       let wake:
         | { readonly nativeId: string; readonly events: Array<[string, unknown]> }
         | undefined;
+      // Muse wakes the agent to report work a user Stop ended; until the next run, end those wakes.
+      let muteWakes = false;
       const emit = (event: ProviderAdapter.ProviderAdapterV2Event) =>
         Queue.offer(events, event).pipe(Effect.asVoid);
       const decode = <A, I>(schema: Schema.Codec<A, I>, data: unknown) =>
@@ -1084,6 +1086,19 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
       });
       const owns = (turn: ActiveTurn, turnId: string) =>
         turnId === turn.nativeId || turn.joined.has(turnId);
+      const stopBackgroundWork = Effect.fnUntraced(function* () {
+        muteWakes = true;
+        if (wake) yield* request("turn/interrupt", { turnId: wake.nativeId }).pipe(Effect.ignore);
+        yield* request("task/stopAll", {});
+      });
+      const settleStoppedWork = eventPermit.withPermits(1)(
+        Effect.gen(function* () {
+          wake = undefined;
+          yield* settleObservedChildren("interrupted");
+          // Reports from stopped work must not name a later wake.
+          finishedBackground.length = 0;
+        }),
+      );
       const decideApproval = Effect.fnUntraced(function* (
         entry: PendingRequest,
         decision: ProviderApprovalDecision | undefined,
@@ -1376,6 +1391,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           params.turnId !== wake?.nativeId
         ) {
           if (active && !active.compact) active.joined.add(params.turnId);
+          else if (!active && !wake && muteWakes)
+            yield* request("turn/interrupt", { turnId: params.turnId }).pipe(
+              Effect.ignore,
+              Effect.forkIn(scope),
+            );
           else if (!active && !wake) {
             const held = { nativeId: params.turnId, events: [] };
             wake = held;
@@ -2050,6 +2070,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         yield* Effect.gen(function* () {
           thread = turnInput.providerThread;
           active = turn;
+          muteWakes = false;
           yield* emit({
             type: "provider_turn.updated",
             driver: MUSE_PROVIDER,
@@ -2262,6 +2283,15 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         interruptTurn: Effect.fn("MuseAdapter.interruptTurn")(
           function* (args) {
             const turn = active;
+            // Stop also reaches settled turns, for the background work Muse still runs.
+            if (
+              !turn &&
+              args.requestRuntimeRestart === true &&
+              validateThread(args.providerThread)
+            ) {
+              yield* stopBackgroundWork();
+              return yield* settleStoppedWork;
+            }
             if (
               !turn ||
               turn.providerTurn.id !== args.providerTurnId ||
@@ -2291,11 +2321,14 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
             for (const joined of turn.joined)
               yield* request("turn/interrupt", { turnId: joined }).pipe(Effect.ignore);
             yield* request("turn/interrupt", { turnId: turn.nativeId });
+            // User Stop also ends commands Muse yielded to the background.
+            if (args.requestRuntimeRestart === true) yield* stopBackgroundWork();
             yield* Deferred.await(turn.done).pipe(
               Effect.timeout(options.requestTimeoutMs ?? 30_000),
               Effect.mapError((cause) => protocolError("Muse did not confirm interruption", cause)),
               Effect.onError((cause) => eventPermit.withPermits(1)(failHost(cause))),
             );
+            if (args.requestRuntimeRestart === true) yield* settleStoppedWork;
           },
           (effect, args) =>
             effect.pipe(
