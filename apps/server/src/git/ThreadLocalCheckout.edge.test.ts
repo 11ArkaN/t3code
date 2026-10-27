@@ -239,7 +239,12 @@ const makeHarness = (options: HarnessOptions) => {
       Effect.provide(layer),
     );
 
-  return { thread, dispatch, move, layer, sendToThread };
+  const preview = () =>
+    ThreadLocalCheckout.previewMoveThreadToLocalCheckout({ threadId: movingThreadId }).pipe(
+      Effect.provide(layer),
+    );
+
+  return { thread, dispatch, move, preview, layer, sendToThread };
 };
 
 const expectCode = (exit: Exit.Exit<unknown, unknown>, code: string) => {
@@ -1885,7 +1890,12 @@ describe("a file another program holds open", () => {
             ]),
           );
           yield* holder.stdout.pipe(Stream.decodeText(), Stream.take(1), Stream.runDrain);
-          return yield* Effect.exit(makeHarness({ fixture: f }).move());
+          const harness = makeHarness({ fixture: f });
+          const moved = yield* Effect.exit(harness.move());
+          // While it's still held open, the next check says so instead of calling it a change.
+          const blocked = yield* harness.preview();
+          if (blocked.blocker !== null) expect(blocked.blocker.message).toContain("open");
+          return moved;
         }),
       );
       expectCode(exit, "operation_failed");

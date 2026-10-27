@@ -1047,9 +1047,16 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
     operationFailed("Unable to read the local checkout's status"),
   )).filter((entry) => !isUntracked(entry));
   if (localChanges.length > 0) {
+    // Git reports a file it can't read (held open elsewhere, on Windows) as changed.
+    const reads = yield* readableEntries(localChanges.map((entry) => entry.path));
+    const unreadable = Array.from(reads)
+      .filter(([, read]) => Option.isNone(read))
+      .map(([relative]) => relative);
     return yield* fail(
       "local_checkout_dirty",
-      `The local checkout has uncommitted changes (${describePaths(localChanges)}). Commit or stash them first.`,
+      unreadable.length === localChanges.length
+        ? `Another program has ${unreadable.slice(0, 5).join(", ")} open in the local checkout, so git can't tell whether ${unreadable.length === 1 ? "it changed" : "they changed"}. Close ${unreadable.length === 1 ? "it" : "them"}, then try again.`
+        : `The local checkout has uncommitted changes (${describePaths(localChanges)}). Commit or stash them first.`,
     );
   }
 
