@@ -479,19 +479,29 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
     }),
   );
 
-  it.effect("keeps a runtime a launcher inside the versions directory names", () =>
+  it.effect.each([
+    { name: "a launcher inside the versions directory", via: "bin" as const },
+    { name: "a PATH directory linked to its version directory", via: "linked dir" as const },
+  ])("keeps a runtime $name names", ({ via }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
-      // The installer accepts any bin directory, including one under the versions directory.
-      const binDir = path.join(versionsDir, "bin");
-      yield* fs.makeDirectory(binDir);
-      yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
-      yield* fs.writeFileString(
-        path.join(baseDir, "runtime", "launchers"),
-        `${path.join(binDir, "t3")}\n`,
-      );
+      let pathDirs = "/usr/bin:/bin";
+      if (via === "bin") {
+        // The installer accepts any bin directory, including one under the versions directory.
+        const binDir = path.join(versionsDir, "bin");
+        yield* fs.makeDirectory(binDir);
+        yield* fs.symlink(path.join(versionsDir, "1.0.0", "t3"), path.join(binDir, "t3"));
+        yield* fs.writeFileString(
+          path.join(baseDir, "runtime", "launchers"),
+          `${path.join(binDir, "t3")}\n`,
+        );
+      } else {
+        const linkedDir = path.join(baseDir, "current");
+        yield* fs.symlink(path.join(versionsDir, "1.0.0"), linkedDir);
+        pathDirs = `${linkedDir}:${pathDirs}`;
+      }
 
       const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(
         Effect.provideService(
@@ -499,7 +509,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
           lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
         ),
         Effect.provideService(HostProcess.Platform, "darwin"),
-        Effect.provideService(HostProcess.Environment, { PATH: "/usr/bin:/bin" }),
+        Effect.provideService(HostProcess.Environment, { PATH: pathDirs }),
       );
       assert.deepEqual(removed, ["1.1.0"]);
     }),
