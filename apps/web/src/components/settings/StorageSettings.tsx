@@ -163,7 +163,6 @@ function RetentionControl({
           className="w-auto"
           onValueChange={(next) => {
             setDraft(next);
-            setHeld(false);
             setEnabling((current) => (current === "draft" ? "edited" : current));
           }}
           onValueCommitted={(next, { reason, event }) => {
@@ -186,6 +185,8 @@ function RetentionControl({
               autoFocus={value === null}
               size={new Intl.NumberFormat().format(draft ?? value ?? 8).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
+              // Any edit, even one NumberField cannot parse yet, replaces a held age.
+              onChange={() => setHeld(false)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {

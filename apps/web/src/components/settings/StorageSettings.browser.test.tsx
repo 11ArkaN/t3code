@@ -255,6 +255,14 @@ it("does not save a stale age when Enter is pressed on invalid text", async () =
   await userEvent.fill(daysInput(screen), "+");
   await userEvent.keyboard("{Enter}");
   expect(state.update).not.toHaveBeenCalled();
+
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.tab();
+  await userEvent.tab({ shift: true });
+  await userEvent.fill(daysInput(screen), "+");
+  await userEvent.keyboard("{Enter}");
+  expect(state.update).not.toHaveBeenCalled();
 });
 
 it("keeps a newer pending age open when an older first save fails", async () => {
