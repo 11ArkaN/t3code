@@ -7,7 +7,11 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
-import { projectWorkspaceEnvironment, projectWorkspaceState } from "./workspaceModel";
+import {
+  projectLiveEnvironmentIds,
+  projectWorkspaceEnvironment,
+  projectWorkspaceState,
+} from "./workspaceModel";
 import type { EnvironmentPresentation } from "./environments";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
@@ -93,5 +97,24 @@ describe("mobile workspace projection", () => {
     expect(state.hasSyncingConnectedEnvironment).toBe(false);
     expect(state.hasReadyEnvironment).toBe(false);
     expect(state.connectionState).toBe("reconnecting");
+  });
+
+  it("counts a first connection attempt as live but not a failed one or an offline network", () => {
+    const live = (
+      phase: EnvironmentPresentation["connection"]["phase"],
+      networkStatus: "online" | "offline" = "online",
+    ) =>
+      projectLiveEnvironmentIds({
+        networkStatus,
+        environments: [projectWorkspaceEnvironment(ENVIRONMENT_ID, environment(phase))],
+      }).length === 1;
+
+    expect(live("connected")).toBe(true);
+    expect(live("connecting")).toBe(true);
+    expect(live("reconnecting")).toBe(false);
+    expect(live("error")).toBe(false);
+    expect(live("offline")).toBe(false);
+    expect(live("available")).toBe(false);
+    expect(live("connected", "offline")).toBe(false);
   });
 });

@@ -552,6 +552,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly thread: EnvironmentThreadShell;
   readonly variant: "card" | "slim";
   readonly hasQueuedMessages?: boolean;
+  readonly environmentOffline?: boolean;
   readonly snoozed?: boolean;
   readonly pinned?: boolean;
   readonly wokeAt: string | null;
@@ -655,13 +656,26 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const status = resolveThreadListV2Status(thread);
   const isUnread = status === "ready" && threadHasUnseenCompletion(thread);
   const workingLabel = STATUS_LABEL_BY_STATUS[status];
-  const showsWoke = status === "ready" && props.wokeAt !== null;
-  const statusLabel =
-    (status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
-      ? { ...workingLabel, label: "Goal" }
-      : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined);
+  const offline = props.environmentOffline === true;
+  const showsWoke = !offline && status === "ready" && props.wokeAt !== null;
+  // A cached status is not current, so an offline card shows that instead.
+  const statusLabel: StatusLabel | undefined = offline
+    ? {
+        label: "Offline",
+        icon: "wifi.slash",
+        className: rowAppearance.mutedForegroundClassName,
+        iconTintClassName: rowAppearance.mutedIconTintClassName,
+      }
+    : ((status === "working" && workingLabel !== undefined && thread.goal?.status === "active"
+        ? { ...workingLabel, label: "Goal" }
+        : workingLabel) ?? (isUnread ? DONE_STATUS_LABEL : undefined));
   const recede = shouldRecedeThreadRow({ status, selected });
   const timeLabel = props.timeLabel;
+  const rowAccessibilityLabel = [
+    thread.title,
+    ...(props.hasQueuedMessages ? ["messages queued to send"] : []),
+    ...(offline ? ["offline"] : []),
+  ].join(", ");
 
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
@@ -1083,9 +1097,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 )}
               >
                 {statusLabel.label}
-                {status === "working" ? (
+                {!offline && status === "working" ? (
                   <ThreadListV2Duration startedAt={resolveThreadWorkingStartedAt(thread)} />
-                ) : status === "waiting" ? (
+                ) : !offline && status === "waiting" ? (
                   <ThreadListV2Duration startedAt={thread.latestRun?.completedAt ?? null} />
                 ) : null}
               </Text>
@@ -1238,9 +1252,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         interactionOpacity={rowAppearance.interactionOpacity}
         className={rowAppearance.className}
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={
-          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
-        }
+        accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         accessibilityActions={rowAccessibilityActions}
@@ -1271,9 +1283,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         interactionClassName={rowAppearance.interactionClassName}
         interactionOpacity={rowAppearance.interactionOpacity}
         accessibilityHint={swipeAccessibilityHint}
-        accessibilityLabel={
-          props.hasQueuedMessages ? `${thread.title}, messages queued to send` : thread.title
-        }
+        accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         className={rowAppearance.className}
@@ -1323,6 +1333,18 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             ) : null}
           </View>
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
+          {offline ? (
+            <SymbolView
+              name="wifi.slash"
+              size={13}
+              tintColorClassName={
+                selected
+                  ? selectedThreadRowColors.iconTintClassName
+                  : rowAppearance.mutedIconTintClassName
+              }
+              type="monochrome"
+            />
+          ) : null}
           <Text
             className={cn(
               "text-sm tabular-nums",

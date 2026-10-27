@@ -1549,12 +1549,12 @@ describe("buildThreadListV2ListItems row-state stamps", () => {
       searchQuery: "",
       now: NOW,
     });
-    const rows = (connectedEnvironmentIds: ReadonlySet<EnvironmentId>) =>
+    const rows = (liveEnvironmentIds: ReadonlySet<EnvironmentId>) =>
       itemsByThreadKey(
         buildThreadListV2ListItems({
           items: layout.items,
           pendingTasks: [],
-          connectedEnvironmentIds,
+          liveEnvironmentIds,
         }),
       );
     const bothConnected = rows(new Set([environmentId, unreachableEnvironmentId]));

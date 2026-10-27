@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useSyncExternalStore } from "react";
@@ -5,6 +6,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../../state/olderSettledShelf";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
+import { liveEnvironmentIdsAtom } from "../../state/workspace";
 import {
   buildThreadListV2Items,
   buildThreadListV2ListItems,
@@ -56,6 +58,7 @@ export function useThreadListV2(input: {
   readonly selectedThreadKey: string | null;
 }) {
   const { threads, workingShelfEnabled } = input;
+  const liveEnvironmentIds = useAtomValue(liveEnvironmentIdsAtom);
   // A thread can stop working when the threads change, or when its exit grace expires.
   const inboxVersion = useSyncExternalStore(
     threadListInboxReturns.subscribe,
@@ -161,6 +164,7 @@ export function useThreadListV2(input: {
     snoozeLabelNow: `${input.now.slice(0, 16)}:00.000Z`,
     snoozeEnvironmentIds: input.snoozeEnvironmentIds,
     queuedThreadKeys: input.queuedThreadKeys,
+    liveEnvironmentIds,
     moveAvailability,
     shelfPreferencesLoading: !input.shelfPreferencesLoaded,
   });

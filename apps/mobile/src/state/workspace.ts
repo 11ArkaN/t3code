@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { useMemo } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 
 import { environmentShell, environmentShellSummaryAtom } from "./shell";
-import { projectWorkspaceState } from "./workspaceModel";
+import { projectLiveEnvironmentIds, projectWorkspaceState } from "./workspaceModel";
 import { environmentCatalog } from "../connection/catalog";
 import { environmentPresentations } from "./presentation";
 import { createWorkspaceConnectionAtoms } from "./workspace-connection-atoms";
@@ -23,6 +25,17 @@ const hasSyncingConnectedEnvironmentAtom = Atom.make((get) =>
       get(environmentShell.stateValueAtom(environment.environmentId)).status === "synchronizing",
   ),
 ).pipe(Atom.withLabel("mobile:has-syncing-connected-environment"));
+
+export const liveEnvironmentIdsAtom = Atom.make((get) => {
+  const next = projectLiveEnvironmentIds({
+    networkStatus: get(environmentCatalog.networkStatusValueAtom),
+    environments: get(workspaceConnections.environmentsAtom),
+  });
+  const previous = Option.getOrNull(get.self<ReadonlySet<EnvironmentId>>());
+  return previous !== null && previous.size === next.length && next.every((id) => previous.has(id))
+    ? previous
+    : new Set(next);
+}).pipe(Atom.withLabel("mobile:live-environment-ids"));
 
 export function useWorkspaceEnvironments() {
   return useAtomValue(workspaceConnections.environmentsAtom);

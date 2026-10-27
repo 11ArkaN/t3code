@@ -60,6 +60,19 @@ function overallConnectionState(
   return "available";
 }
 
+/** A first connection attempt counts as live so launch does not flash every cached row offline. */
+export function projectLiveEnvironmentIds(input: {
+  readonly networkStatus: NetworkStatus;
+  readonly environments: ReadonlyArray<WorkspaceEnvironment>;
+}): ReadonlyArray<EnvironmentId> {
+  if (input.networkStatus === "offline") return [];
+  return input.environments.flatMap((environment) =>
+    environment.connectionState === "connected" || environment.connectionState === "connecting"
+      ? [environment.environmentId]
+      : [],
+  );
+}
+
 export function projectWorkspaceConnectionState(input: {
   readonly isReady: boolean;
   readonly networkStatus: NetworkStatus;

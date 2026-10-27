@@ -583,6 +583,7 @@ export function HomeScreen(props: HomeScreenProps) {
         thread={thread}
         variant={item.item.variant}
         hasQueuedMessages={item.hasQueuedMessages}
+        environmentOffline={item.environmentOffline}
         snoozed={item.item.snoozed}
         pinned={item.item.pinned}
         wokeAt={item.item.wokeAt}
