@@ -205,15 +205,7 @@ async function handle(message: Message) {
     case "session/new": {
       sessionCount += 1;
       const sessionId = `eval-session-${process.pid}-${sessionCount}`;
-      reply({ sessionId, configOptions, modes });
-      // Real fx lists its commands after a session opens; the composer's / menu shows them.
-      return update(sessionId, {
-        sessionUpdate: "available_commands_update",
-        availableCommands: [
-          { name: "review", description: "Review the current change" },
-          { name: "explain", description: "Explain the selected code" },
-        ],
-      });
+      return reply({ sessionId, configOptions, modes });
     }
     case "session/load":
     case "session/resume":

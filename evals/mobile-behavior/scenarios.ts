@@ -8,7 +8,14 @@ import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { APP_ID, SCHEME, type Device, type FeedSample, type ProbeState } from "./device.ts";
+import {
+  APP_ID,
+  SCHEME,
+  type AxNode,
+  type Device,
+  type FeedSample,
+  type ProbeState,
+} from "./device.ts";
 import { uuid, type EvalEnvironment } from "./environment.ts";
 import { feedMotion, frameStats, type Metrics } from "./grade.ts";
 
@@ -92,6 +99,9 @@ const typeInComposer = Effect.fn("scenario.typeInComposer")(function* (
 ) {
   const { x, y } = ctx.device.center(yield* composerNode(ctx));
   yield* ctx.device.run(["fill", String(x), String(y), text]);
+  // The composer slides up with the keyboard; a tap before it settles lands on the keyboard.
+  yield* ctx.device.waitFor("the keyboard", (state) => state.composer.keyboard, 10_000);
+  yield* Effect.sleep("1 second");
 });
 
 const countUserText = (
@@ -295,22 +305,26 @@ export const SCENARIOS = {
     } satisfies Metrics;
   }, failure),
 
-  /** Types `/`, picks the first suggestion, and checks the editor keeps focus. */
+  /** Types `/eval`, picks the workspace's `eval-notes` skill, and checks the editor keeps focus. */
   skillPick: Effect.fn("scenario.skillPick")(function* (ctx: ScenarioContext) {
     yield* openThread(ctx, yield* freshThread(ctx));
-    yield* typeInComposer(ctx, "/");
-    yield* Effect.sleep("1500 millis");
+    // Short screens fit one menu row above the keyboard, so filter the menu to one row.
+    yield* typeInComposer(ctx, "/eval");
     const composer = yield* composerNode(ctx);
-    // Menu rows read "<icon>, /<command>, <description>"; /model opens a sheet, so pick another.
-    const item = (yield* ctx.device.nodes).find(
-      (node) =>
-        node.rect !== undefined &&
-        node.rect.y + node.rect.height <= composer.rect!.y &&
-        /, (\/|skill:)/.test(node.label ?? "") &&
-        node.label?.includes("/model") !== true,
-    );
+    // Menu rows read "<icon>, skill:<name>, <description>". Skills arrive with a workspace
+    // snapshot the draft change requests.
+    let item: AxNode | undefined;
+    for (let attempt = 0; attempt < 10 && !item?.rect; attempt++) {
+      yield* Effect.sleep("1 second");
+      item = (yield* ctx.device.nodes).find(
+        (node) =>
+          node.rect !== undefined &&
+          node.rect.y + node.rect.height <= composer.rect!.y &&
+          node.label?.includes(", skill:eval-notes") === true,
+      );
+    }
     if (!item?.rect)
-      return yield* new ScenarioFailure({ message: "The / menu listed no commands." });
+      return yield* new ScenarioFailure({ message: "The / menu did not list skill:eval-notes." });
     const { x, y } = ctx.device.center(item);
     yield* ctx.device.pressAt(x, y);
     yield* Effect.sleep("1500 millis");

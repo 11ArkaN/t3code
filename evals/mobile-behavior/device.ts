@@ -78,7 +78,7 @@ export interface Recording {
   readonly feed: ReadonlyArray<FeedSample>;
 }
 
-interface AxNode {
+export interface AxNode {
   readonly type?: string;
   readonly label?: string;
   readonly value?: string;

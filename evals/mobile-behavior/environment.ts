@@ -86,6 +86,13 @@ function writeScratch(baseDir: string) {
   NodeFS.mkdirSync(control, { recursive: true });
   NodeFS.mkdirSync(workspace, { recursive: true });
   NodeFS.writeFileSync(NodePath.join(workspace, "README.md"), "# acme app\n");
+  // The / menu's pickable row; without it, fx finds only skills in folders above `--out`.
+  const skill = NodePath.join(workspace, ".fx/skills/eval-notes");
+  NodeFS.mkdirSync(skill, { recursive: true });
+  NodeFS.writeFileSync(
+    NodePath.join(skill, "SKILL.md"),
+    "---\nname: eval-notes\ndescription: Takes notes for the eval.\n---\nTake notes.\n",
+  );
   const git = (...args: string[]) =>
     NodeChildProcess.execFileSync("git", ["-C", workspace, ...args], { stdio: "ignore" });
   git("init", "-q");
