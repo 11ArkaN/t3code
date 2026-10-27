@@ -148,6 +148,58 @@ function windowFitsWithinDisplay(
   );
 }
 
+function overlapArea(left: DisplayBounds, right: DisplayBounds): number {
+  const width = Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x);
+  const height = Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y);
+  return width > 0 && height > 0 ? width * height : 0;
+}
+
+function displayMatching(
+  bounds: DisplayBounds,
+  displays: readonly DisplayBounds[],
+): DisplayBounds | undefined {
+  let match: DisplayBounds | undefined;
+  let matchArea = 0;
+  for (const display of displays) {
+    const area = overlapArea(bounds, display);
+    if (area > matchArea) {
+      match = display;
+      matchArea = area;
+    }
+  }
+  return match;
+}
+
+// Normal bounds of a maximized window can sit on another display than the window itself.
+function normalBoundsOnWindowDisplay(
+  normalBounds: DisplayBounds,
+  windowBounds: DisplayBounds,
+  displays: readonly DisplayBounds[],
+): DisplayBounds {
+  const target = displayMatching(windowBounds, displays);
+  if (target === undefined || windowFitsWithinDisplay(normalBounds, target)) {
+    return normalBounds;
+  }
+  const source = displayMatching(normalBounds, displays) ?? target;
+  const width = Math.min(normalBounds.width, target.width);
+  const height = Math.min(normalBounds.height, target.height);
+  const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+  return {
+    x: clamp(target.x + normalBounds.x - source.x, target.x, target.x + target.width - width),
+    y: clamp(target.y + normalBounds.y - source.y, target.y, target.y + target.height - height),
+    width,
+    height,
+  };
+}
+
+function readDisplayBoundsOrEmpty(): readonly DisplayBounds[] {
+  try {
+    return Electron.screen.getAllDisplays().map((display) => display.bounds);
+  } catch {
+    return [];
+  }
+}
+
 function windowBoundsEqual(
   left: DesktopAppSettings.DesktopWindowBounds,
   right: DesktopAppSettings.DesktopWindowBounds,
@@ -411,9 +463,15 @@ export const make = Effect.gen(function* () {
         return null;
       }
       const bounds =
-        window.isFullScreen() || window.isMaximized() || window.isMinimized()
-          ? window.getNormalBounds()
-          : window.getBounds();
+        window.isFullScreen() || window.isMaximized()
+          ? normalBoundsOnWindowDisplay(
+              window.getNormalBounds(),
+              window.getBounds(),
+              readDisplayBoundsOrEmpty(),
+            )
+          : window.isMinimized()
+            ? window.getNormalBounds()
+            : window.getBounds();
       return DesktopAppSettings.normalizeMainWindowBounds({
         x: Math.round(bounds.x),
         y: Math.round(bounds.y),
