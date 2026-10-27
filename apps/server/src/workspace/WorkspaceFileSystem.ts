@@ -13,13 +13,12 @@ import type {
 } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isNetworkPath, isWindowsDrivePath } from "@t3tools/shared/path";
+import { isNetworkPath } from "@t3tools/shared/path";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Schema from "effect/Schema";
 
@@ -27,6 +26,7 @@ import * as KnownWorkspaces from "./KnownWorkspaces.ts";
 import * as WorkspaceEntries from "./WorkspaceEntries.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
+import { toWslDrivePath } from "./wslDrivePath.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
 
@@ -143,36 +143,14 @@ export const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  // WSL mounts Windows drives under a configurable automount root, so only wslpath knows where.
-  const toWslDrivePath = Effect.fnUntraced(function* (requestedPath: string) {
-    // spawn throws on a NUL byte instead of failing.
-    if (!isWindowsDrivePath(requestedPath) || requestedPath.includes("\0")) return requestedPath;
-    const env = yield* HostProcess.Environment;
-    if (
-      (yield* HostProcess.Platform) !== "linux" ||
-      (env.WSL_DISTRO_NAME === undefined && env.WSL_INTEROP === undefined)
-    ) {
-      return requestedPath;
-    }
-    const output = yield* spawner
-      .string(
-        ChildProcess.make("wslpath", ["-u", requestedPath], {
-          env,
-          stdin: "ignore",
-          stderr: "ignore",
-        }),
-      )
-      .pipe(
-        Effect.timeout("1 second"),
-        Effect.orElseSucceed(() => ""),
-      );
-    const linuxPath = output.endsWith("\n") ? output.slice(0, -1) : output;
-    return linuxPath.startsWith("/") ? linuxPath : requestedPath;
-  });
+  const toHostPath = (requestedPath: string) =>
+    toWslDrivePath(requestedPath).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
 
   const metadataForPath = Effect.fnUntraced(function* (requestedPath: string) {
     const expandedPath = expandHomePath(
-      yield* toWslDrivePath(requestedPath),
+      yield* toHostPath(requestedPath),
       yield* HostProcess.HomeDirectory,
     );
     // Chips ask as soon as an agent's message renders, and touching a network
@@ -260,7 +238,7 @@ export const make = Effect.gen(function* () {
     const requestedPath = input.relativePath.trim();
     const hostPath = requestedPath.startsWith("~/")
       ? expandHomePath(requestedPath, yield* HostProcess.HomeDirectory)
-      : yield* toWslDrivePath(requestedPath);
+      : yield* toHostPath(requestedPath);
     if (
       isNetworkPath(hostPath) &&
       !KnownWorkspaces.isWithinRoot(path, path.resolve(hostPath), path.resolve(input.cwd))

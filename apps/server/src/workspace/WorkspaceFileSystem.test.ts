@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
+import { makeFakeWslHost } from "../testUtils/fakeWsl.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
@@ -74,37 +75,8 @@ const writeTextFile = Effect.fn("writeTextFile")(function* (
   yield* fileSystem.writeFileString(absolutePath, contents).pipe(Effect.orDie);
 });
 
-// `wslpath` honours the distro's configurable automount root, so the fake maps drives under a temp dir.
 const makeWslHost = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const mountRoot = yield* makeTempDir;
-  const binDir = yield* makeTempDir;
-  const wslpath = path.join(binDir, "wslpath");
-  yield* fileSystem
-    .writeFileString(
-      wslpath,
-      [
-        "#!/bin/sh",
-        '[ "$1" = "-u" ] || exit 1',
-        "p=$(printf '%s' \"$2\" | tr '\\\\' '/')",
-        "drive=$(printf '%s' \"$p\" | cut -c1 | tr 'A-Z' 'a-z')",
-        `printf '%s/%s%s\\n' '${mountRoot}' "$drive" "\${p#?:}"`,
-        "",
-      ].join("\n"),
-    )
-    .pipe(Effect.orDie);
-  yield* fileSystem.chmod(wslpath, 0o755).pipe(Effect.orDie);
-  const environment = {
-    ...HostProcess.Environment.defaultValue(),
-    PATH: `${binDir}:${HostProcess.Environment.defaultValue().PATH ?? ""}`,
-    WSL_DISTRO_NAME: "Ubuntu",
-  };
-  const underWsl = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(
-      Effect.provideService(HostProcess.Platform, "linux"),
-      Effect.provideService(HostProcess.Environment, environment),
-    );
+  const { mountRoot, underWsl } = yield* makeFakeWslHost;
   const service = yield* underWsl(
     WorkspaceFileSystem.make.pipe(Effect.provide(layerKnownWorkspacesTest)),
   );
