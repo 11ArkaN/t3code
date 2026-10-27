@@ -318,12 +318,16 @@ the published task result.
 ### `task_cancel`
 
 Stops the child thread with the internal `thread.stop` command, then stops every
-task the child delegated, and disposes automatic parent delivery. Like a user Stop,
-`thread.stop` interrupts the running turn, holds queued turns, and ends pull request
-watches. A nonterminal task with no interruptible run is rejected. A terminal task
-returns its existing status, and its child thread still stops, including later
-runs and watch wakes. Published task results remain available. It accepts an
-optional cancellation reason.
+task the child delegated, cancels the task's own queued turn, and disposes
+automatic parent delivery. Like a user Stop, `thread.stop` interrupts the running
+turn, holds queued turns, and ends pull request watches. The task's own queued
+turn is cancelled even if Stop already held it, so a task that is only queued can
+be cancelled; other queued turns in the child stay held for Resume. A nonterminal
+task with no active run, no running delegates, and no queued turn of its own is
+rejected, unless it is a follow-up still running on the parent, which is
+cancelled there. A terminal task returns its existing status, and its child
+thread still stops, including later runs and watch wakes. Published task results
+remain available. It accepts an optional cancellation reason.
 
 ### `create_threads`
 
