@@ -2778,18 +2778,37 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               arguments: { persistent: true, command: "tail -f" },
             },
           });
-        // Replies fence notification handling on the same protocol reader.
+        // Replies fence notification handling on the same protocol reader. Codex
+        // builds without background terminal cleanup leave closure to thread/closed.
         const unsubscribe = (id: number, notifications: ReturnType<typeof notification>[] = []) => [
           {
             type: "expect_outbound" as const,
+            label: `clean-${id}`,
+            frame: {
+              id,
+              method: "thread/backgroundTerminals/clean",
+              params: { threadId: BG_NATIVE_THREAD },
+            },
+          },
+          {
+            type: "emit_inbound" as const,
+            label: `clean-error-${id}`,
+            frame: { id, error: { code: -32601, message: "method not found" } },
+          },
+          {
+            type: "expect_outbound" as const,
             label: `unsubscribe-${id}`,
-            frame: { id, method: "thread/unsubscribe", params: { threadId: BG_NATIVE_THREAD } },
+            frame: {
+              id: id + 1,
+              method: "thread/unsubscribe",
+              params: { threadId: BG_NATIVE_THREAD },
+            },
           },
           ...notifications,
           {
             type: "emit_inbound" as const,
             label: `unsubscribe-result-${id}`,
-            frame: { id, result: { status: "notSubscribed" } },
+            frame: { id: id + 1, result: { status: "notSubscribed" } },
           },
         ];
         const closed = notification("thread/closed", { threadId: BG_NATIVE_THREAD });
@@ -2800,9 +2819,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             ...(retainContext ? [monitor("inProgress")] : []),
             backgroundExecTranscript.entries.at(-2)!,
             ...unsubscribe(4),
-            ...unsubscribe(5, [notification("thread/closed", { threadId: "unrelated-thread" })]),
-            ...unsubscribe(6, [closed]),
-            ...unsubscribe(7, [
+            ...unsubscribe(6, [notification("thread/closed", { threadId: "unrelated-thread" })]),
+            ...unsubscribe(8, [closed]),
+            ...unsubscribe(10, [
               closed,
               notification("item/completed", {
                 threadId: BG_NATIVE_THREAD,
@@ -2913,6 +2932,18 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           },
           {
             type: "emit_inbound",
+            label: "item/completed/command-cleaned",
+            frame: {
+              method: "item/completed",
+              params: {
+                item: backgroundCommandItem("completed"),
+                threadId: BG_NATIVE_THREAD,
+                turnId: BG_NATIVE_TURN,
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
             label: "unsubscribe-result",
             frame: { id: 5, result: { status: "unsubscribed" } },
           },
@@ -2930,6 +2961,16 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       );
       yield* harness.firstTerminal;
       yield* harness.runtime.unloadThread!({ providerThread: harness.providerThread });
+      assert.deepEqual(
+        harness.events.flatMap((event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.nativeItemRef?.nativeId === BG_COMMAND_ITEM
+            ? [event.turnItem.status]
+            : [],
+        ),
+        ["running", "interrupted"],
+      );
+      assert.isFalse(yield* harness.hasPendingBackgroundWork);
     }).pipe(
       Effect.scoped,
       Effect.provide(

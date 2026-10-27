@@ -4573,33 +4573,35 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           });
         });
 
-        // Unloading an idle thread kills its terminals without completing
-        // their command items, while the shared provider session stays alive.
-        yield* client.handleServerNotification("thread/closed", (payload) =>
-          Effect.gen(function* () {
-            const completedAt = yield* DateTime.now;
-            for (const context of (yield* Ref.get(settledTurns)).values()) {
-              if (context.providerThread.nativeThreadRef?.nativeId !== payload.threadId) continue;
-              const commands = (yield* Ref.get(runningCommandItemsByTurn)).get(
-                context.nativeTurnId,
-              );
-              if (commands !== undefined) {
-                context.closedCommandItemIds = new Set(commands.keys());
-              }
-              yield* terminalizeRunningCommandItems(
-                context,
-                context.nativeTurnId,
-                "interrupted",
-                completedAt,
-              );
-              yield* Ref.update(runningCommandItemsByTurn, (current) => {
-                const updated = new Map(current);
-                updated.delete(context.nativeTurnId);
-                return updated;
-              });
-              yield* releaseSettledTurnIfIdle(context.nativeTurnId);
+        // Closing or cleaning a thread kills its terminals, but their command
+        // items may never complete while the shared provider session stays alive.
+        const terminalizeClosedThreadCommands = Effect.fn(
+          "CodexAdapterV2.terminalizeClosedThreadCommands",
+        )(function* (nativeThreadId: string) {
+          const completedAt = yield* DateTime.now;
+          for (const context of (yield* Ref.get(settledTurns)).values()) {
+            if (context.providerThread.nativeThreadRef?.nativeId !== nativeThreadId) continue;
+            const commands = (yield* Ref.get(runningCommandItemsByTurn)).get(context.nativeTurnId);
+            if (commands !== undefined) {
+              context.closedCommandItemIds = new Set(commands.keys());
             }
-          }).pipe(Effect.orDie, turnTerminalizationPermit.withPermits(1)),
+            yield* terminalizeRunningCommandItems(
+              context,
+              context.nativeTurnId,
+              "interrupted",
+              completedAt,
+            );
+            yield* Ref.update(runningCommandItemsByTurn, (current) => {
+              const updated = new Map(current);
+              updated.delete(context.nativeTurnId);
+              return updated;
+            });
+            yield* releaseSettledTurnIfIdle(context.nativeTurnId);
+          }
+        }, turnTerminalizationPermit.withPermits(1));
+
+        yield* client.handleServerNotification("thread/closed", (payload) =>
+          terminalizeClosedThreadCommands(payload.threadId).pipe(Effect.orDie),
         );
 
         yield* client.handleServerNotification("item/started", (payload) =>
@@ -6799,12 +6801,24 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 ),
               ),
           ),
-          // Dropping this connection's subscription lets the shared app-server
-          // shut the native thread (and its MCP servers) down once it is idle.
+          // Unsubscribing lets the shared app-server shut the native thread and its
+          // MCP servers down eventually, so background terminals are cleaned first.
           unloadThread: Effect.fn("CodexAdapterV2.unloadThread")(
             function* (unloadInput) {
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               sessionApprovals.delete(nativeThreadId);
+              yield* client.raw
+                .request("thread/backgroundTerminals/clean", { threadId: nativeThreadId })
+                .pipe(
+                  Effect.timeout("5 seconds"),
+                  Effect.andThen(terminalizeClosedThreadCommands(nativeThreadId)),
+                  Effect.catch((cause) =>
+                    Effect.logWarning("orchestration-v2.codex-background-terminal-clean-failed", {
+                      providerThreadId: unloadInput.providerThread.id,
+                      cause,
+                    }),
+                  ),
+                );
               yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });
             },
             (effect, unloadInput) =>
