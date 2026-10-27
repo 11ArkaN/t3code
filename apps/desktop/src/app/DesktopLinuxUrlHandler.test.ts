@@ -302,7 +302,6 @@ describe("DesktopLinuxUrlHandler", () => {
         }),
       });
       assert.deepEqual(recorded.files, []);
-      // Electron's copyFile from app.asar extracts to a temp file it never deletes.
       assert.deepEqual(recorded.copies, [], "icon must not be copied out of the app bundle");
       assert.deepEqual(recorded.icons, [{ path: iconPath, bytes: [...ICON_BYTES] }]);
       assert.equal(recorded.commands.at(-1)?.command, "xdg-mime");

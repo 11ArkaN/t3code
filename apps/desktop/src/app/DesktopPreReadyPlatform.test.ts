@@ -135,7 +135,6 @@ describe("DesktopPreReadyPlatform", () => {
     const iconBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
     readFileSyncMock.mockImplementation((path: string) => {
       if (path === iconSource) return iconBytes;
-      if (path === iconPath) throw new Error("ENOENT");
       return "{}";
     });
     setDesktopNameMock.mockImplementation((name: string) => {
@@ -167,7 +166,6 @@ describe("DesktopPreReadyPlatform", () => {
           identity.desktopEntry ?? "",
           "Icon=/xdg/icons/com.t3tools.T3Code.desktop.png",
         );
-        // Electron's copyFileSync from app.asar extracts to a temp file it never deletes.
         assert.equal(
           copyFileSyncMock.mock.calls.length,
           0,
