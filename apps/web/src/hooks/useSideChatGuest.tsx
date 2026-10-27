@@ -94,7 +94,6 @@ export function useSideChatGuest(input: {
       sideItems.push({
         id: "side-chat:parent-waiting",
         variant: "warning",
-        priority: "activity",
         icon: <MessageCircleQuestionIcon />,
         title: "The main thread is waiting on you",
         actions: (
@@ -107,7 +106,6 @@ export function useSideChatGuest(input: {
     sideItems.push({
       id: "side-chat",
       variant: "info",
-      priority: "activity",
       icon: <MessageCircleQuestionIcon />,
       title: (
         <span className="flex min-w-0 items-baseline gap-1.5">
