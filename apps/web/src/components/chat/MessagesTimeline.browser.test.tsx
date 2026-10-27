@@ -331,6 +331,9 @@ describe("MessagesTimeline messages", () => {
     await vi.waitFor(() => {
       const target = Math.min(savedOffset, viewport.scrollHeight - viewport.clientHeight);
       expect(Math.abs(viewport.scrollTop - target)).toBeLessThanOrEqual(2);
+      expect(
+        Math.abs(props.listRef.current!.getState().scroll - viewport.scrollTop),
+      ).toBeLessThanOrEqual(2);
       const view = viewport.getBoundingClientRect();
       const visible = [
         ...screen.container.querySelectorAll<HTMLElement>("[data-timeline-row-id]"),
