@@ -344,10 +344,10 @@ describe("OrchestratorMcpService", () => {
 
       yield* Effect.gen(function* () {
         const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-        yield* service.readThread(scope, { threadId: childThreadId });
+        yield* service.readThread(scope, { threadId: childThreadId, view: "activity" });
         assert.equal(yield* Ref.get(acknowledgements), 0);
         page = [row(report, 1), row(error, 2)];
-        yield* service.readThread(scope, { threadId: childThreadId });
+        yield* service.readThread(scope, { threadId: childThreadId, view: "activity" });
         assert.equal(yield* Ref.get(acknowledgements), 1);
       }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
     }),
