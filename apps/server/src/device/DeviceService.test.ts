@@ -782,8 +782,8 @@ it.effect("reopening a device waits for its closing agent-device session to end"
     };
     const order: string[] = [];
     const configured = yield* Queue.unbounded<void>();
-    const releaseStarted = yield* Deferred.make<void>();
-    const finishRelease = yield* Deferred.make<void>();
+    const releaseStarted = yield* Queue.unbounded<void>();
+    const finishRelease = yield* Queue.unbounded<void>();
     const service = yield* DeviceService.makeWithHosts(
       new Map([[host.id, host]]),
       undefined,
@@ -791,8 +791,8 @@ it.effect("reopening a device waits for its closing agent-device session to end"
       undefined,
       ({ session }) =>
         Effect.gen(function* () {
-          yield* Deferred.succeed(releaseStarted, undefined);
-          yield* Deferred.await(finishRelease);
+          yield* Queue.offer(releaseStarted, undefined);
+          yield* Queue.take(finishRelease);
           order.push(`released ${session}`);
         }),
     ).pipe(Effect.provide(NodeCrypto.layer));
@@ -808,14 +808,14 @@ it.effect("reopening a device waits for its closing agent-device session to end"
     yield* service.agentTarget(input);
     yield* Queue.take(configured);
     const closing = yield* service.close({ threadId }).pipe(Effect.forkChild);
-    yield* Deferred.await(releaseStarted);
+    yield* Queue.take(releaseStarted);
     yield* service.open(input);
     const targeting = yield* service.agentTarget(input).pipe(
       Effect.tap((target) => Effect.sync(() => order.push(`given ${target.args.at(-1)}`))),
       Effect.forkChild,
     );
     yield* Queue.take(configured);
-    yield* Deferred.succeed(finishRelease, undefined);
+    yield* Queue.offer(finishRelease, undefined);
     yield* Fiber.join(closing);
     const target = yield* Fiber.join(targeting);
     const session = target.args.at(-1);
@@ -823,8 +823,20 @@ it.effect("reopening a device waits for its closing agent-device session to end"
 
     // Turning agent access off leaves the device's daemon holding the claim.
     yield* service.configure({ agentAccessEnabled: false });
+    yield* Queue.offer(finishRelease, undefined);
     yield* service.close({ threadId });
+    yield* Queue.take(releaseStarted);
     expect(order).toEqual([`released ${session}`, `given ${session}`, `released ${session}`]);
+
+    // A cancelled close has already dropped the session, so nothing could retry its release.
+    yield* service.open(input);
+    const cancelled = yield* service.close({ threadId }).pipe(Effect.forkChild);
+    yield* Queue.take(releaseStarted);
+    cancelled.interruptUnsafe();
+    yield* Queue.offer(finishRelease, undefined);
+    yield* Fiber.await(cancelled);
+    expect(order.at(-1)).toBe(`released ${session}`);
+    expect(order).toHaveLength(4);
   }).pipe(
     Effect.provide(
       ServerSettings.layerTest({ enableDeviceSupport: true, enableAgentDeviceAccess: true }),

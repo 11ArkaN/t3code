@@ -725,7 +725,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     },
     (effect, session) =>
       effect.pipe(
-        agentSessionLock.withPermit,
         Effect.catch((cause) =>
           Effect.logDebug("Could not end the agent-device session for a closed device", {
             hostId: session.hostId,
@@ -748,7 +747,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       ),
       releaseAgentSession,
       { discard: true },
-    );
+    ).pipe(agentSessionLock.withPermit);
     yield* ready.devices.shutdown({ id: deviceId, platform });
     yield* publish((state) => ({
       ...state,
@@ -779,11 +778,14 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           (input.deviceId === undefined || session.deviceId === input.deviceId),
       );
       if (closing.length === 0) return;
-      yield* publish((current) => ({
-        ...current,
-        sessions: current.sessions.filter((session) => !closing.includes(session)),
-      }));
-      yield* Effect.forEach(closing, releaseAgentSession, { discard: true });
+      // Once a session leaves state nothing can retry its release, so finish it even if cancelled.
+      yield* Effect.gen(function* () {
+        yield* publish((current) => ({
+          ...current,
+          sessions: current.sessions.filter((session) => !closing.includes(session)),
+        }));
+        yield* Effect.forEach(closing, releaseAgentSession, { discard: true });
+      }).pipe(Effect.uninterruptible, agentSessionLock.withPermit);
       if (input.shutdown) {
         yield* Effect.forEach(
           closing,
