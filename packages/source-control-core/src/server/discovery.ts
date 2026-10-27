@@ -197,7 +197,7 @@ function probeFailureHint(spec: SourceControlCliDiscoverySpec, cause: unknown): 
     : isVcsProcessExitError(cause)
       ? `exited with status ${cause.exitCode}`
       : "failed";
-  return `${command} ${outcome} on the server. Check the \`${spec.executable}\` that the server's PATH resolves.`;
+  return `${command} ${outcome}. Check the \`${spec.executable}\` that the server's PATH resolves.`;
 }
 
 function probeCli(input: {
