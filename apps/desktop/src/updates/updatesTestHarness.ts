@@ -13,6 +13,7 @@ import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 
 export const flushCallbacks = Effect.yieldNow;
@@ -47,6 +48,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
   const installSteps: string[] = [];
+  const forceRunAfter: boolean[] = [];
 
   const addListener = (eventName: string, listener: (...args: readonly unknown[]) => void) => {
     const eventListeners = listeners.get(eventName) ?? new Set();
@@ -90,10 +92,11 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     downloadUpdate: Effect.sync(() => {
       downloadCount += 1;
     }).pipe(Effect.andThen(options.downloadUpdate ?? Effect.void)),
-    quitAndInstall: () =>
+    quitAndInstall: ({ isForceRunAfter }) =>
       Effect.sync(() => {
         quitAndInstallCount += 1;
         installSteps.push("quitAndInstall");
+        forceRunAfter.push(isForceRunAfter);
       }).pipe(Effect.andThen(options.quitAndInstall ?? Effect.void)),
     on: (eventName, listener) =>
       Effect.acquireRelease(
@@ -106,6 +109,18 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
           }),
       ).pipe(Effect.asVoid),
   } satisfies ElectronUpdater.ElectronUpdater["Service"]);
+
+  const layerApp = Layer.mock(ElectronApp.ElectronApp)({
+    relaunch: () =>
+      Effect.sync(() => {
+        installSteps.push("relaunch");
+      }),
+    onBeforeQuitForUpdate: (listener) =>
+      Effect.acquireRelease(
+        Effect.sync(() => addListener("before-quit-for-update", listener)),
+        () => Effect.sync(() => removeListener("before-quit-for-update", listener)),
+      ),
+  });
 
   const layerWindow = Layer.succeed(ElectronWindow.ElectronWindow, {
     create: () => Effect.die("unexpected BrowserWindow creation"),
@@ -252,6 +267,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   const layer = DesktopUpdates.layer.pipe(
     Layer.provide(layerFileSystem),
     Layer.provideMerge(layerUpdater),
+    Layer.provideMerge(layerApp),
     Layer.provideMerge(layerWindow),
     Layer.provideMerge(layerBackend),
     Layer.provideMerge(DesktopState.layer),
@@ -273,6 +289,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     checkCount: () => checkCount,
     quitAndInstalls: () => quitAndInstallCount,
     installSteps,
+    forceRunAfter,
     updateRestartMarkers,
     installRecords,
     previousInstallRecord: () => previousInstallRecord,

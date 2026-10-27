@@ -498,6 +498,27 @@ describe("DesktopUpdates", () => {
     }),
   );
 
+  it.effect("relaunches a .deb install itself once the updater reports success", () => {
+    const harness = makeHarness({ platform: "linux", packageType: "deb" });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        yield* updates.install;
+        assert.deepEqual(harness.forceRunAfter, [false]);
+        assert.deepEqual(harness.installSteps, ["quitAndInstall"]);
+
+        // electron-updater emits this only after dpkg succeeded, right before it quits the app.
+        harness.emit("before-quit-for-update");
+        assert.deepEqual(harness.installSteps, ["quitAndInstall", "relaunch"]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("keeps windows and restarts backends when quitAndInstall fails", () => {
     const harness = makeHarness({
       quitAndInstall: Effect.fail(

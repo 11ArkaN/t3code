@@ -1,3 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off -- relaunch starts a detached process that outlives this one.
+import * as NodeChildProcess from "node:child_process";
+
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -49,7 +53,7 @@ export class ElectronApp extends Context.Service<
     readonly requestSingleInstanceLock: Effect.Effect<boolean>;
     readonly quit: Effect.Effect<void>;
     readonly exit: (code: number) => Effect.Effect<void>;
-    readonly relaunch: (options: Electron.RelaunchOptions) => Effect.Effect<void>;
+    readonly relaunch: (options?: Electron.RelaunchOptions) => Effect.Effect<void>;
     readonly setPath: (
       name: Parameters<Electron.App["setPath"]>[0],
       path: string,
@@ -140,10 +144,25 @@ export const make = ElectronApp.of({
       Electron.app.exit(code);
     });
   }),
-  relaunch: Effect.fn("ElectronApp.relaunch")(function (options) {
-    return Effect.sync(() => {
+  relaunch: Effect.fn("ElectronApp.relaunch")(function* (options = {}) {
+    if ((yield* HostProcess.Platform) !== "linux") {
       Electron.app.relaunch(options);
-    });
+      return;
+    }
+    // Electron's relauncher sets PR_SET_NO_NEW_PRIVS on Linux, so the new instance could never
+    // run pkexec or sudo again (e.g. for .deb updates). The new instance waits for this one to
+    // exit because it would otherwise lose the single-instance lock and quit.
+    NodeChildProcess.spawn(
+      "/bin/sh",
+      [
+        "-c",
+        'while kill -0 "$0" 2>/dev/null; do sleep 0.1; done; exec "$@"',
+        String(process.pid),
+        options.execPath ?? process.execPath,
+        ...(options.args ?? process.argv.slice(1)),
+      ],
+      { detached: true, stdio: "ignore" },
+    ).unref();
   }),
   setPath: Effect.fn("ElectronApp.setPath")(function (name, path) {
     return Effect.sync(() => {
