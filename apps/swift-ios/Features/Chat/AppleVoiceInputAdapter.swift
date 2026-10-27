@@ -20,7 +20,7 @@ private final class UnsupportedVoiceInputAdapter: FeatureVoiceInputAdapter {
 
     func prepare() async throws {}
     func requestMicrophonePermission() async -> FeatureVoiceMicrophonePermission { .denied }
-    func startRecording(maximumDuration: TimeInterval) throws {}
+    func startRecording(maximumDuration: TimeInterval) async throws {}
     func stopRecording() async throws -> URL { throw AppleVoiceInputError.unavailable }
     func transcribe(recordingURL: URL) async throws -> String {
         throw AppleVoiceInputError.unavailable
@@ -42,19 +42,101 @@ private struct AppleVoiceAudioSessionConfiguration {
     let preferredInput: AVAudioSessionPortDescription?
 }
 
+/// Owns the shared audio session and the recorder off the main thread.
+/// Session activation, route selection, and recorder setup wait on the audio
+/// server. That can take seconds, for example while a Bluetooth headset switches
+/// to its microphone profile, and it froze the app when it ran on the main actor.
+@available(iOS 26.0, *)
+private actor AppleVoiceRecorder {
+    private let audioSession = AVAudioSession.sharedInstance()
+    private var recorder: AVAudioRecorder?
+    private var previousConfiguration: AppleVoiceAudioSessionConfiguration?
+    private var preferredInputWasTouched = false
+
+    /// Starts recording to `url` and returns the connected microphones so the
+    /// caller can remember them.
+    func start(
+        url: URL,
+        maximumDuration: TimeInterval,
+        microphoneOrder: [FeatureMicrophoneEntry]
+    ) throws -> [FeatureMicrophoneInput] {
+        stop()
+        let previous = AppleVoiceAudioSessionConfiguration(
+            category: audioSession.category,
+            mode: audioSession.mode,
+            options: audioSession.categoryOptions,
+            preferredInput: audioSession.preferredInput
+        )
+        do {
+            try audioSession.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
+            previousConfiguration = previous
+            try audioSession.setActive(true)
+            let inputs = selectPreferredMicrophone(order: microphoneOrder)
+            let recorder = try AVAudioRecorder(url: url, settings: [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+            ])
+            guard recorder.prepareToRecord(), recorder.record(forDuration: maximumDuration) else {
+                throw AppleVoiceInputError.recordingFailed
+            }
+            self.recorder = recorder
+            return inputs
+        } catch {
+            stop()
+            throw error
+        }
+    }
+
+    /// Stops any recording and restores the session the app had before.
+    func stop() {
+        recorder?.stop()
+        recorder = nil
+        guard let previousConfiguration else { return }
+        if preferredInputWasTouched {
+            try? audioSession.setPreferredInput(previousConfiguration.preferredInput)
+            preferredInputWasTouched = false
+        }
+        try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+        try? audioSession.setCategory(
+            previousConfiguration.category,
+            mode: previousConfiguration.mode,
+            options: previousConfiguration.options
+        )
+        self.previousConfiguration = nil
+    }
+
+    private func selectPreferredMicrophone(
+        order: [FeatureMicrophoneEntry]
+    ) -> [FeatureMicrophoneInput] {
+        // iOS only exposes connected inputs after the recording session is configured.
+        let ports = audioSession.availableInputs ?? []
+        let inputs = ports.map {
+            FeatureMicrophoneInput(uid: $0.uid, name: $0.portName, portType: $0.portType.rawValue)
+        }
+        let order = FeatureMicrophonePriority.order(
+            FeatureMicrophonePriority.remembering(inputs, in: order)
+        )
+        guard let preferred = FeatureMicrophonePriority.preferredInput(inputs, order: order),
+              let port = ports.first(where: { $0.uid == preferred.uid }),
+              port.uid != audioSession.preferredInput?.uid else { return inputs }
+        preferredInputWasTouched = true
+        // A route can disappear between enumeration and selection. Keep the iOS route in that case.
+        try? audioSession.setPreferredInput(port)
+        return inputs
+    }
+}
+
 @available(iOS 26.0, *)
 @MainActor
 private final class AppleVoiceInputAdapter: FeatureVoiceInputAdapter {
-    private let audioSession = AVAudioSession.sharedInstance()
+    private let recorder = AppleVoiceRecorder()
     private let fileManager = FileManager.default
     private var transcriber: SpeechTranscriber?
     private var analyzer: SpeechAnalyzer?
-    private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var ownedRecordingURLs = Set<URL>()
-    private var previousAudioSessionConfiguration: AppleVoiceAudioSessionConfiguration?
-    private var audioSessionWasConfigured = false
-    private var preferredInputWasTouched = false
     private var previousIdleTimerDisabled: Bool?
 
     var isSupported: Bool { SpeechTranscriber.isAvailable }
@@ -79,56 +161,32 @@ private final class AppleVoiceInputAdapter: FeatureVoiceInputAdapter {
     }
 
     func requestMicrophonePermission() async -> FeatureVoiceMicrophonePermission {
-        let granted = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
-        return granted ? .granted : .denied
+        await AVAudioApplication.requestRecordPermission() ? .granted : .denied
     }
 
-    func startRecording(maximumDuration: TimeInterval) throws {
+    func startRecording(maximumDuration: TimeInterval) async throws {
         let url = fileManager.temporaryDirectory
             .appendingPathComponent("t3-voice-\(UUID().uuidString)")
             .appendingPathExtension("m4a")
         ownedRecordingURLs.insert(url)
         recordingURL = url
 
-        previousAudioSessionConfiguration = AppleVoiceAudioSessionConfiguration(
-            category: audioSession.category,
-            mode: audioSession.mode,
-            options: audioSession.categoryOptions,
-            preferredInput: audioSession.preferredInput
+        let preferences = FeatureMicrophonePreferences.shared
+        let inputs = try await recorder.start(
+            url: url,
+            maximumDuration: maximumDuration,
+            microphoneOrder: preferences.entries
         )
-        do {
-            try audioSession.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
-            audioSessionWasConfigured = true
-            try audioSession.setActive(true)
-            selectPreferredMicrophone()
-            let recorder = try AVAudioRecorder(url: url, settings: [
-                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-                AVSampleRateKey: 44_100,
-                AVNumberOfChannelsKey: 1,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ])
-            recorder.prepareToRecord()
-            guard recorder.record(forDuration: maximumDuration) else {
-                throw AppleVoiceInputError.recordingFailed
-            }
-            self.recorder = recorder
+        preferences.remember(inputs)
+        if previousIdleTimerDisabled == nil {
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
-            UIApplication.shared.isIdleTimerDisabled = true
-        } catch {
-            restoreAudioSession()
-            throw error
         }
+        UIApplication.shared.isIdleTimerDisabled = true
     }
 
     func stopRecording() async throws -> URL {
         guard let recordingURL else { throw AppleVoiceInputError.recordingFailed }
-        recorder?.stop()
-        recorder = nil
-        restoreAudioSession()
+        await stopAudio()
         return recordingURL
     }
 
@@ -167,9 +225,7 @@ private final class AppleVoiceInputAdapter: FeatureVoiceInputAdapter {
     }
 
     func cleanup() async {
-        recorder?.stop()
-        recorder = nil
-        restoreAudioSession()
+        await stopAudio()
         if let analyzer {
             await analyzer.cancelAndFinishNow()
             self.analyzer = nil
@@ -182,43 +238,11 @@ private final class AppleVoiceInputAdapter: FeatureVoiceInputAdapter {
         transcriber = nil
     }
 
-    private func restoreAudioSession() {
+    private func stopAudio() async {
+        await recorder.stop()
         if let previousIdleTimerDisabled {
             UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled
             self.previousIdleTimerDisabled = nil
         }
-        guard let previousAudioSessionConfiguration else { return }
-        guard audioSessionWasConfigured else {
-            self.previousAudioSessionConfiguration = nil
-            return
-        }
-        if preferredInputWasTouched {
-            try? audioSession.setPreferredInput(previousAudioSessionConfiguration.preferredInput)
-            preferredInputWasTouched = false
-        }
-        try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
-        try? audioSession.setCategory(
-            previousAudioSessionConfiguration.category,
-            mode: previousAudioSessionConfiguration.mode,
-            options: previousAudioSessionConfiguration.options
-        )
-        self.previousAudioSessionConfiguration = nil
-        audioSessionWasConfigured = false
-    }
-
-    private func selectPreferredMicrophone() {
-        // iOS only exposes connected inputs after the recording session is configured.
-        let ports = audioSession.availableInputs ?? []
-        let inputs = ports.map {
-            FeatureMicrophoneInput(uid: $0.uid, name: $0.portName, portType: $0.portType.rawValue)
-        }
-        let preferences = FeatureMicrophonePreferences.shared
-        preferences.remember(inputs)
-        guard let preferred = FeatureMicrophonePriority.preferredInput(inputs, order: preferences.entries),
-              let port = ports.first(where: { $0.uid == preferred.uid }),
-              port.uid != audioSession.preferredInput?.uid else { return }
-        preferredInputWasTouched = true
-        // A route can disappear between enumeration and selection. Keep the iOS route in that case.
-        try? audioSession.setPreferredInput(port)
     }
 }
