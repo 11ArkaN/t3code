@@ -419,8 +419,6 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
   const unrecorded: Array<string> = [];
   const targets: Array<string> = [];
   for (const launcher of [...recorded, ...found]) {
-    // A runtime's own entry, on the macOS service PATH or recorded by an earlier prune, is no launcher.
-    if (inVersionsDir(launcher)) continue;
     const target =
       platform === "win32"
         ? yield* fs.readFileString(launcher).pipe(
@@ -430,6 +428,14 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
         : // Fully resolved, through chained links and a symlinked T3 home alike.
           yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined));
     if (target === undefined) continue;
+    // A runtime's own entry, on the macOS service PATH or recorded by an earlier prune, is no launcher.
+    if (platform !== "win32" && inVersionsDir(target)) {
+      const unlinked = yield* fs.realPath(path.dirname(launcher)).pipe(
+        Effect.map((directory) => path.join(directory, path.basename(launcher))),
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (unlinked === target) continue;
+    }
     targets.push(target);
     if (inVersionsDir(target) && !recorded.includes(launcher) && !unrecorded.includes(launcher)) {
       unrecorded.push(launcher);
