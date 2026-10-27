@@ -724,6 +724,114 @@ it.effect("closing a thread's device ends the agent-device session its agent was
   ),
 );
 
+it.effect("reopening a device waits for its closing agent-device session to end", () =>
+  Effect.gen(function* () {
+    const http = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          request,
+          Response.json({
+            simulators: [],
+            emulators: [
+              {
+                id: "emulator-5554",
+                name: "Pixel",
+                version: "36",
+                platform: "android",
+                booted: true,
+                physical: false,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const run = () => Effect.succeed({ code: 0, stdout: " V....D libx264", stderr: "" });
+    const ready: DeviceHost.DeviceHostAgentReady = {
+      nodePath: process.execPath,
+      hub: { origin: "http://device.test" },
+      devices: makeDeviceHubOperations({
+        hostId: LOCAL_DEVICE_HOST_ID,
+        origin: "http://device.test",
+        http,
+        run,
+        androidAvailable: Effect.succeed(true),
+      }),
+      agentDevice: { baseUrl: "http://agent.test", token: "test", entryPath: "/agent-device" },
+      helpers: { serveSimAxSettings: null, serveSimCli: null },
+      run,
+    };
+    const host: DeviceHost.DeviceHost["Service"] = {
+      id: LOCAL_DEVICE_HOST_ID,
+      label: "This machine",
+      summary: Effect.succeed({
+        id: LOCAL_DEVICE_HOST_ID,
+        kind: "local",
+        label: "Test server",
+        platforms: [{ platform: "android", available: true }],
+        hubInstalled: true,
+        agentDeviceInstalled: true,
+      }),
+      platformAvailability: (platform) => Effect.succeed({ platform, available: true }),
+      ensureReady: () => Effect.succeed(ready),
+      ensureAgentReady: () => Effect.succeed(ready),
+      // The daemon keeps running when agent access is turned off, as an EAS device's does.
+      current: Effect.succeed(ready),
+      stopAgent: Effect.void,
+      stop: Effect.void,
+    };
+    const order: string[] = [];
+    const configured = yield* Queue.unbounded<void>();
+    const releaseStarted = yield* Deferred.make<void>();
+    const finishRelease = yield* Deferred.make<void>();
+    const service = yield* DeviceService.makeWithHosts(
+      new Map([[host.id, host]]),
+      undefined,
+      () => Queue.offer(configured, undefined).pipe(Effect.as("/agent-config.json")),
+      undefined,
+      ({ session }) =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(releaseStarted, undefined);
+          yield* Deferred.await(finishRelease);
+          order.push(`released ${session}`);
+        }),
+    ).pipe(Effect.provide(NodeCrypto.layer));
+
+    const threadId = ThreadId.make("thread-reopening-device");
+    const input = {
+      threadId,
+      hostId: LOCAL_DEVICE_HOST_ID,
+      deviceId: DeviceId.make("emulator-5554"),
+      platform: "android",
+    } as const;
+    yield* service.open(input);
+    yield* service.agentTarget(input);
+    yield* Queue.take(configured);
+    const closing = yield* service.close({ threadId }).pipe(Effect.forkChild);
+    yield* Deferred.await(releaseStarted);
+    yield* service.open(input);
+    const targeting = yield* service.agentTarget(input).pipe(
+      Effect.tap((target) => Effect.sync(() => order.push(`given ${target.args.at(-1)}`))),
+      Effect.forkChild,
+    );
+    yield* Queue.take(configured);
+    yield* Deferred.succeed(finishRelease, undefined);
+    yield* Fiber.join(closing);
+    const target = yield* Fiber.join(targeting);
+    const session = target.args.at(-1);
+    expect(order).toEqual([`released ${session}`, `given ${session}`]);
+
+    // Turning agent access off leaves the device's daemon holding the claim.
+    yield* service.configure({ agentAccessEnabled: false });
+    yield* service.close({ threadId });
+    expect(order).toEqual([`released ${session}`, `given ${session}`, `released ${session}`]);
+  }).pipe(
+    Effect.provide(
+      ServerSettings.layerTest({ enableDeviceSupport: true, enableAgentDeviceAccess: true }),
+    ),
+  ),
+);
+
 it.effect.each(["shutdown", "close"] as const)(
   "%s releases iOS capture so reopening uses a fresh session",
   (operation) =>

@@ -198,6 +198,9 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const settings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
   const lifecycleLock = yield* Semaphore.make(1);
+  // Session names are stable per thread and device: a reopened device must not
+  // be handed its session while a close is still ending it.
+  const agentSessionLock = yield* Semaphore.make(1);
   const readDeviceSettings = settings.getSettings.pipe(
     Effect.map((value) => ({
       enabled: value.enableDeviceSupport,
@@ -708,8 +711,6 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
    */
   const releaseAgentSession = Effect.fn("DeviceService.releaseAgentSession")(
     function* (session: DeviceSession) {
-      const deviceSettings = yield* readDeviceSettings;
-      if (!deviceSettings.enabled || !deviceSettings.agentAccessEnabled) return;
       const ready = yield* hosts.get(session.hostId)?.current ?? Effect.succeed(null);
       if (!ready) return;
       // A device with its own daemon has nothing to release once it stops running.
@@ -724,6 +725,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     },
     (effect, session) =>
       effect.pipe(
+        agentSessionLock.withPermit,
         Effect.catch((cause) =>
           Effect.logDebug("Could not end the agent-device session for a closed device", {
             hostId: session.hostId,
@@ -925,7 +927,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           input.threadId,
           input.hostId,
           input.deviceId,
-        ).pipe(Effect.provideService(Crypto.Crypto, crypto));
+        ).pipe(Effect.provideService(Crypto.Crypto, crypto), agentSessionLock.withPermit);
         return { agentDeviceId, args: ["--config", configPath, "--session", session] };
       }),
       state: SynchronizedRef.get(stateRef).pipe(Effect.map(({ state }) => state)),
