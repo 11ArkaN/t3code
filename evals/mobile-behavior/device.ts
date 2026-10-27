@@ -216,11 +216,16 @@ export function makeDevice(options: DeviceOptions) {
     open: (path: string) =>
       evaluate(`__t3Behavior.open(${JSON.stringify(`${SCHEME}://${path.replace(/^\//, "")}`)})`),
     openUrl: (url: string) => evaluate(`__t3Behavior.open(${JSON.stringify(url)})`),
-    /** Reloads JS and waits for the thread list; split layouts may restore a thread beside it. */
+    /** Reloads JS, then opens Home; the app restores the last thread, and split layouts keep one open. */
     reload: Effect.fn("device.reload")(function* (ready: (state: ProbeState) => boolean) {
       yield* evaluate("__t3Behavior.reload()").pipe(Effect.ignore);
       yield* Effect.sleep("2 seconds");
-      return yield* waitFor("the thread list after reload", ready, 60_000);
+      yield* waitFor("the thread list after reload", ready, 60_000);
+      yield* evaluate(`__t3Behavior.open(${JSON.stringify(`${SCHEME}://`)})`);
+      return yield* waitFor(
+        "Home",
+        (value) => ready(value) && (value.route?.name === "Home" || value.route?.columns === true),
+      );
     }),
     recordStart: (withFeed: boolean) => evaluate(`__t3Behavior.recordStart(${withFeed})`),
     recordStop: evaluate("__t3Behavior.recordStop()").pipe(
