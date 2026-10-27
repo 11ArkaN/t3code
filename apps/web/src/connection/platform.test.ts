@@ -306,6 +306,31 @@ describe("desktop SSH pairing", () => {
     }),
   );
 
+  it.effect("does not adopt an interrupted saved-token reconnect when pairing", () =>
+    Effect.gen(function* () {
+      const bridge = makeBridge([]);
+      const setup = pendingSetup();
+      const ensure = vi.spyOn(bridge, "ensureSshEnvironment").mockReturnValueOnce(setup.promise);
+      const interrupted = yield* Effect.forkChild(
+        prepareDesktopSshEnvironment(bridge, {
+          target: TARGET,
+          expectedEnvironmentId: EnvironmentId.make("environment-ssh"),
+          bearerToken: "saved-token",
+        }),
+        { startImmediately: true },
+      );
+      yield* Fiber.interrupt(interrupted);
+
+      const provisioned = yield* provisionDesktopSshEnvironment(bridge, TARGET);
+      setup.resolve({ ...SSH_BOOTSTRAP, pairingToken: null });
+      yield* Effect.promise(() => setup.promise);
+
+      expect(provisioned.bearerToken).toBe("bearer-token");
+      expect(ensure).toHaveBeenLastCalledWith(TARGET, { issuePairingToken: true });
+      expect(ensure).toHaveBeenCalledTimes(2);
+    }),
+  );
+
   it.effect("pairs again when the host no longer accepts the saved token", () =>
     Effect.gen(function* () {
       const calls: string[] = [];
