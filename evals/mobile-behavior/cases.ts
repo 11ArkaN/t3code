@@ -1,7 +1,7 @@
 /**
- * Cases for the mobile behavior eval. `bad` reproduces an open issue and must fail while the
- * bug exists; `guard` protects a fix that already landed; `control` is ordinary use that must
- * keep passing. Each names the scenario that produces its metrics and the checks on them.
+ * Cases for the mobile behavior eval. `bad` fails on main today and must pass once fixed;
+ * `guard` passes on main and must keep passing (its issue is fixed, or does not show on iOS);
+ * `control` is ordinary use that must keep passing. Each names the scenario that produces its metrics and the checks on them.
  */
 import type { Check } from "./grade.ts";
 import type { Pose, ScenarioName } from "./scenarios.ts";
@@ -35,7 +35,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "scroll-up-never-moves-backward",
     area: "scroll",
-    kind: "bad",
+    kind: "guard",
     source: "#22350",
     experience: "Flicking up a long thread, content jerks back down toward the latest message.",
     scenario: "scrollUpLongThread",
@@ -61,7 +61,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "streaming-stays-at-latest",
     area: "scroll",
-    kind: "guard",
+    kind: "bad",
     source: "#15469",
     experience:
       "While a reply streams at the bottom, the thread jumps far above the latest message.",
@@ -75,7 +75,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "send-in-long-thread-stays-at-end",
     area: "scroll",
-    kind: "bad",
+    kind: "guard",
     source: "#13706",
     experience:
       "Sending in a long thread, the timeline jumps far up instead of showing the new message.",
@@ -135,7 +135,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "draft-survives-thread-switch",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#17422",
     experience: "A typed draft is gone after switching threads and coming back.",
     scenario: "draftThreadSwitch",
@@ -148,7 +148,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "draft-never-leaks-to-other-thread",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#7390",
     experience: "Text typed in a streaming thread shows up in another thread's composer.",
     scenario: "draftThreadSwitch",
@@ -161,7 +161,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "draft-survives-background",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#17422, #7390",
     experience: "A typed draft is gone after the app goes to the background and back.",
     scenario: "draftBackground",
@@ -174,7 +174,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "composer-clears-after-send",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#20982",
     experience: "After sending, the message text stays in the composer.",
     scenario: "sendInLongThread",
@@ -187,7 +187,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "composer-tap-focuses-text",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#24303",
     experience: "Tapping the composer's text area opens the model picker instead of the keyboard.",
     scenario: "tapComposer",
@@ -200,7 +200,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "composer-keeps-focus-after-command-pick",
     area: "composer",
-    kind: "bad",
+    kind: "guard",
     source: "#10956",
     experience: "Picking a skill or command from the / menu closes the keyboard.",
     scenario: "skillPick",
@@ -235,7 +235,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "pending-question-shows-input",
     area: "status",
-    kind: "bad",
+    kind: "guard",
     source: "#24901",
     experience: "A thread waiting on a question shows as Working instead of needing input.",
     scenario: "pendingQuestion",
@@ -261,7 +261,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "long-press-pin-pins-that-row",
     area: "wrong-thread",
-    kind: "bad",
+    kind: "guard",
     source: "#20428",
     experience: "Pin from a row's long-press menu pins a different thread.",
     scenario: "pinFromLongPress",
@@ -284,7 +284,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "link-opens-archived-thread",
     area: "wrong-thread",
-    kind: "bad",
+    kind: "guard",
     source: "#16443",
     experience: "A link to an archived thread sends you Home.",
     scenario: "linkToArchivedThread",

@@ -24,7 +24,7 @@ pnpm mobile-behavior --out runs/iphone --label iphone-17-pro \
 
 Each sample stops any unfinished turn, reloads the app's JS, and starts from Home. Composer flows use new threads, so drafts from earlier samples never mix in. A scenario runs once per sample and grades every case that uses it. A case fails when half or more of its graded samples fail. It is `incomplete` when scenario errors outnumber graded samples. Cells show the median of the key metric.
 
-**Cost.** No paid models. A full run is about 25 minutes on one simulator with 3 samples: 1 minute to seed a 60-turn thread and load the bundle, then about 30 seconds per scenario sample. Run devices in parallel, one run each; each run owns its server, Metro, and port.
+**Cost.** No paid models. A full run takes about 15 minutes per simulator with 3 samples: about 2 minutes to seed a 60-turn thread and load the bundle, then the scenarios. Run devices in parallel, one run each; each run owns its server, Metro, and port.
 
 ## Metrics
 
@@ -35,7 +35,7 @@ Each sample stops any unfinished turn, reloads the app's JS, and starts from Hom
 
 ## Add a case
 
-Cases are data in [`cases.ts`](cases.ts). Each has an `id`, a `kind` (`bad` for an open issue, `guard` for a landed fix, `control` for ordinary use), its `source`, the `scenario` that makes its metrics, a `key` metric, and `checks`. A new flow goes in [`scenarios.ts`](scenarios.ts) and returns metrics. Add the case before the fix: it must fail on `main` while the bug exists.
+Cases are data in [`cases.ts`](cases.ts). Each has an `id`, a `kind` (`bad` fails on `main` today, `guard` passes and must keep passing, `control` is ordinary use), its `source`, the `scenario` that makes its metrics, a `key` metric, and `checks`. A new flow goes in [`scenarios.ts`](scenarios.ts) and returns metrics. Add the case before the fix: it must fail on `main` while the bug exists.
 
 ## Not covered here
 
