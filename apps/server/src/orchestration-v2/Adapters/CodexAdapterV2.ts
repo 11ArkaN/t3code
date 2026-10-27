@@ -4708,7 +4708,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 driver: CODEX_PROVIDER,
                 turnItem: artifacts.turnItem,
               });
-              yield* reportSubagentProgress(context, payload.item.command);
+              // `command` carries the `/bin/bash -lc` wrapper; the parsed actions do not.
+              const actions = payload.item.commandActions.map((action) => action.command);
+              yield* reportSubagentProgress(
+                context,
+                actions.length > 0 ? actions.join("; ") : payload.item.command,
+              );
               return;
             }
 

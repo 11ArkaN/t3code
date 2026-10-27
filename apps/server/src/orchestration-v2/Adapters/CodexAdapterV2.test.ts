@@ -5501,6 +5501,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const command = "sleep 8 && echo CHILD_STEP_ONE";
+        const wrappedCommand = `/bin/bash -lc '${command}'`;
         const commandItemId = "child-command-step-one";
         const harness = yield* makeCodexReplayHarness(
           makeCodexReplayTranscript({
@@ -5519,12 +5520,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                     item: {
                       type: "commandExecution",
                       id: commandItemId,
-                      command,
+                      command: wrappedCommand,
                       cwd: "/workspace",
                       processId: "4343",
                       source: "unifiedExecStartup",
                       status: "inProgress",
-                      commandActions: [{ type: "unknown", command }],
+                      commandActions: [
+                        { type: "unknown", command: "sleep 8" },
+                        { type: "unknown", command: "echo CHILD_STEP_ONE" },
+                      ],
                       aggregatedOutput: null,
                       exitCode: null,
                       durationMs: null,
@@ -5577,9 +5581,10 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         );
         const latest = harness.subagentUpdates().at(-1)?.subagent;
         assert.equal(latest?.status, "running");
-        assert.isTrue(
-          latest?.progress?.includes(command) === true,
-          `parent subagent task should name the child's running command, got progress ${String(latest?.progress)}`,
+        assert.equal(
+          latest?.progress,
+          "sleep 8; echo CHILD_STEP_ONE",
+          "parent subagent task should name the child's running command without its shell wrapper",
         );
       }).pipe(
         Effect.provide(
