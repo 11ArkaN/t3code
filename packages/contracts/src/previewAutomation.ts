@@ -71,9 +71,11 @@ export const PreviewAutomationProfile = Schema.Struct({
 });
 export type PreviewAutomationProfile = typeof PreviewAutomationProfile.Type;
 
+const VISIBLE_DESCRIPTION = "True while a T3 client shows this tab's live view.";
+
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
-  visible: Schema.Boolean,
+  visible: Schema.Boolean.annotate({ description: VISIBLE_DESCRIPTION }),
   tabId: Schema.NullOr(PreviewTabId),
   url: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
@@ -119,7 +121,7 @@ export const PreviewAutomationStatus = Schema.Struct({
         openerTabId: Schema.optional(PreviewTabId),
         owner: Schema.optional(PreviewAutomationTabOwner),
         ownedByCaller: Schema.optional(Schema.Boolean),
-        visible: Schema.optional(Schema.Boolean),
+        visible: Schema.optional(Schema.Boolean.annotate({ description: VISIBLE_DESCRIPTION })),
         profileId: Schema.optional(BrowserProfileId),
       }),
     ),
