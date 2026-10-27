@@ -136,6 +136,7 @@ export function renderBootServicePlist(
   // Allow 90s stops for update handoffs.
   // Interactive avoids background throttling.
   // AbandonProcessGroup=false reaps agents only on launcher exit, preserving them across child updates.
+  // launchd's default soft maxfiles is 256; macOS setrlimit rejects soft NOFILE above OPEN_MAX (10240).
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
@@ -168,6 +169,11 @@ export function renderBootServicePlist(
     `  <integer>90</integer>`,
     `  <key>ProcessType</key>`,
     `  <string>Interactive</string>`,
+    `  <key>SoftResourceLimits</key>`,
+    `  <dict>`,
+    `    <key>NumberOfFiles</key>`,
+    `    <integer>10240</integer>`,
+    `  </dict>`,
     `  <key>StandardOutPath</key>`,
     `  <string>${escapeXmlText(plan.logPath)}</string>`,
     `  <key>StandardErrorPath</key>`,
