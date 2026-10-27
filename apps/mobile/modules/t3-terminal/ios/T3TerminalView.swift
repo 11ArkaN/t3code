@@ -517,7 +517,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
           self?.presentTextSelection(text)
         })
     }
-    return UIMenu(children: children)
+    return children.isEmpty ? nil : UIMenu(children: children)
   }
 
   private func presentTextSelection(_ text: String) {

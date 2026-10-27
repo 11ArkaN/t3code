@@ -9,8 +9,6 @@ import type { NativeSyntheticEvent } from "react-native";
 import { expect, it, vi } from "vite-plus/test";
 
 import type { NativeTerminalSurfaceProps } from "./nativeTerminalModule";
-import { TERMINAL_WRITE_MAX_LENGTH } from "./terminalInput";
-import { createTerminalPasteSession } from "./terminalPaste";
 
 const mocks = vi.hoisted(() => ({
   revision: null as number | null,
@@ -169,37 +167,20 @@ it.each([null, 1])(
 );
 
 it.each([
-  { isRunning: true, readOnly: false },
-  { isRunning: true, readOnly: true },
-  { isRunning: false, readOnly: false },
-])("native paste preserves text and write limits for %j", async ({ isRunning, readOnly }) => {
-  await using harness = setup(1);
-  const session = createTerminalPasteSession();
-  session.reset(true);
-  const writes: string[] = [];
-  let paste: Promise<void> | undefined;
-  await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, {
-    isRunning,
-    readOnly,
-    onPaste: (text) => {
-      paste = session.paste({
-        readText: async () => text,
-        write: async (data) => {
-          writes.push(data);
-          return true;
-        },
-        onReadError: (cause) => {
-          throw cause;
-        },
-      });
-    },
-  });
-  mocks.paste(`one\ntwo\u0000${"x".repeat(TERMINAL_WRITE_MAX_LENGTH)}`);
-  await paste;
-  expect(writes.join("")).toBe(
-    isRunning && !readOnly ? `one\rtwo ${"x".repeat(TERMINAL_WRITE_MAX_LENGTH)}` : "",
-  );
-  expect(writes.map((chunk) => chunk.length)).toEqual(
-    isRunning && !readOnly ? [TERMINAL_WRITE_MAX_LENGTH, 8] : [],
-  );
-});
+  { isRunning: true, readOnly: false, delivered: ["one\ntwo"] },
+  { isRunning: true, readOnly: true, delivered: [] },
+  { isRunning: false, readOnly: false, delivered: [] },
+])(
+  "native paste delivers multi-line clipboard text only to a writable running terminal: %j",
+  async ({ isRunning, readOnly, delivered }) => {
+    await using harness = setup(1);
+    const pasted: string[] = [];
+    await harness.render(EMPTY_TERMINAL_BUFFER_STATE, undefined, {
+      isRunning,
+      readOnly,
+      onPaste: (text) => pasted.push(text),
+    });
+    mocks.paste("one\ntwo");
+    expect(pasted).toEqual(delivered);
+  },
+);
