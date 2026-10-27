@@ -48,6 +48,7 @@ import {
   t3McpServerName,
 } from "@t3tools/provider-opencode/testing";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import type { OpenCode2Connection } from "@t3tools/provider-opencode/server/v2/OpenCode2Server";
 import { openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
 import {
   makeProviderReplayGate,
@@ -314,6 +315,7 @@ const resumed = (
     readonly resolveExtractedTextPath?: (path: string) => Effect.Effect<string | undefined>;
     readonly fileSystem?: FileSystem.FileSystem;
     readonly onPrompt?: (input: unknown) => void;
+    readonly relend?: (connection: OpenCode2Connection) => OpenCode2Connection;
   },
 ) =>
   Effect.gen(function* () {
@@ -338,6 +340,7 @@ const resumed = (
         ...(options?.onPrompt === undefined ? {} : { onPrompt: options.onPrompt }),
         ...(options?.external === undefined ? {} : { external: options.external }),
         ...(options?.replayGate === undefined ? {} : { replayGate: options.replayGate }),
+        ...(options?.relend === undefined ? {} : { relend: options.relend }),
         ...(options?.attachmentsDir === undefined
           ? {}
           : { attachmentsDir: options.attachmentsDir }),
@@ -2262,6 +2265,39 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         "Arrived on the new stream.",
       ]);
       assert.deepInclude(collected.at(-1), { type: "turn.terminal", status: "completed" });
+    }).pipe(Effect.scoped),
+  );
+
+  // regression: #25751 a defect during reconnect left the session wedged until restart
+  it.effect("fails the session when reconnecting to the event stream dies", () =>
+    Effect.gen(function* () {
+      const dropped = yield* Deferred.make<void>();
+      const { runtime, thread } = yield* resumed(
+        [
+          out("session.prompt", { sessionID: SESSION, id: PROMPT_ID, text: "<any>" }),
+          promptAccepted,
+          { type: "runtime_exit", status: "success" } as const,
+        ],
+        {
+          relend: (connection) => ({
+            ...connection,
+            events: Deferred.succeed(dropped, undefined).pipe(
+              Effect.andThen(Effect.die(new RangeError("Maximum call stack size exceeded"))),
+            ),
+          }),
+        },
+      );
+      const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn(turnInput(thread));
+      yield* Deferred.await(dropped);
+      const next = yield* runtime.startTurn(turnInput(thread)).pipe(Effect.flip, Effect.forkScoped);
+      yield* TestClock.adjust("30 seconds");
+      const failure = yield* Fiber.join(next);
+      assert.deepInclude(failure, {
+        _tag: "ProviderAdapterEventStreamError",
+        cause: "The OpenCode event stream was lost and could not reconnect.",
+      });
+      assert.equal((yield* Fiber.join(terminal))?.status, "failed");
     }).pipe(Effect.scoped),
   );
 
