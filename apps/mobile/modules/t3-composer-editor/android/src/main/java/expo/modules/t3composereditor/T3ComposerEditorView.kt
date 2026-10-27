@@ -593,15 +593,12 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
   var pasteImagesListener: ((List<String>) -> Unit)? = null
   var pasteContextListener: ((Map<String, String>) -> Unit)? = null
   var pasteTextListener: ((String, Int, Int) -> Unit)? = null
-
   var submitListener: ((Boolean) -> Unit)? = null
+  var submitEnabled = false
+  var returnSends = true
   var textPasteThresholdBytes = 0
   var maxInputChars = Int.MAX_VALUE
   var clipboardFragment = ""
-
-  var returnSends = true
-
-  var submitEnabled = false
 
   /**
    * Editable TextView hints do not ellipsize, so long placeholders wrap and grow the composer.
@@ -653,21 +650,30 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
     return spans.isNotEmpty()
   }
 
-  private fun submitChord(keyCode: Int, event: KeyEvent): Boolean? {
+  // Mirrors the iOS key commands with Ctrl for Command. Returns `alternate`, or null to type Return.
+  // No composing-text guard: some IMEs keep a composing region over the last word while hardware typing.
+  private fun returnSubmission(keyCode: Int, event: KeyEvent): Boolean? {
     val isReturn = keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
-    if (!isReturn || !isFromPhysicalKeyboard(event) || !canSubmit()) {
-      return null
-    }
-    return when {
-      event.hasNoModifiers() -> if (returnSends) false else null
-      event.hasModifiers(KeyEvent.META_CTRL_ON) -> returnSends
-      event.hasModifiers(KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON) ->
-        if (returnSends) null else true
-      else -> null
+    if (!isReturn || !canSubmit() || !isFromPhysicalKeyboard(event)) return null
+    return if (returnSends) {
+      when {
+        event.hasNoModifiers() -> false
+        event.hasModifiers(KeyEvent.META_CTRL_ON) -> true
+        else -> null
+      }
+    } else {
+      when {
+        event.hasModifiers(KeyEvent.META_CTRL_ON) -> false
+        event.hasModifiers(KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON) -> true
+        else -> null
+      }
     }
   }
 
-  // IMEs can use device ID 0 without the soft-keyboard flag; it is not proof of a typing keyboard.
+  private fun canSubmit(): Boolean =
+    submitEnabled && submitListener != null && !readOnly && isEnabled
+
+  // IMEs can send Return from device 0 without FLAG_SOFT_KEYBOARD, so only a real alphabetic keyboard counts.
   private fun isFromPhysicalKeyboard(event: KeyEvent): Boolean {
     val device = event.device
     return (event.flags and KeyEvent.FLAG_SOFT_KEYBOARD) == 0 &&
@@ -676,14 +682,10 @@ internal class SelectionAwareEditText(context: Context) : EditText(context) {
       device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
   }
 
-  // Latin autocomplete also owns composing spans; the IME handles candidate Return before onKeyDown.
-  private fun canSubmit(): Boolean =
-    submitEnabled && submitListener != null && !readOnly && isEnabled
-
   override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-    val alternate = submitChord(keyCode, event)
+    val alternate = returnSubmission(keyCode, event)
     if (alternate != null) {
-      // A held Return repeats. Send once, and drop the repeats instead of typing newlines.
+      // A held Return repeats; send once and swallow the repeats instead of typing newlines.
       if (event.repeatCount == 0) submitListener?.invoke(alternate)
       return true
     }

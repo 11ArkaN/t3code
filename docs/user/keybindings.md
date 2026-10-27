@@ -77,10 +77,8 @@ behavior in Settings → Keyboard.
 
 ## Android
 
-With a hardware keyboard, the composer works like the iPad one with `Ctrl` in
-place of `Cmd`: Return sends, `Shift+Return` inserts a new line, and
-`Ctrl+Return` also sends. The on-screen keyboard's Return always inserts a new
-line. Change the Return key behavior in Settings → Keyboard.
+With a hardware keyboard, the composer handles Return as on iPad, with `Ctrl` in
+place of `Cmd`. The on-screen keyboard's Return always inserts a new line.
 
 ## Edit the configuration file
 
