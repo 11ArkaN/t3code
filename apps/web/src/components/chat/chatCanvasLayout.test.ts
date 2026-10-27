@@ -48,7 +48,11 @@ describe("chat canvas layout", () => {
     expect(previous!.overlapsChat).toBe(true);
     expect(previous!.frame!.width).toBe(1100);
   });
-  it("narrows a lifted preview when its right edge is dragged inward", () => {
+  it.each([
+    { x: -10, y: 0 },
+    { x: -200, y: 0 },
+    { x: 0, y: 6 },
+  ])("keeps a lifted preview's width when its right edge is dragged by %o", (delta) => {
     const source = { width: 1280, height: 800 };
     const player: ChatCanvasPreview = {
       ...preview,
@@ -60,7 +64,7 @@ describe("chat canvas layout", () => {
     const resized = resizePreviewMiniPlayer({
       start: rendered,
       direction: "east",
-      delta: { x: -10, y: 0 },
+      delta,
       source,
       container: { width: 1200, height: 300 },
     });
@@ -70,9 +74,9 @@ describe("chat canvas layout", () => {
       inPlace: resolve(1200, stored, 300).frame!.width,
       roomToGrow: resolve(1200, stored, 900).frame!.width,
     }).toEqual({
-      dragged: rendered.width - 10,
-      inPlace: rendered.width - 10,
-      roomToGrow: rendered.width - 10,
+      dragged: rendered.width,
+      inPlace: rendered.width,
+      roomToGrow: rendered.width,
     });
   });
   it.each([900, 1000, 1004])("allows dragging across a %spx chat canvas", (width) => {
