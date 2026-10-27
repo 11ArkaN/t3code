@@ -44,6 +44,7 @@ import {
   type SDKMessage,
   type SDKRateLimitInfo,
   type SDKResultMessage,
+  type SDKSettingsParseError,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -516,9 +517,43 @@ export interface ClaudeAgentSdkQuerySession {
   readonly backgroundTasks: (
     toolUseId: string,
   ) => Effect.Effect<boolean, ClaudeAgentSdkQueryRunnerError>;
+  // Settings files the CLI skipped as malformed; absent when the SDK has no get_settings request.
+  readonly settingsErrors?: Effect.Effect<
+    ReadonlyArray<SDKSettingsParseError>,
+    ClaudeAgentSdkQueryRunnerError
+  >;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
+
+function claudeSettingsErrorsNotice(errors: ReadonlyArray<SDKSettingsParseError>): string | null {
+  const lines = errors.map((error) => {
+    const file = error.file ?? "a settings file";
+    const location = error.path === "" ? "" : ` (${error.path})`;
+    const message = error.message.endsWith(".") ? error.message.slice(0, -1) : error.message;
+    return `Claude Code skipped ${file}${location}: ${message}. Its settings are not applied.`;
+  });
+  return lines.length === 0 ? null : [...new Set(lines)].join("\n");
+}
+
+// The SDK Query implements get_settings but does not declare it.
+type ClaudeQueryWithSettings = ClaudeQuery & {
+  readonly getSettings?: () => Promise<unknown>;
+};
+
+const decodeClaudeSettingsReply = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    errors: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          file: Schema.optionalKey(Schema.String),
+          path: Schema.String,
+          message: Schema.String,
+        }),
+      ),
+    ),
+  }),
+);
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
 
@@ -1079,6 +1114,7 @@ export const layerQueryRunner: Layer.Layer<
             ),
           );
 
+          const settingsQuery: ClaudeQueryWithSettings = queryRuntime;
           return {
             messages: Stream.fromAsyncIterable(claudeQueryMessages(queryRuntime), (cause) =>
               queryRunnerError(cause, "fromAsyncIterable"),
@@ -1183,6 +1219,21 @@ export const layerQueryRunner: Layer.Layer<
                   }),
                 ),
               ),
+            ...(settingsQuery.getSettings === undefined
+              ? {}
+              : {
+                  settingsErrors: Effect.tryPromise({
+                    try: async () => settingsQuery.getSettings?.(),
+                    catch: (cause) => queryRunnerError(cause, "getSettings"),
+                  }).pipe(
+                    Effect.flatMap((reply) =>
+                      decodeClaudeSettingsReply(reply).pipe(
+                        Effect.mapError((cause) => queryRunnerError(cause, "getSettings")),
+                      ),
+                    ),
+                    Effect.map((reply) => reply.errors ?? []),
+                  ),
+                }),
             interrupt: Effect.tryPromise({
               try: () => queryRuntime.interrupt(),
               catch: (cause) => queryRunnerError(cause, "interrupt"),
@@ -3837,6 +3888,7 @@ interface ClaudeLiveQueryContext {
   receivedInit: boolean;
   permissionMode: PermissionMode;
   stopping: boolean;
+  settingsErrorsChecked: boolean;
   readonly subagentsFromEarlierProcesses: ReadonlySet<ActiveClaudeSubagent>;
 }
 
@@ -4258,6 +4310,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     adapterOptions.settings.homePath.trim().length > 0 ||
     adapterOptions.environment.CLAUDE_CONFIG_DIR !== hostEnvironment.CLAUDE_CONFIG_DIR;
   const announcedBypassDowngrades = new Set<ThreadId>();
+  const announcedSettingsErrors = new Set<string>();
   const readBypassSettings = (filePath: string) =>
     fileSystem.readFileString(filePath).pipe(
       Effect.flatMap(decodeClaudeBypassSettings),
@@ -9805,6 +9858,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             receivedInit: false,
             permissionMode: queryOptions.permissionMode,
             stopping: false,
+            settingsErrorsChecked: false,
             subagentsFromEarlierProcesses: new Set(
               [...(yield* Ref.get(sessionSubagentsByTaskId)).values()].filter(
                 (subagent) => subagent.task.status === "running",
@@ -10045,6 +10099,71 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 }),
               });
             });
+            // Asked once per query after the prompt is queued, so a slow reply holds only startTurn, bounded.
+            const announceSettingsErrors = Effect.gen(function* () {
+              const readSettingsErrors = querySession.query.settingsErrors;
+              if (readSettingsErrors === undefined || querySession.settingsErrorsChecked) return;
+              querySession.settingsErrorsChecked = true;
+              yield* readSettingsErrors.pipe(
+                Effect.timeout("2 seconds"),
+                Effect.flatMap((errors) =>
+                  sdkMessageLock.withPermits(1)(
+                    Effect.gen(function* () {
+                      const notice = claudeSettingsErrorsNotice(errors);
+                      const announcement = `${turnInput.threadId}\n${notice}`;
+                      if (
+                        notice === null ||
+                        (yield* Ref.get(activeTurn)) !== context ||
+                        announcedSettingsErrors.has(announcement)
+                      ) {
+                        return;
+                      }
+                      announcedSettingsErrors.add(announcement);
+                      if (announcedSettingsErrors.size > 1000) {
+                        const oldest = announcedSettingsErrors.values().next().value;
+                        if (oldest !== undefined) announcedSettingsErrors.delete(oldest);
+                      }
+                      const nativeItemId = `settings-errors:${context.providerTurnId}`;
+                      const now = yield* DateTime.now;
+                      yield* emitProviderEvent({
+                        type: "turn_item.updated",
+                        driver: CLAUDE_PROVIDER,
+                        turnItem: {
+                          id: idAllocator.derive.turnItemFromProviderItem({
+                            driver: CLAUDE_PROVIDER,
+                            nativeItemId,
+                          }),
+                          threadId: turnInput.threadId,
+                          runId: turnInput.runId,
+                          nodeId: turnInput.rootNodeId,
+                          providerThreadId: turnInput.providerThread.id,
+                          providerTurnId: context.providerTurnId,
+                          nativeItemRef: {
+                            driver: CLAUDE_PROVIDER,
+                            nativeId: nativeItemId,
+                            strength: "weak",
+                          },
+                          parentItemId: null,
+                          ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+                          type: "system_notice",
+                          status: "completed",
+                          title: notice,
+                          message: notice,
+                          startedAt: now,
+                          completedAt: now,
+                          updatedAt: now,
+                        },
+                      });
+                    }),
+                  ),
+                ),
+                Effect.catch((cause) =>
+                  Effect.logDebug("orchestration-v2.claude-settings-errors-unavailable", {
+                    cause,
+                  }),
+                ),
+              );
+            });
             if (userMessage !== null) {
               yield* attachTurn;
               yield* startUserTurnForWakeReports(nativeThreadId);
@@ -10061,6 +10180,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   ),
                 ),
               );
+              yield* announceSettingsErrors;
               return;
             }
             // Transcript reads suspend replay; hold SDK frames until the buffer is applied to preserve order.

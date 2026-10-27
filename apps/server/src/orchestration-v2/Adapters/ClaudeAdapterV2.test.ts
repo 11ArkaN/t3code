@@ -2640,8 +2640,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       // Mirrors the CLI's get_settings control response, which lists skipped settings files.
-      const getSettings = () =>
-        Effect.succeed({ effective: {}, sources: [], errors: options?.settingsErrors ?? [] });
+      const settingsErrors = Effect.succeed(options?.settingsErrors ?? []);
       const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-claude-v2-wake-",
       });
@@ -2754,7 +2753,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     ),
                   backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
                   stopTask: options?.stopTask ?? (() => Effect.void),
-                  getSettings,
+                  settingsErrors,
                   interrupt: Effect.void,
                   close: Queue.shutdown(processMessages),
                 };
@@ -2780,7 +2779,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   }).pipe(Effect.andThen(() => options?.setPermissionMode?.(mode) ?? Effect.void)),
                 backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
                 stopTask: options?.stopTask ?? (() => Effect.void),
-                getSettings,
+                settingsErrors,
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
               };
