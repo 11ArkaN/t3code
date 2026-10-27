@@ -134,6 +134,7 @@ const daysInput = (screen: Screen) => screen.getByLabelText(`${rule} in days`);
 
 it("saves a newly enabled retention rule only once its age is committed", async () => {
   setup();
+  state.update.mockResolvedValue(true);
   await using screen = await render(panel());
   await userEvent.click(ruleSwitch(screen));
   expect(state.update).not.toHaveBeenCalled();
@@ -145,6 +146,8 @@ it("saves a newly enabled retention rule only once its age is committed", async 
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { browserArtifactsAfterDays: 30 },
   });
+  await expect.element(ruleSwitch(screen)).toBeChecked();
+  await expect.element(daysInput(screen)).toHaveValue("30");
 });
 
 it("discards a retention draft on Escape or when switched back off", async () => {
@@ -175,11 +178,14 @@ it("discards an untouched retention draft when focus leaves it", async () => {
   expect(state.update).not.toHaveBeenCalled();
 });
 
-it("saves an edited draft when focus leaves it", async () => {
+it("saves an edited draft when focus leaves its row", async () => {
   setup();
   await using screen = await render(panel());
   await userEvent.click(ruleSwitch(screen));
   await userEvent.fill(daysInput(screen), "30");
+  await userEvent.tab();
+  await expect.element(ruleSwitch(screen)).toHaveFocus();
+  expect(state.update).not.toHaveBeenCalled();
   await userEvent.tab();
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { browserArtifactsAfterDays: 30 },
@@ -196,9 +202,22 @@ it("saves a re-entered age that matches the shown value", async () => {
   await userEvent.click(daysInput(screen));
   await userEvent.keyboard("{Control>}a{/Control}30");
   await userEvent.tab();
+  await userEvent.tab();
   expect(state.update).toHaveBeenCalledExactlyOnceWith({
     storageCleanup: { browserArtifactsAfterDays: 30 },
   });
+});
+
+it("switching an edited draft off from the keyboard saves nothing", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.tab();
+  await userEvent.keyboard(" ");
+  await expect.element(ruleSwitch(screen)).not.toBeChecked();
+  await userEvent.tab();
+  expect(state.update).not.toHaveBeenCalled();
 });
 
 it("turns a saved retention rule off immediately", async () => {
@@ -264,7 +283,9 @@ it("switching off during a pending first save does not save an edited age", asyn
   await userEvent.fill(daysInput(screen), "30");
   await userEvent.keyboard("{Enter}");
   await userEvent.fill(daysInput(screen), "1");
-  await userEvent.click(ruleSwitch(screen));
+  await userEvent.tab();
+  await userEvent.keyboard(" ");
+  await userEvent.tab();
   expect(state.update.mock.calls).toEqual([
     [{ storageCleanup: { browserArtifactsAfterDays: 30 } }],
     [{ storageCleanup: { browserArtifactsAfterDays: null } }],

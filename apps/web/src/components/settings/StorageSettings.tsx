@@ -116,16 +116,21 @@ function RetentionControl({
   // Saving an age can start a cleanup sweep, so turning a rule on only opens a draft.
   // While its first save is in flight this holds that submission.
   const [enabling, setEnabling] = useState<"draft" | "edited" | { days: number } | null>(null);
+  // An edited age is held while focus is on the switch, so switching off never saves it first.
+  const [held, setHeld] = useState(false);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
     setEnabling(null);
+    setHeld(false);
   }
   const pending = typeof enabling === "object" ? enabling : null;
+  const row = useRef<HTMLDivElement>(null);
 
   const commit = async (next: number) => {
     const days = Math.min(3650, Math.max(minimum, Math.round(next)));
     setDraft(days);
+    setHeld(false);
     if (days === pending?.days) return;
     if (value !== null) {
       void onChange(days);
@@ -140,10 +145,12 @@ function RetentionControl({
 
   return (
     <div
+      ref={row}
       className="flex items-center gap-3"
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget)) return;
-        setEnabling((current) => (typeof current === "string" ? null : current));
+        if (held && draft !== null) void commit(draft);
+        else setEnabling((current) => (typeof current === "string" ? null : current));
       }}
     >
       {value !== null || enabling !== null ? (
@@ -156,11 +163,20 @@ function RetentionControl({
           className="w-auto"
           onValueChange={(next) => {
             setDraft(next);
+            setHeld(false);
             setEnabling((current) => (current === "draft" ? "edited" : current));
           }}
-          onValueCommitted={(next) => {
+          onValueCommitted={(next, { reason, event }) => {
             if (next === null) setDraft(value);
-            else void commit(next);
+            else if (
+              reason === "input-blur" &&
+              event instanceof FocusEvent &&
+              event.relatedTarget instanceof Node &&
+              row.current?.contains(event.relatedTarget)
+            ) {
+              setDraft(next);
+              setHeld(true);
+            } else void commit(next);
           }}
         >
           <NumberFieldGroup>
@@ -180,11 +196,13 @@ function RetentionControl({
                     draft !== null && input.value === new Intl.NumberFormat().format(draft);
                   if (enabling === "draft" && shown) void commit(draft);
                   input.blur();
-                } else if (event.key === "Escape" && typeof enabling === "string") {
+                } else if (event.key === "Escape" && (held || typeof enabling === "string")) {
                   // An unhandled Escape closes the settings page.
                   event.preventDefault();
                   event.stopPropagation();
-                  setEnabling(null);
+                  setDraft(pending?.days ?? value);
+                  setHeld(false);
+                  setEnabling((current) => (typeof current === "string" ? null : current));
                 }
               }}
             />
@@ -209,6 +227,8 @@ function RetentionControl({
             return;
           }
           if (value !== null || pending !== null) void onChange(null);
+          setDraft(value);
+          setHeld(false);
           setEnabling(null);
         }}
       />
