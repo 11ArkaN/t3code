@@ -128,6 +128,7 @@ private enum TerminalInputSequence {
 private final class TerminalInputField: UITextField {
   var onDeleteBackward: (() -> Void)?
   var onInsert: ((String) -> Void)?
+  var onPaste: (() -> Void)?
 
   private static let hardwareKeyCommands = TerminalHardwareKeyEncoder.makeKeyCommands(
     action: #selector(handleHardwareKeyCommand(_:))
@@ -140,6 +141,11 @@ private final class TerminalInputField: UITextField {
   override func deleteBackward() {
     onDeleteBackward?()
     super.deleteBackward()
+  }
+
+  // System pastes must bypass typed input to preserve paste encoding and chunking.
+  override func paste(_ sender: Any?) {
+    onPaste?()
   }
 
   @objc
@@ -184,7 +190,7 @@ private extension UIColor {
   }
 }
 
-public final class T3TerminalView: ExpoView, UITextFieldDelegate {
+public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInteractionDelegate {
   private static let minimumVerticalScrollStepPoints: CGFloat = 18
   private static let verticalScrollStepMultiplier: CGFloat = 1.15
 
@@ -192,12 +198,15 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
   private let inputField = TerminalInputField()
   private let focusTapGesture = UITapGestureRecognizer()
   private let scrollPanGesture = UIPanGestureRecognizer()
+  private let editMenuGesture = UILongPressGestureRecognizer()
+  private lazy var editMenuInteraction = UIEditMenuInteraction(delegate: self)
   private var lastViewportSize: CGSize = .zero
   private var lastContentScale: CGFloat = 0
   private var lastReportedGrid: (cols: Int, rows: Int)?
   private var lastAppliedBuffer = ""
   private var streamedOutput: TerminalOutputBuffer?
   private var pendingVerticalScrollPoints: CGFloat = 0
+  private var menuText: String?
   private var app: ghostty_app_t?
   private var surface: ghostty_surface_t?
   private var isCreatingSurface = false
@@ -208,18 +217,11 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
   let onInput = EventDispatcher()
   let onResize = EventDispatcher()
   let onCapture = EventDispatcher()
+  let onPaste = EventDispatcher()
   var captureRequest: Double = 0 {
     didSet {
       guard captureRequest > 0, captureRequest != oldValue else { return }
-      guard let surface else { onCapture(["text": ""]); return }
-      let selection = ghostty_selection_s(
-        top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
-        bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
-        rectangle: false)
-      var captured = ghostty_text_s()
-      guard ghostty_surface_read_text(surface, selection, &captured) else { onCapture(["text": ""]); return }
-      defer { ghostty_surface_free_text(surface, &captured) }
-      let text = captured.text.flatMap { String(bytes: UnsafeBufferPointer(start: UnsafeRawPointer($0).assumingMemoryBound(to: UInt8.self), count: Int(captured.text_len)), encoding: .utf8) } ?? ""
+      let text = readViewportText() ?? ""
       // Android joins snapshot rows with "\n" and trims each row's trailing whitespace, so do
       // the same here: identical terminal content must capture identically on both platforms.
       let normalized = text.split(separator: "\n", omittingEmptySubsequences: false)
@@ -348,6 +350,9 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     inputField.onInsert = { [weak self] data in
       self?.emitInput(data)
     }
+    inputField.onPaste = { [weak self] in
+      self?.emitPaste()
+    }
 
     focusTapGesture.addTarget(self, action: #selector(handleViewportTap))
     terminalViewport.addGestureRecognizer(focusTapGesture)
@@ -355,6 +360,10 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     scrollPanGesture.maximumNumberOfTouches = 1
     scrollPanGesture.cancelsTouchesInView = false
     terminalViewport.addGestureRecognizer(scrollPanGesture)
+    editMenuGesture.addTarget(self, action: #selector(handleViewportLongPress(_:)))
+    terminalViewport.addGestureRecognizer(editMenuGesture)
+    terminalViewport.addInteraction(editMenuInteraction)
+    focusTapGesture.require(toFail: editMenuGesture)
 
     addSubview(terminalViewport)
     addSubview(inputField)
@@ -426,6 +435,23 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     requestKeyboardFocus()
   }
 
+  private func readViewportText() -> String? {
+    guard let surface else { return nil }
+    let selection = ghostty_selection_s(
+      top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+      bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+      rectangle: false)
+    var captured = ghostty_text_s()
+    guard ghostty_surface_read_text(surface, selection, &captured) else { return nil }
+    defer { ghostty_surface_free_text(surface, &captured) }
+    guard let text = captured.text else { return nil }
+    return String(
+      bytes: UnsafeBufferPointer(
+        start: UnsafeRawPointer(text).assumingMemoryBound(to: UInt8.self),
+        count: Int(captured.text_len)),
+      encoding: .utf8)
+  }
+
   @objc
   private func handleViewportPan(_ gesture: UIPanGestureRecognizer) {
     guard let surface else { return }
@@ -464,6 +490,83 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
       pendingVerticalScrollPoints = 0
       gesture.setTranslation(.zero, in: terminalViewport)
     }
+  }
+
+  @objc
+  private func handleViewportLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began else { return }
+    // Freeze the text the user pressed on; output keeps streaming while the menu is open.
+    menuText = readViewportText().flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    guard menuText != nil || canPaste else { return }
+    editMenuInteraction.presentEditMenu(
+      with: UIEditMenuConfiguration(identifier: nil, sourcePoint: gesture.location(in: terminalViewport))
+    )
+  }
+
+  public func editMenuInteraction(
+    _ interaction: UIEditMenuInteraction,
+    menuFor configuration: UIEditMenuConfiguration,
+    suggestedActions: [UIMenuElement]
+  ) -> UIMenu? {
+    // The hidden input field would otherwise add actions such as Scan Text or Writing Tools.
+    // Keep the system Paste command: unlike a custom action, it reads without a paste prompt.
+    var children: [UIMenuElement] = Self.pasteCommand(in: suggestedActions).map { [$0] } ?? []
+    if let text = menuText {
+      children.append(
+        UIAction(title: "Select Text", image: UIImage(systemName: "text.cursor")) { [weak self] _ in
+          self?.presentTextSelection(text)
+        })
+    }
+    return UIMenu(children: children)
+  }
+
+  private func presentTextSelection(_ text: String) {
+    guard let window else { return }
+    var responder: UIResponder? = self
+    while let current = responder, !(current is UIViewController) {
+      responder = current.next
+    }
+    guard let presenter = responder as? UIViewController,
+      presenter.viewIfLoaded?.window === window,
+      presenter.presentedViewController == nil,
+      !presenter.isBeingPresented,
+      !presenter.isBeingDismissed,
+      presenter.transitionCoordinator == nil
+    else { return }
+
+    inputField.resignFirstResponder()
+    let controller = TerminalTextSelectionViewController(text: text, fontSize: fontSize)
+    let navigation = UINavigationController(rootViewController: controller)
+    navigation.modalPresentationStyle = .pageSheet
+    presenter.present(navigation, animated: !UIAccessibility.isReduceMotionEnabled)
+  }
+
+  private static func pasteCommand(in elements: [UIMenuElement]) -> UIMenuElement? {
+    for element in elements {
+      if let command = element as? UICommand,
+         command.action == #selector(UIResponderStandardEditActions.paste(_:)) {
+        return command
+      }
+      if let menu = element as? UIMenu, let command = pasteCommand(in: menu.children) {
+        return command
+      }
+    }
+    return nil
+  }
+
+  public override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+    if action == #selector(UIResponderStandardEditActions.paste(_:)) {
+      return canPaste
+    }
+    return super.canPerformAction(action, withSender: sender)
+  }
+
+  public override func paste(_ sender: Any?) {
+    emitPaste()
+  }
+
+  private var canPaste: Bool {
+    !readOnly && UIPasteboard.general.hasStrings
   }
 
   @objc
@@ -714,6 +817,11 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
   private func emitInput(_ data: String) {
     guard !readOnly, !data.isEmpty else { return }
     onInput(["data": data])
+  }
+
+  private func emitPaste() {
+    guard !readOnly, let text = UIPasteboard.general.string, !text.isEmpty else { return }
+    onPaste(["text": text])
   }
 
   private func textInputModeDidChange() {
