@@ -5,8 +5,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
@@ -70,7 +72,10 @@ const encryptWithOldSafeStorageName = (platform: "darwin" | "linux") => {
   ]);
 };
 
-const layerLinuxSecretHelper = (lookups: Ref.Ref<ReadonlyArray<string>>) =>
+const layerLinuxSecretHelper = (
+  lookups: Ref.Ref<ReadonlyArray<string>>,
+  beforeLookup: Effect.Effect<void> = Effect.void,
+) =>
   Layer.merge(
     Layer.succeed(LinuxBrowserSecretPath, "/bundled/browser-secret/t3-browser-secret"),
     Layer.succeed(
@@ -79,6 +84,7 @@ const layerLinuxSecretHelper = (lookups: Ref.Ref<ReadonlyArray<string>>) =>
         Effect.gen(function* () {
           const application = command._tag === "StandardCommand" ? command.args[0] : undefined;
           yield* Ref.update(lookups, (all) => [...all, application ?? ""]);
+          yield* beforeLookup;
           const secret = application === OLD_SAFE_STORAGE_NAME ? OLD_SAFE_STORAGE_SECRET : null;
           return ChildProcessSpawner.makeHandle({
             pid: ChildProcessSpawner.ProcessId(1),
@@ -139,6 +145,7 @@ function layerFor(
     readonly platform: NodeJS.Platform;
     readonly appVersion: string;
     readonly linuxSecretLookups?: Ref.Ref<ReadonlyArray<string>>;
+    readonly beforeLinuxSecretLookup?: Effect.Effect<void>;
   } = { platform: "darwin", appVersion: "1.2.3" },
 ) {
   const layerEnvironment = DesktopEnvironment.layer({
@@ -162,7 +169,9 @@ function layerFor(
     layerSafeStorage,
     NodeServices.layer,
     fileSystemLayer,
-    host.linuxSecretLookups ? layerLinuxSecretHelper(host.linuxSecretLookups) : Layer.empty,
+    host.linuxSecretLookups
+      ? layerLinuxSecretHelper(host.linuxSecretLookups, host.beforeLinuxSecretLookup)
+      : Layer.empty,
   );
   const layerSavedEnvironments = DesktopSavedEnvironments.layer.pipe(
     Layer.provideMerge(layerDependencies),
@@ -389,14 +398,18 @@ describe("DesktopConnectionCatalogStore", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 
-  const writeOldNightlyCatalog = (baseDir: string, platform: "darwin" | "linux") =>
+  const writeOldNightlyCatalog = (
+    baseDir: string,
+    platform: "darwin" | "linux",
+    encryptedCatalog = encryptWithOldSafeStorageName(platform),
+  ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const stateDir = `${baseDir}/userdata`;
       const catalogPath = `${stateDir}/connection-catalog.json`;
       const contents = `${JSON.stringify({
         version: 1,
-        encryptedCatalog: Base64.encode(encryptWithOldSafeStorageName(platform)),
+        encryptedCatalog: Base64.encode(encryptedCatalog),
       })}\n`;
       yield* fileSystem.makeDirectory(stateDir, { recursive: true });
       yield* fileSystem.writeFileString(catalogPath, contents);
@@ -473,5 +486,75 @@ describe("DesktopConnectionCatalogStore", () => {
         assert.deepStrictEqual(yield* reopened.get, Option.some(savedCatalog));
         assert.equal(keychainPassword.mock.calls.length, 0);
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect.each([
+    { platform: "darwin" as const, label: "the old Keychain item is missing", plaintext: false },
+    { platform: "linux" as const, label: "the file holds unencrypted JSON", plaintext: true },
+  ])("keeps the decrypt failure and the file when $label", ({ platform, plaintext }) =>
+    Effect.gen(function* () {
+      keychainPassword.mockReset().mockReturnValue(null);
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-connection-catalog-test-",
+      });
+      const { catalogPath, contents } = yield* writeOldNightlyCatalog(
+        baseDir,
+        platform,
+        plaintext ? Buffer.from(savedCatalog) : undefined,
+      );
+      const lookups = yield* Ref.make<ReadonlyArray<string>>([]);
+      const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+        Effect.provide(
+          layerFor(baseDir, true, null, NodeServices.layer, {
+            platform,
+            appVersion: NIGHTLY_VERSION,
+            linuxSecretLookups: lookups,
+          }),
+        ),
+      );
+
+      const error = yield* store.get.pipe(Effect.flip);
+      assert.instanceOf(
+        error,
+        DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreProtectionError,
+      );
+      assert.equal(error.operation, "decrypt-catalog");
+      assert.instanceOf(error.cause, ElectronSafeStorage.ElectronSafeStorageDecryptError);
+      assert.equal(yield* fileSystem.readFileString(catalogPath), contents);
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
+
+  it.effect("keeps a catalog saved while the old Nightly key is being read", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-connection-catalog-test-",
+      });
+      yield* writeOldNightlyCatalog(baseDir, "linux");
+      const lookupStarted = yield* Deferred.make<void>();
+      const lookupReleased = yield* Deferred.make<void>();
+      const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore.pipe(
+        Effect.provide(
+          layerFor(baseDir, true, null, NodeServices.layer, {
+            platform: "linux",
+            appVersion: NIGHTLY_VERSION,
+            linuxSecretLookups: yield* Ref.make<ReadonlyArray<string>>([]),
+            beforeLinuxSecretLookup: Deferred.succeed(lookupStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(lookupReleased)),
+            ),
+          }),
+        ),
+      );
+      const newer = savedCatalog.replace("Saved relay", "Updated relay");
+
+      const recovery = yield* store.get.pipe(Effect.forkChild);
+      yield* Deferred.await(lookupStarted);
+      assert.isTrue(yield* store.set(newer));
+      yield* Deferred.succeed(lookupReleased, undefined);
+      assert.deepStrictEqual(yield* Fiber.join(recovery), Option.some(savedCatalog));
+
+      assert.deepStrictEqual(yield* store.get, Option.some(newer));
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );
 });
