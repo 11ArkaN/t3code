@@ -424,6 +424,46 @@ describe("ConnectionCatalogDocument", () => {
     );
   });
 
+  it("a login paired over HTTPS is not copied to a plain HTTP LAN address", () => {
+    const lan = new BearerConnectionTarget({ ...BEARER_TARGET, connectionId: "bearer-lan" });
+    const fresh = new BearerConnectionCredential({ token: "fresh-token" });
+    const document: ConnectionCatalogDocument = {
+      ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
+      targets: [lan, BEARER_TARGET],
+      profiles: [
+        new BearerConnectionProfile({
+          ...BEARER_PROFILE,
+          connectionId: lan.connectionId,
+          httpBaseUrl: "http://192.168.1.10:3773/",
+          wsBaseUrl: "ws://192.168.1.10:3773/",
+        }),
+        BEARER_PROFILE,
+      ],
+      credentials: [lan, BEARER_TARGET].map(({ connectionId }) => ({
+        connectionId,
+        credential: BEARER_CREDENTIAL,
+      })),
+    };
+    const registered = registerConnectionInCatalog(
+      document,
+      new BearerConnectionRegistration({
+        target: BEARER_TARGET,
+        profile: BEARER_PROFILE,
+        credential: fresh,
+      }),
+      document.targets,
+    );
+
+    expect(
+      new Map(registered.credentials.map((value) => [value.connectionId, value.credential])),
+    ).toEqual(
+      new Map([
+        [lan.connectionId, BEARER_CREDENTIAL],
+        [BEARER_TARGET.connectionId, fresh],
+      ]),
+    );
+  });
+
   it("editing a saved address does not copy its login to the other addresses", () => {
     const tailnet = new BearerConnectionTarget({
       ...BEARER_TARGET,

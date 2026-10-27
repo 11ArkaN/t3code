@@ -318,11 +318,14 @@ function tokenAllowsPlainHttp(
   credentialId: string,
 ): boolean {
   const credentialRoute = routes.find((route) => connectionRouteId(route.target) === credentialId);
+  return credentialRoute !== undefined && isPlainHttpRoute(credentialRoute);
+}
+
+/** Plain HTTP outside loopback and the tailnet, where a token can be read in transit. */
+export function isPlainHttpRoute(route: ConnectionRoute): boolean {
+  const kind = connectionRouteKind(route);
   return (
-    credentialRoute !== undefined &&
-    routeHttpBaseUrl(credentialRoute)?.startsWith("http:") === true &&
-    (connectionRouteKind(credentialRoute) === "lan" ||
-      connectionRouteKind(credentialRoute) === "public")
+    routeHttpBaseUrl(route)?.startsWith("http:") === true && (kind === "lan" || kind === "public")
   );
 }
 
