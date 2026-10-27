@@ -1236,6 +1236,8 @@ describe("MuseAdapterV2", () => {
         .pipe(Effect.forkScoped);
       assert.strictEqual((yield* fake.takeCall("turn/interrupt")).params.turnId, nativeId);
       yield* fake.takeCall("task/stopAll");
+      yield* fake.emit("turn/started", { turnId: "stop-report" });
+      assert.strictEqual((yield* fake.takeCall("turn/interrupt")).params.turnId, "stop-report");
       yield* fake.emit("turn/completed", { turnId: nativeId, terminal: "cancelled" });
       yield* Fiber.join(stopping);
       assert.strictEqual((yield* harness.takeEvent("turn.terminal")).status, "interrupted");

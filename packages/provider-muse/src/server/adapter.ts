@@ -1390,12 +1390,12 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           params.turnId !== active?.nativeId &&
           params.turnId !== wake?.nativeId
         ) {
-          if (active && !active.compact) active.joined.add(params.turnId);
-          else if (!active && !wake && muteWakes)
+          if (muteWakes)
             yield* request("turn/interrupt", { turnId: params.turnId }).pipe(
               Effect.ignore,
               Effect.forkIn(scope),
             );
+          else if (active && !active.compact) active.joined.add(params.turnId);
           else if (!active && !wake) {
             const held = { nativeId: params.turnId, events: [] };
             wake = held;
