@@ -672,6 +672,54 @@ describe("providerMaintenanceRunner", () => {
       ),
     );
   });
+
+  it.effect("passes the macOS system proxy to the updater when the env has none", () => {
+    const updaterEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner(registry);
+
+      yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.strictEqual(updaterEnvs.length, 1);
+      assert.strictEqual(updaterEnvs[0]?.HTTPS_PROXY, "http://127.0.0.1:7890");
+      assert.strictEqual(updaterEnvs[0]?.HTTP_PROXY, "http://127.0.0.1:7890");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcess.Platform, "darwin"),
+          Layer.succeed(HostProcess.Environment, { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }),
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((command, _args, options) => {
+            if (command.split("/").pop() === "scutil") {
+              return {
+                stdout: [
+                  "<dictionary> {",
+                  "  ExceptionsList : <array> {",
+                  "    0 : *.local",
+                  "    1 : 169.254/16",
+                  "  }",
+                  "  FTPPassive : 1",
+                  "  HTTPEnable : 1",
+                  "  HTTPPort : 7890",
+                  "  HTTPProxy : 127.0.0.1",
+                  "  HTTPSEnable : 1",
+                  "  HTTPSPort : 7890",
+                  "  HTTPSProxy : 127.0.0.1",
+                  "}",
+                  "",
+                ].join("\n"),
+              };
+            }
+            if (command === "npm") {
+              updaterEnvs.push(options.env);
+            }
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
 });
 
 it.effect.each([
