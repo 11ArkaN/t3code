@@ -2494,23 +2494,26 @@ it.effect(
     }),
 );
 
-// regression: #11805 sessions were released right after the computer woke from sleep
-it.effect("ProviderSessionManagerV2 does not count host sleep toward the idle timeout", () =>
+// Models the idle timer's view of two hours of host sleep, five awake minutes after open.
+// Libuv's clock keeps counting while Windows and macOS sleep, so the timer fires on resume far past
+// its due time; Linux pauses the timer and the monotonic clock while only wall time jumps.
+const idleAcrossHostSleep = (input: { readonly timerCountsSleep: boolean }) =>
   Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);
     const testClock = yield* TestClock.testClockWith(Effect.succeed);
-    // Libuv's clock keeps counting while Windows and macOS sleep, so an idle timer
-    // that came due during sleep fires on resume with the clock far past its due time.
     let sleptMs = 0;
     const sleptNanos = () => BigInt(sleptMs) * BigInt(1_000_000);
+    const monotonicSleptNanos = () => (input.timerCountsSleep ? sleptNanos() : BigInt(0));
     const hostClock: TestClock.TestClock = {
       ...testClock,
       currentTimeMillisUnsafe: () => testClock.currentTimeMillisUnsafe() + sleptMs,
       currentTimeMillis: Effect.sync(() => testClock.currentTimeMillisUnsafe() + sleptMs),
       currentTimeNanosUnsafe: () => testClock.currentTimeNanosUnsafe() + sleptNanos(),
       currentTimeNanos: Effect.sync(() => testClock.currentTimeNanosUnsafe() + sleptNanos()),
-      monotonicTimeNanosUnsafe: () => testClock.monotonicTimeNanosUnsafe() + sleptNanos(),
-      monotonicTimeNanos: Effect.sync(() => testClock.monotonicTimeNanosUnsafe() + sleptNanos()),
+      monotonicTimeNanosUnsafe: () => testClock.monotonicTimeNanosUnsafe() + monotonicSleptNanos(),
+      monotonicTimeNanos: Effect.sync(
+        () => testClock.monotonicTimeNanosUnsafe() + monotonicSleptNanos(),
+      ),
     };
     const effect = Effect.gen(function* () {
       const eventSink = yield* EventSink.EventSinkV2;
@@ -2528,27 +2531,54 @@ it.effect("ProviderSessionManagerV2 does not count host sleep toward the idle ti
       yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
 
       yield* TestClock.adjust("5 minutes");
-      // Two hours of sleep: the overdue timer fires on the first tick after resume.
-      sleptMs = 2 * 60 * 60_000 - 25 * 60_000;
+      // A counting timer spends 25 of the two hours reaching its due time, then fires on resume.
+      sleptMs = input.timerCountsSleep ? 2 * 60 * 60_000 - 25 * 60_000 : 2 * 60 * 60_000;
       yield* TestClock.adjust("25 minutes");
       yield* Effect.yieldNow;
-      assert.isTrue(
-        Option.isSome(yield* manager.get(providerSessionId)),
-        "session was idle-released on resume after only 5 awake minutes of a 30 minute timeout",
-      );
-      assert.equal((yield* Ref.get(state)).closeCount, 0);
+      const releasedAfter30AwakeMinutes = Option.isNone(yield* manager.get(providerSessionId));
+      const closeCountAfter30AwakeMinutes = (yield* Ref.get(state)).closeCount;
 
       yield* TestClock.adjust("30 minutes");
       yield* Effect.yieldNow;
-      assert.isTrue(Option.isNone(yield* manager.get(providerSessionId)));
-      assert.equal((yield* Ref.get(state)).closeCount, 1);
+      return {
+        releasedAfter30AwakeMinutes,
+        closeCountAfter30AwakeMinutes,
+        releasedAfter60AwakeMinutes: Option.isNone(yield* manager.get(providerSessionId)),
+        closeCountAfter60AwakeMinutes: (yield* Ref.get(state)).closeCount,
+      };
     });
 
-    yield* effect.pipe(
+    return yield* effect.pipe(
       Effect.provide(layerTest({ state, idleTimeoutMs: 30 * 60_000 })),
       Effect.provideService(Clock.Clock, hostClock),
     );
+  });
+
+// regression: #11805 sessions were released right after the computer woke from sleep
+it.effect("ProviderSessionManagerV2 does not count host sleep toward the idle timeout", () =>
+  Effect.gen(function* () {
+    const result = yield* idleAcrossHostSleep({ timerCountsSleep: true });
+    assert.isFalse(
+      result.releasedAfter30AwakeMinutes,
+      "session was idle-released on resume after only 5 awake minutes of a 30 minute timeout",
+    );
+    assert.equal(result.closeCountAfter30AwakeMinutes, 0);
+    assert.isTrue(result.releasedAfter60AwakeMinutes);
+    assert.equal(result.closeCountAfter60AwakeMinutes, 1);
   }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 releases on time when the idle timer already paused during host sleep",
+  () =>
+    Effect.gen(function* () {
+      const result = yield* idleAcrossHostSleep({ timerCountsSleep: false });
+      assert.isTrue(
+        result.releasedAfter30AwakeMinutes,
+        "session outlived its 30 awake idle minutes because wall time jumped during sleep",
+      );
+      assert.equal(result.closeCountAfter30AwakeMinutes, 1);
+    }),
 );
 
 it.effect("ProviderSessionManagerV2 releases sessions when provider event streams fail", () =>

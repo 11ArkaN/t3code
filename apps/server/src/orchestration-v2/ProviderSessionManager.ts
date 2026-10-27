@@ -64,11 +64,12 @@ const UNLOAD_THREAD_TIMEOUT_MS = 10 * 1000;
 const HOST_SUSPEND_GRACE_MS = 60 * 1000;
 
 // Timers keep counting while Windows and macOS sleep, so an overshoot past the grace restarts the wait.
-// Untraced: every provider event re-arms the idle timer.
+// Monotonic matches the timer's clock, so Linux (which pauses both) never restarts. Untraced: every
+// provider event re-arms the idle timer.
 const sleepWhileAwake = Effect.fnUntraced(function* (ms: number): Effect.fn.Return<void> {
-  const startedAtMs = yield* Clock.currentTimeMillis;
+  const startedAtNanos = yield* Clock.monotonicTimeNanos;
   yield* Effect.sleep(Duration.millis(ms));
-  const elapsedMs = (yield* Clock.currentTimeMillis) - startedAtMs;
+  const elapsedMs = Number((yield* Clock.monotonicTimeNanos) - startedAtNanos) / 1_000_000;
   if (elapsedMs > ms + HOST_SUSPEND_GRACE_MS) return yield* sleepWhileAwake(ms);
 });
 
