@@ -57,6 +57,21 @@ if (clientPlatform === "darwin") {
   window.addEventListener("resize", syncWindowControlInset);
 }
 
+if (
+  clientPlatform !== "darwin" &&
+  clientPlatform !== "win32" &&
+  ipcRenderer.sendSync(IpcChannels.GET_PRIMARY_PASTE_ENABLED_CHANNEL) === false
+) {
+  // Blink pastes the PRIMARY selection on a middle-click mouseup unless it is default-prevented.
+  window.addEventListener(
+    "mouseup",
+    (event) => {
+      if (event.button === 1) event.preventDefault();
+    },
+    true,
+  );
+}
+
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
   if (
     typeof result === "object" &&
