@@ -567,6 +567,8 @@ const waitForRow = Effect.fn("scenario.waitForRow")(function* (
   for (let attempt = 0; attempt < 20; attempt++) {
     const nodes = yield* ctx.device.nodes;
     if (nodes.some((node) => node.label?.includes(title))) return;
+    // A crowded list can hold the new row below the fold; scroll to the top once.
+    if (attempt === 4) yield* ctx.device.run(["scroll", "top"]).pipe(Effect.ignore);
     // A finished row can stay folded in the Working shelf; open the shelf once.
     const shelf = nodes.find((node) => /^\d+ working threads?$/.test(node.label ?? ""));
     if (attempt === 10 && shelf?.label) yield* ctx.device.press(`label="${shelf.label}"`);
