@@ -57,14 +57,26 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
   return endpoint.status !== "unavailable" && endpoint.reachability !== "loopback";
 }
 
-/** Desktop skips Tailscale probing until network/Serve is enabled to avoid macOS prompts; absence then
- * means unchecked. */
-export function missingTailscaleEndpointDescription(
+const START_TAILSCALE_DESCRIPTION = "Start Tailscale to set up HTTPS access through MagicDNS.";
+
+/**
+ * Desktop skips Tailscale probing until network/Serve is enabled to avoid macOS prompts, so with no
+ * endpoint the switch still enables Serve, and stays while Serve is on so it can be turned off.
+ * `switchChecked: null` hides the switch.
+ */
+export function missingTailscaleEndpointRow(
   state: Pick<DesktopServerExposureState, "mode" | "tailscaleServeEnabled"> | null,
-): string {
-  return state && state.mode !== "network-accessible" && !state.tailscaleServeEnabled
-    ? "Turn on Network access to detect Tailscale."
-    : "Start Tailscale to set up HTTPS access through MagicDNS.";
+): { readonly description: string; readonly switchChecked: boolean | null } {
+  if (state?.tailscaleServeEnabled) {
+    return { description: START_TAILSCALE_DESCRIPTION, switchChecked: true };
+  }
+  if (state && state.mode !== "network-accessible") {
+    return {
+      description: "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL.",
+      switchChecked: false,
+    };
+  }
+  return { description: START_TAILSCALE_DESCRIPTION, switchChecked: null };
 }
 
 export function isWslSettingsRowVisible(input: {

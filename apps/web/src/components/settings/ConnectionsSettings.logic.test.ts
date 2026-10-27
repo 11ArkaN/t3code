@@ -2,6 +2,7 @@ import type { DesktopWslState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
+  missingTailscaleEndpointRow,
   selectQrEndpointOption,
   togglePairingScopeSelection,
 } from "./ConnectionsSettings.logic";
@@ -38,6 +39,32 @@ describe("togglePairingScopeSelection", () => {
     },
   ] as const)("$label", ({ current, scope, checked, expected }) => {
     expect(togglePairingScopeSelection(current, scope, checked)).toEqual(expected);
+  });
+});
+
+describe("missingTailscaleEndpointRow", () => {
+  it("offers an unchecked switch when detection was skipped", () => {
+    const row = missingTailscaleEndpointRow({ mode: "local-only", tailscaleServeEnabled: false });
+    expect(row.switchChecked).toBe(false);
+    expect(row.description).not.toMatch(/Network access/u);
+  });
+
+  it("keeps a checked switch to turn Serve off when no endpoint was found", () => {
+    expect(
+      missingTailscaleEndpointRow({ mode: "local-only", tailscaleServeEnabled: true }),
+    ).toEqual({
+      description: "Start Tailscale to set up HTTPS access through MagicDNS.",
+      switchChecked: true,
+    });
+  });
+
+  it("hides the switch when network access found no Tailscale", () => {
+    expect(
+      missingTailscaleEndpointRow({ mode: "network-accessible", tailscaleServeEnabled: false }),
+    ).toEqual({
+      description: "Start Tailscale to set up HTTPS access through MagicDNS.",
+      switchChecked: null,
+    });
   });
 });
 
