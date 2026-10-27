@@ -194,6 +194,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         ...(runtime === "server" && input.automationOwner !== undefined
           ? { automationOwner: input.automationOwner }
           : {}),
+        ...(input.zoomFactor === undefined ? {} : { zoomFactor: input.zoomFactor }),
         ...(input.reveal === undefined ? {} : { reveal: input.reveal }),
         updatedAt,
       };
