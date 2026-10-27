@@ -319,6 +319,74 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("fails a download that receives no data for 60 seconds", () =>
+    Effect.gen(function* () {
+      const downloadStarted = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        downloadUpdate: Deferred.succeed(downloadStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-available", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const downloadFiber = yield* updates.download.pipe(Effect.forkScoped);
+          yield* Deferred.await(downloadStarted);
+
+          yield* TestClock.adjust("45 seconds");
+          harness.emit("download-progress", { percent: 12 });
+          yield* flushCallbacks;
+          yield* TestClock.adjust("45 seconds");
+          assert.equal((yield* updates.getState).status, "downloading");
+
+          yield* TestClock.adjust("16 seconds");
+          yield* flushCallbacks;
+
+          const stalledState = yield* updates.getState;
+          assert.notEqual(stalledState.status, "downloading");
+          assert.equal(stalledState.errorContext, "download");
+          assert.match(stalledState.message ?? "", /stall|no data/i);
+
+          const result = yield* Fiber.join(downloadFiber);
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
+  it.effect("shows why a download failed, not only the channel", () => {
+    const harness = makeHarness({
+      downloadUpdate: Effect.fail(
+        new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
+          channel: "nightly",
+          cause: new Error("net::ERR_CONTENT_LENGTH_MISMATCH"),
+        }),
+      ),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.download;
+        assert.isFalse(result.completed);
+
+        const state = yield* updates.getState;
+        assert.equal(state.errorContext, "download");
+        assert.include(state.message ?? "", "ERR_CONTENT_LENGTH_MISMATCH");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("restores download state and permits retry after interruption", () =>
     Effect.gen(function* () {
       const actionStarted = yield* Deferred.make<void>();
