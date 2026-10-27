@@ -18,7 +18,7 @@ Write or run an eval when a change affects what a model sees or does: agent inst
 
 Each eval's README lists its models, flags, and cost. Start with one case and one sample to check the setup.
 
-Evals call paid models, so CI does not run them. CI typechecks this package and runs the graders' unit tests.
+Most evals call paid models, so CI does not run them. `mobile-behavior` needs a simulator instead. CI typechecks this package and runs the graders' unit tests.
 
 ## The shape of an eval
 

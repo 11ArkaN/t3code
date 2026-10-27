@@ -22,15 +22,15 @@ export function median(values: ReadonlyArray<number>): number {
 const round = (value: number, digits = 1) => Number(value.toFixed(digits));
 
 /**
- * Frame times from rAF timestamps. The refresh interval is the shortest common gap, so a
- * 60 Hz simulator and a 120 Hz device both grade against their own frame budget.
- * `dropped` counts the frames that should have run inside each long gap.
+ * Frame times from rAF timestamps, graded against the display's budget: 120 Hz when its
+ * fastest frames come under 12 ms, else 60 Hz. A steady low frame rate still counts as
+ * dropped frames. `dropped` counts the frames that should have run inside each long gap.
  */
 export function frameStats(timestamps: ReadonlyArray<number>, prefix: string): Metrics {
   const gaps = timestamps.slice(1).map((time, index) => time - timestamps[index]!);
   if (gaps.length < 10) return { [`${prefix}Frames`]: gaps.length };
   const sorted = [...gaps].sort((a, b) => a - b);
-  const refresh = percentile(sorted, 0.1);
+  const refresh = percentile(sorted, 0.05) < 12 ? 1000 / 120 : 1000 / 60;
   const dropped = gaps.reduce(
     (total, gap) => total + Math.max(0, Math.round(gap / refresh) - 1),
     0,
@@ -58,15 +58,20 @@ export function feedMotion(samples: ReadonlyArray<FeedSample>, direction: 1 | -1
   let backward = 0;
   let largest = 0;
   let teleports = 0;
+  let moved = 0;
   for (let index = 1; index < samples.length; index++) {
-    const before = samples[index - 1]!.rows ?? {};
-    const after = samples[index]!.rows ?? {};
+    const before = samples[index - 1]!;
+    const after = samples[index]!;
+    const shared = Object.keys(before.rows ?? {}).filter((key) => after.rows?.[key] !== undefined);
     let step = 0;
-    for (const key of Object.keys(before)) {
-      if (after[key] === undefined) continue;
-      const moved = after[key] - before[key]!;
-      if (Math.abs(moved) > Math.abs(step)) step = moved;
+    for (const key of shared) {
+      const rowStep = after.rows![key]! - before.rows![key]!;
+      if (Math.abs(rowStep) > Math.abs(step)) step = rowStep;
     }
+    // A jump can replace every visible row; with the same content, the offset change is the move.
+    if (shared.length === 0 && before.content === after.content)
+      step = (before.scroll ?? 0) - (after.scroll ?? 0);
+    moved += Math.abs(step);
     largest = Math.max(largest, Math.abs(step));
     if (Math.abs(step) > TELEPORT_PX) teleports++;
     if (direction !== 0) backward = Math.max(backward, -step * direction);
@@ -76,6 +81,7 @@ export function feedMotion(samples: ReadonlyArray<FeedSample>, direction: 1 | -1
   );
   return {
     samples: samples.length,
+    movedPx: Math.round(moved),
     backwardPx: Math.round(backward),
     largestStepPx: Math.round(largest),
     teleports,
@@ -104,7 +110,7 @@ export interface SampleRow {
   readonly pass: boolean | null;
   readonly failures: ReadonlyArray<string>;
   readonly metrics: Metrics;
-  /** Set when the sample could not run, such as a missing precondition. */
+  /** Why the sample has no grade: the scenario failed before it could measure. */
   readonly error?: string;
 }
 
@@ -113,7 +119,11 @@ export interface CaseResult {
   readonly device: string;
   readonly samples: number;
   readonly passed: number;
-  /** `null` when no sample ran. A case fails when half or more of its samples fail. */
+  readonly errors: number;
+  /**
+   * `null` when too few samples were graded: errors outnumber graded samples, or none ran.
+   * Otherwise a case fails when half or more of its graded samples fail.
+   */
   readonly pass: boolean | null;
   readonly key: number | boolean | string | null;
 }
@@ -125,6 +135,7 @@ export function caseResult(
   rows: ReadonlyArray<SampleRow>,
 ): CaseResult {
   const graded = rows.filter((row) => row.pass !== null);
+  const errors = rows.filter((row) => row.error !== undefined).length;
   const passed = graded.filter((row) => row.pass).length;
   const values = graded.map((row) => row.metrics[key]);
   const numbers = values.filter((value): value is number => typeof value === "number");
@@ -133,7 +144,8 @@ export function caseResult(
     device,
     samples: graded.length,
     passed,
-    pass: graded.length === 0 ? null : passed > graded.length / 2,
+    errors,
+    pass: graded.length === 0 || errors > graded.length ? null : passed > graded.length / 2,
     key:
       numbers.length === values.length && numbers.length > 0
         ? round(median(numbers))
@@ -141,7 +153,8 @@ export function caseResult(
   };
 }
 
-const mark = (pass: boolean | null) => (pass === null ? "not run" : pass ? "pass" : "FAIL");
+const mark = (result: CaseResult) =>
+  `${result.pass === null ? "incomplete" : result.pass ? "pass" : "FAIL"} ${result.passed}/${result.samples + result.errors}`;
 
 /** Markdown scoreboard. With a baseline, each row shows the earlier result. */
 export function summarize(input: {
@@ -157,7 +170,7 @@ export function summarize(input: {
 }): string {
   const devices = [...new Set(input.results.map((result) => result.device))];
   const cell = (result: CaseResult | undefined) =>
-    result ? `${mark(result.pass)} (${result.key ?? "-"})` : "-";
+    result ? `${mark(result)} (${result.key ?? "-"})` : "-";
   const lines = [
     input.header,
     "",

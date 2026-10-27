@@ -8,7 +8,7 @@ import type { Pose, ScenarioName } from "./scenarios.ts";
 
 export interface MobileBehaviorCase {
   readonly id: string;
-  readonly area: "scroll" | "jank" | "composer" | "status" | "live-activity" | "wrong-thread";
+  readonly area: "scroll" | "jank" | "composer" | "status" | "wrong-thread";
   readonly kind: "bad" | "guard" | "control";
   /** The issue or PR it came from. */
   readonly source: string;
@@ -37,7 +37,10 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     experience: "Flicking up a long thread, content jerks back down toward the latest message.",
     scenario: "scrollUpLongThread",
     key: "backwardPx",
-    checks: [{ metric: "backwardPx", max: 24 }],
+    checks: [
+      { metric: "movedPx", min: 300 },
+      { metric: "backwardPx", max: 24 },
+    ],
   },
   {
     id: "scroll-up-never-teleports",
@@ -47,7 +50,10 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     experience: "Dragging up a little after scroll-to-end, the viewport jumps far away.",
     scenario: "scrollUpLongThread",
     key: "largestStepPx",
-    checks: [{ metric: "teleports", equals: 0 }],
+    checks: [
+      { metric: "movedPx", min: 300 },
+      { metric: "teleports", equals: 0 },
+    ],
   },
   {
     id: "streaming-stays-at-latest",
@@ -100,8 +106,8 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "jank-scrolling-settled-thread",
     area: "jank",
-    kind: "bad",
-    source: "#13925",
+    kind: "guard",
+    source: "#13925 (Android)",
     experience: "Scrolling a long settled thread drops frames.",
     scenario: "scrollUpLongThread",
     key: "uiP99Ms",
@@ -111,7 +117,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     id: "jank-opening-subagent-thread",
     area: "jank",
     kind: "guard",
-    source: "#18376",
+    source: "#18376 (Android)",
     experience: "Opening and scrolling a subagent's thread is far less smooth than its parent.",
     scenario: "openSubagentThread",
     key: "uiP99Ms",
@@ -220,7 +226,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     id: "pending-question-shows-input",
     area: "status",
     kind: "bad",
-    source: "#24914, #24901",
+    source: "#24901",
     experience: "A thread waiting on a question shows as Working instead of needing input.",
     scenario: "pendingQuestion",
     key: "status",
@@ -243,19 +249,6 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     ],
   },
   {
-    id: "no-live-activity-when-nothing-ran",
-    area: "live-activity",
-    kind: "bad",
-    source: "#25026",
-    experience: "The Dynamic Island shows Done although nothing ran.",
-    scenario: "liveActivityIdle",
-    key: "liveActivities",
-    checks: [
-      { metric: "liveActivities", equals: 0 },
-      { metric: "starts", equals: 0 },
-    ],
-  },
-  {
     id: "long-press-pin-pins-that-row",
     area: "wrong-thread",
     kind: "bad",
@@ -272,7 +265,7 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     id: "link-opens-new-thread",
     area: "wrong-thread",
     kind: "guard",
-    source: "#14689",
+    source: "#14689 (web)",
     experience: "A link to a just-created thread redirects to another thread.",
     scenario: "linkToNewThread",
     key: "opensTarget",

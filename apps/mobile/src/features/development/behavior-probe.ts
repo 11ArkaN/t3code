@@ -31,8 +31,8 @@ interface Atom {
   readonly _atom: true;
 }
 
-let root: Fiber | null = null;
-const activityLog: Array<{ at: number; event: "start" | "end"; deepLink: string | null }> = [];
+// Every root React has committed; LogBox and other overlays commit their own.
+const roots = new Set<{ current: Fiber }>();
 
 function installCommitHook() {
   const hook = (globalThis as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: DevToolsHook })
@@ -45,7 +45,7 @@ function installCommitHook() {
   hook.__t3BehaviorProbe = true;
   const original = hook.onCommitFiberRoot.bind(hook);
   hook.onCommitFiberRoot = (id, next, ...rest) => {
-    root = next.current;
+    roots.add(next);
     return original(id, next, ...rest);
   };
 }
@@ -79,7 +79,7 @@ function scanTree() {
     pinned?: boolean;
     count?: number;
   }> | null = null;
-  walk<Feed | null>(root, null, (fiber, feed) => {
+  const enter = (fiber: Fiber, feed: Feed | null): Feed | null => {
     const props = fiber.memoizedProps;
     if (!props || typeof props !== "object") return feed;
     if ("listRef" in props && typeof props.threadId === "string" && "detailRef" in props) {
@@ -126,7 +126,8 @@ function scanTree() {
       }
     }
     return feed;
-  });
+  };
+  for (const root of roots) walk(root.current, null, enter);
   return { feeds: [...feeds.values()], editors, floatingStatus, homeList };
 }
 
@@ -196,17 +197,18 @@ function snapshot() {
   const { resolveThreadListV2Status } = require("../threads/threadListV2") as {
     resolveThreadListV2Status: (thread: unknown) => string;
   };
-  const shells = readAtom<ReadonlyArray<{ id: string; pinnedAt?: string | null }>>(
+  const shells = readAtom<ReadonlyArray<{ id: string; environmentId: string }>>(
     environmentThreadShells.threadShellsAtom,
   );
   return {
+    /** Saved environments the app has threads from. */
+    environments: [...new Set(shells.map((shell) => shell.environmentId))],
     /** The app's own status for every thread it knows, including rows folded into a shelf. */
     threads: Object.fromEntries(
       shells.map((shell) => [shell.id, resolveThreadListV2Status(shell)]),
     ),
     route: at,
     feed: feed ? feedState(feed) : null,
-    mountedFeeds: scan.feeds.map((feed) => feed.threadId),
     composer: {
       key: threadKey,
       draft: threadKey ? (drafts[threadKey]?.text ?? "") : null,
@@ -219,52 +221,6 @@ function snapshot() {
     },
     floatingStatus: scan.floatingStatus,
     homeList: scan.homeList,
-    liveActivities: {
-      count: liveActivityCount(),
-      log: activityLog,
-    },
-  };
-}
-
-function liveActivityCount() {
-  const { Platform } = require("react-native") as typeof import("react-native");
-  if (Platform.OS !== "ios") return 0;
-  const { getAgentLiveActivities } = require("../agent-awareness/agentLiveActivity") as {
-    getAgentLiveActivities: () => ReadonlyArray<unknown>;
-  };
-  return getAgentLiveActivities().length;
-}
-
-/** Records what JS starts and ends; content updates arrive by push and stay device-only. */
-function wrapLiveActivities() {
-  const { Platform } = require("react-native") as typeof import("react-native");
-  if (Platform.OS !== "ios") return;
-  const widgets = require("expo-widgets") as {
-    LiveActivity: { prototype: { end: (...args: unknown[]) => unknown } };
-  };
-  const activity = (
-    require("../../widgets/AgentActivity") as {
-      default: {
-        start: (
-          props: { activities?: ReadonlyArray<{ deepLink?: string }> },
-          ...rest: unknown[]
-        ) => unknown;
-      };
-    }
-  ).default;
-  const start = activity.start.bind(activity);
-  activity.start = (props, ...rest) => {
-    activityLog.push({
-      at: Date.now(),
-      event: "start",
-      deepLink: props.activities?.[0]?.deepLink ?? null,
-    });
-    return start(props, ...rest);
-  };
-  const end = widgets.LiveActivity.prototype.end;
-  widgets.LiveActivity.prototype.end = function (...args) {
-    activityLog.push({ at: Date.now(), event: "end", deepLink: null });
-    return end.apply(this, args);
   };
 }
 
@@ -313,7 +269,6 @@ function visibleFeed(feeds: ReadonlyArray<Feed>) {
 }
 
 installCommitHook();
-setTimeout(wrapLiveActivities, 0);
 
 Object.assign(globalThis, {
   __t3Behavior: {
@@ -329,8 +284,8 @@ Object.assign(globalThis, {
       return true;
     },
     state: () => JSON.stringify(snapshot()),
-    /** Removes every saved environment except `keep`, so cached threads from earlier runs never count. */
-    async forgetOtherEnvironments(keep: string) {
+    /** Removes these saved environments (and their cached threads) through the app's own command. */
+    async forgetEnvironments(ids: ReadonlyArray<string>) {
       const { runAtomCommand } = require("@t3tools/client-runtime/state/runtime") as {
         runAtomCommand: (
           registry: unknown,
@@ -345,20 +300,11 @@ Object.assign(globalThis, {
       const { environmentCatalog } = require("../../connection/catalog") as {
         environmentCatalog: { remove: unknown };
       };
-      const { environmentThreadShells } = require("../../state/threads") as {
-        environmentThreadShells: { threadShellsAtom: Atom };
-      };
-      const shells = readAtom<ReadonlyArray<{ environmentId: string }>>(
-        environmentThreadShells.threadShellsAtom,
-      );
-      const others = [...new Set(shells.map((shell) => shell.environmentId))].filter(
-        (id) => id !== keep,
-      );
-      for (const id of others)
+      for (const id of ids)
         await runAtomCommand(appAtomRegistry, environmentCatalog.remove, id, {
           label: "behavior probe",
         });
-      return others.length;
+      return true;
     },
     /** Records JS and UI frame times, and the visible feed on every JS frame. */
     recordStart(withFeed: boolean) {

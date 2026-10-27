@@ -40,7 +40,7 @@ export class EnvironmentError extends Schema.TaggedError<EnvironmentError>()("En
   message: Schema.String,
 }) {}
 
-const freePort = () =>
+export const freePort = () =>
   Effect.callback<number>((resume) => {
     const server = NodeNet.createServer();
     server.listen(0, () => {
@@ -178,7 +178,6 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         HttpClientRequest.bodyJsonUnsafe({
           type: "project.create",
           commandId: yield* uuid,
-          projectId,
           title,
           workspaceRoot,
         }),
@@ -283,27 +282,29 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
     yield* settled(threadId);
     for (let turn = 1; turn < turns; turn++) {
       yield* send(threadId, `Next part ${turn}. [[eval:stream:${turn % 3 === 0 ? 900 : 300}:0]]`);
-      yield* Effect.sleep("150 millis");
+      yield* until("its next run", threadId, (value) =>
+        value.runs.length > turn ? true : undefined,
+      );
       yield* settled(threadId);
     }
     return threadId;
   });
 
   return {
-    /** An empty thread whose project then disables `evalbot`, so the server rejects sends to it. */
-    launchRejecting: Effect.fn("environment.launchRejecting")(function* (title: string) {
+    /** An empty thread in its own project; `lock` then disables `evalbot` there, so sends are rejected. */
+    launchLockable: Effect.fn("environment.launchLockable")(function* (title: string) {
       const root = NodePath.join(input.baseDir, `workspace/locked-${(yield* uuid).slice(0, 6)}`);
       NodeFS.mkdirSync(root, { recursive: true });
       const project = yield* createProject("locked", root);
       const threadId = yield* create(title, undefined, project);
-      yield* client["server.updateSettings"]({
+      const lock = client["server.updateSettings"]({
         patch: {
           projectSettingsOverrides: {
             [project]: { providerInstances: { [EVAL_INSTANCE]: { enabled: false } } },
           },
         },
       });
-      return threadId;
+      return { threadId, lock };
     }),
     /** Stops every unfinished run, so one sample's held turns never leak into the next. */
     interruptAll: Effect.fn("environment.interruptAll")(function* () {
@@ -316,6 +317,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
             threadId: thread.id,
             runId: run.id,
           });
+          yield* settled(thread.id);
         }
       }
     }),
@@ -328,10 +330,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         value.subagents.length >= 2 ? value.subagents : undefined,
       ),
     origin,
-    port,
-    token,
     baseDir: input.baseDir,
-    deviceOrigin: `http://${input.deviceHost}:${port}`,
     environmentId,
     projectId,
     client,

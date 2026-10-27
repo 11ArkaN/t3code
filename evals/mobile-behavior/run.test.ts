@@ -13,6 +13,9 @@ it("counts the frames a long gap swallowed, against the device's own refresh rat
   // One 50 ms stall at 60 Hz hides two frames.
   const stalled = [...steady(60, 1000 / 60), 59 * (1000 / 60) + 50];
   expect(frameStats(stalled, "js")).toMatchObject({ jsRefreshHz: 60, jsDroppedPct: 3.2 });
+
+  // A steady 20 FPS is two dropped frames in every three, not a slow display.
+  expect(frameStats(steady(60, 50), "ui")).toMatchObject({ uiRefreshHz: 60, uiDroppedPct: 66.7 });
 });
 
 it("reads row motion on screen, so an offset change that keeps content still is not a jump", () => {
@@ -26,6 +29,17 @@ it("reads row motion on screen, so an offset change that keeps content still is 
 
   const teleport = [rows({ a: 100 }), rows({ a: 1300 })];
   expect(feedMotion(teleport, 1)).toMatchObject({ teleports: 1, largestStepPx: 1200 });
+
+  // A jump past every visible row leaves no shared row; the offset change is the move.
+  const offset = (scroll: number, entries: Record<string, number>) => ({
+    ...rows(entries),
+    scroll,
+    content: 9000,
+  });
+  expect(feedMotion([offset(6000, { a: 100 }), offset(1000, { z: 100 })], 1)).toMatchObject({
+    teleports: 1,
+    largestStepPx: 5000,
+  });
 });
 
 it("fails a case when half or more of its graded samples fail", () => {

@@ -20,7 +20,7 @@ import { FetchHttpClient, HttpClient } from "effect/http";
 
 import { CASES, type MobileBehaviorCase } from "./cases.ts";
 import { APP_ID, DeviceError, makeDevice, SCHEME } from "./device.ts";
-import { startEnvironment } from "./environment.ts";
+import { freePort, startEnvironment, uuid } from "./environment.ts";
 import { caseResult, checkFails, summarize, type CaseResult, type SampleRow } from "./grade.ts";
 import { SCENARIOS, type Pose, type ScenarioContext } from "./scenarios.ts";
 
@@ -38,19 +38,9 @@ function reachableHost(): string {
   return lan?.address ?? "127.0.0.1";
 }
 
-const freePort = Effect.callback<number>((resume) => {
-  const server = NodeNet.createServer();
-  server.listen(0, () => {
-    const address = server.address();
-    server.close(() =>
-      resume(Effect.succeed(typeof address === "object" && address ? address.port : 0)),
-    );
-  });
-});
-
 /** Metro with the behavior probe compiled in, stopped with its process group when the scope ends. */
 const startMetro = Effect.fn("run.startMetro")(function* (host: string, out: string) {
-  const port = yield* freePort;
+  const port = yield* freePort();
   const log = NodeFS.openSync(NodePath.join(out, "metro.log"), "w");
   yield* Effect.acquireRelease(
     Effect.sync(() =>
@@ -137,6 +127,11 @@ const command = Command.make(
     agentDevice: Flag.String("agent-device").pipe(
       Flag.withDefault(NodePath.join(NodeOS.homedir(), ".t3/userdata/device/bin/agent-device")),
     ),
+    forgetOtherEnvironments: Flag.Boolean("forget-other-environments").pipe(
+      Flag.withDescription(
+        "Remove the app's other saved environments first. Only for a simulator kept for this eval.",
+      ),
+    ),
     host: Flag.String("host").pipe(
       Flag.withDescription(
         "Address the simulator uses to reach this machine; defaults to the tailnet IP.",
@@ -159,7 +154,7 @@ const command = Command.make(
     const startedAt = yield* Clock.currentTimeMillis;
 
     const env = yield* startEnvironment({ baseDir: NodePath.join(out, "env"), deviceHost: host });
-    const tag = (yield* env.command).slice(0, 4);
+    const tag = (yield* uuid).slice(0, 4);
     const titles = { long: `Long settled thread ${tag}`, second: `Second thread ${tag}` };
     yield* Console.error(`Seeding a 60-turn thread on ${env.origin}...`);
     const longThread = yield* env.longThread(titles.long, 60);
@@ -182,13 +177,13 @@ const command = Command.make(
       APP_ID,
       `${SCHEME}://expo-development-client/?url=${encodeURIComponent(metro)}&disableOnboarding=1&disableFab=1&disableAutoLaunch=1`,
     ]);
-    // iOS asks before a URL opens another app; nothing to accept when it is already open.
-    yield* device.run(["alert", "accept"], 20_000).pipe(Effect.ignore);
     for (let attempt = 0; ; attempt++) {
       const loaded = yield* device
         .evaluate("typeof __t3Behavior")
         .pipe(Effect.orElseSucceed(() => ""));
       if (loaded === "object") break;
+      // iOS asks before a URL opens another app; busy hosts can miss the first accept.
+      if (attempt % 5 === 0) yield* device.run(["alert", "accept"], 60_000).pipe(Effect.ignore);
       if (attempt > 120)
         return yield* new DeviceError({
           message:
@@ -205,12 +200,18 @@ const command = Command.make(
     const seeded = (state: { homeList: unknown; threads: Record<string, string> }) =>
       state.homeList !== null && longThread in state.threads;
     yield* device.waitFor("the paired environment's threads on Home", seeded, 60_000);
-    // Earlier runs' environments keep cached threads, some stuck working; the probe removes them.
-    yield* device.evaluate(
-      `__t3Behavior.forgetOtherEnvironments(${JSON.stringify(env.environmentId)})`,
-    );
-    yield* Effect.sleep("3 seconds");
-
+    // Other saved environments keep cached threads (some stuck working) that skew status cases.
+    const others = (yield* device.state).environments.filter((id) => id !== env.environmentId);
+    if (others.length > 0 && !flags.forgetOtherEnvironments)
+      return yield* new DeviceError({
+        message: `The app has ${others.length} other saved environment(s). Use a simulator with no other connections, or pass --forget-other-environments to remove them.`,
+      });
+    const forget = (ids: ReadonlyArray<string>) =>
+      device
+        .evaluate(`__t3Behavior.forgetEnvironments(${JSON.stringify(ids)})`)
+        .pipe(Effect.andThen(Effect.sleep("3 seconds")));
+    if (others.length > 0) yield* forget(others);
+    yield* Effect.addFinalizer(() => forget([env.environmentId]).pipe(Effect.ignore));
     const ctx: ScenarioContext = {
       env,
       device,
@@ -230,7 +231,7 @@ const command = Command.make(
           Effect.catch((error) =>
             Effect.succeed({
               metrics: {},
-              error: `${error._tag === "ScenarioFailure" && error.notApplicable ? "not applicable" : "error"}: ${error.message}`,
+              error: error.message,
             }),
           ),
         );
@@ -253,8 +254,6 @@ const command = Command.make(
             `${testCase.id} #${sample}: ${row.pass === null ? row.error : row.pass ? "pass" : `FAIL ${failures.join("; ")}`}`,
           );
         }
-        // NotApplicable holds for every sample of the scenario.
-        if (outcome.error?.startsWith("not applicable")) break;
       }
     }
     NodeFS.closeSync(results);

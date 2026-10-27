@@ -5,10 +5,12 @@
  * through Metro's Hermes inspector for exact app state.
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
+import { Socket } from "effect/socket";
 
 const InspectorTargets = Schema.Array(
   Schema.Struct({
@@ -32,7 +34,6 @@ export interface ProbeState {
     readonly columns: boolean;
   } | null;
   readonly feed: FeedSample | null;
-  readonly mountedFeeds: ReadonlyArray<string>;
   readonly composer: {
     readonly key: string | null;
     readonly draft: string | null;
@@ -42,6 +43,7 @@ export interface ProbeState {
     readonly keyboard: boolean;
   };
   readonly floatingStatus: string | null;
+  readonly environments: ReadonlyArray<string>;
   /** The app's status for every thread it knows, by thread id. */
   readonly threads: Record<string, string>;
   readonly homeList: ReadonlyArray<{
@@ -51,13 +53,6 @@ export interface ProbeState {
     readonly pinned?: boolean;
     readonly count?: number;
   }> | null;
-  readonly liveActivities: {
-    readonly count: number;
-    readonly log: ReadonlyArray<{
-      readonly event: "start" | "end";
-      readonly deepLink: string | null;
-    }>;
-  };
 }
 
 export interface FeedSample {
@@ -86,6 +81,7 @@ interface AxNode {
   readonly value?: string;
   readonly kind?: string;
   readonly editable?: boolean;
+  readonly enabled?: boolean;
   readonly rect?: {
     readonly x: number;
     readonly y: number;
@@ -118,61 +114,65 @@ export function makeDevice(options: DeviceOptions) {
         }),
     }).pipe(Effect.withSpan("device.agentDevice", { attributes: { command: args[0] } }));
 
-  const evaluate = Effect.fn("device.evaluate")(function* (expression: string) {
-    const targets = yield* HttpClient.get(`${options.metro}/json/list`).pipe(
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(InspectorTargets)),
-      Effect.provide(FetchHttpClient.layer),
-      Effect.mapError(
-        () => new DeviceError({ message: `Metro at ${options.metro} did not answer.` }),
-      ),
-    );
-    const target = targets.findLast(
-      (entry) => entry.appId === APP_ID && entry.deviceName === options.deviceName,
-    );
-    if (!target)
-      return yield* new DeviceError({
-        message: `No app on ${options.deviceName} is attached to Metro.`,
-      });
-    // Expo drops inspector sockets whose Origin is not the URL Metro advertises.
-    return yield* Effect.callback<unknown, DeviceError>((resume) => {
-      const socket = new WebSocket(target.webSocketDebuggerUrl, {
+  const evaluate = Effect.fn("device.evaluate")(
+    function* (expression: string) {
+      const targets = yield* HttpClient.get(`${options.metro}/json/list`).pipe(
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(InspectorTargets)),
+        Effect.provide(FetchHttpClient.layer),
+        Effect.mapError(
+          () => new DeviceError({ message: `Metro at ${options.metro} did not answer.` }),
+        ),
+      );
+      const target = targets.findLast(
+        (entry) => entry.appId === APP_ID && entry.deviceName === options.deviceName,
+      );
+      if (!target)
+        return yield* new DeviceError({
+          message: `No app on ${options.deviceName} is attached to Metro.`,
+        });
+      // Expo drops inspector sockets whose Origin is not the URL Metro advertises.
+      const socket = yield* Socket.makeWebSocket(target.webSocketDebuggerUrl, {
         headers: { origin: new URL(options.metro).origin },
-      } as never);
-      socket.onopen = () =>
-        socket.send(
-          JSON.stringify({
-            id: 1,
-            method: "Runtime.evaluate",
-            params: { expression, returnByValue: true, awaitPromise: true },
-          }),
-        );
-      socket.onerror = () =>
-        resume(Effect.fail(new DeviceError({ message: "Inspector socket failed." })));
-      socket.onmessage = (message) => {
-        const reply = JSON.parse(String(message.data)) as {
-          id?: number;
-          result?: { result?: { value?: unknown }; exceptionDetails?: unknown };
-        };
-        if (reply.id !== 1) return;
-        resume(
-          reply.result?.exceptionDetails
-            ? Effect.fail(
-                new DeviceError({
-                  message: `${expression} threw ${JSON.stringify(reply.result.exceptionDetails).slice(0, 400)}`,
-                }),
-              )
-            : Effect.succeed(reply.result?.result?.value),
-        );
-      };
-      return Effect.sync(() => socket.close());
-    }).pipe(
-      Effect.timeoutOrElse({
-        duration: "15 seconds",
-        orElse: () =>
-          Effect.fail(new DeviceError({ message: `Inspector timed out on ${expression}` })),
-      }),
-    );
-  });
+        openTimeout: "10 seconds",
+      });
+      const writer = yield* socket.writer;
+      const reader = yield* socket.reader;
+      yield* writer.write(
+        JSON.stringify({
+          id: 1,
+          method: "Runtime.evaluate",
+          params: { expression, returnByValue: true, awaitPromise: true },
+        }),
+      );
+      while (true) {
+        for (const frame of yield* reader.pull) {
+          const reply = JSON.parse(
+            typeof frame === "string" ? frame : new TextDecoder().decode(frame),
+          ) as {
+            id?: number;
+            result?: { result?: { value?: unknown }; exceptionDetails?: unknown };
+          };
+          if (reply.id !== 1) continue;
+          if (reply.result?.exceptionDetails)
+            return yield* new DeviceError({
+              message: `${expression} threw ${JSON.stringify(reply.result.exceptionDetails).slice(0, 400)}`,
+            });
+          return reply.result?.result?.value;
+        }
+      }
+    },
+    Effect.scoped,
+    Effect.provide(NodeSocket.layerWebSocketConstructorWS),
+    Effect.timeoutOrElse({
+      duration: "20 seconds",
+      orElse: () => Effect.fail(new DeviceError({ message: "The inspector did not answer." })),
+    }),
+    Effect.mapError((error) =>
+      error._tag === "DeviceError"
+        ? error
+        : new DeviceError({ message: `Inspector: ${error.message}` }),
+    ),
+  );
 
   const state = evaluate("__t3Behavior.state()").pipe(
     Effect.map((value) => JSON.parse(String(value)) as ProbeState),
