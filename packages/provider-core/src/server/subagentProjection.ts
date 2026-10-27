@@ -205,13 +205,16 @@ export function subagentResultForRun(
           .filter((item) => item.runId === run.id && item.type === "error")
           .toSorted((left, right) => right.ordinal - left.ordinal)[0]
       : undefined;
+  const output = message?.text ?? turnItem?.text;
   const text =
-    (failure?.type === "error" ? failure.failure.message : undefined) ??
-    message?.text ??
-    turnItem?.text ??
-    (run.status === "completed"
-      ? "Child task completed without an assistant result."
-      : `Child task ended with status ${run.status}.`);
+    failure?.type !== "error"
+      ? (output ??
+        (run.status === "completed"
+          ? "Child task completed without an assistant result."
+          : `Child task ended with status ${run.status}.`))
+      : output === undefined
+        ? failure.failure.message
+        : `${failure.failure.message}\n\nOutput from the failed run:\n${output}`;
   return {
     text,
     messageId: failure === undefined ? (message?.id ?? turnItem?.messageId ?? null) : null,

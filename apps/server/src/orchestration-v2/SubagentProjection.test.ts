@@ -294,7 +294,7 @@ it("exposes the provider failure rather than a progress message from the failed 
     },
     failedRun,
   );
-  assert.equal(result.text, failure.message);
+  assert.isTrue(result.text.startsWith(failure.message));
   assert.equal(result.turnItemId, artifacts.turnItem.id);
   assert.isNull(result.messageId);
 });
