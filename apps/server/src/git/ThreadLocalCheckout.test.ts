@@ -651,10 +651,13 @@ const simulateCrashAfterCopy = Effect.fn("simulateCrashAfterCopy")(function* (fi
   yield* fs.writeFileString(
     journalFile(fixture),
     JSON.stringify({
-      version: 1,
+      version: 2,
+      localRoot: fixture.local,
+      localGitDir: `${fixture.local}/.git`,
       worktreePath: fixture.worktree,
       sourceRoot: fixture.worktree,
       branch: "feature",
+      branchHead: worktreeHead,
       previousLocalBranch: "main",
       previousLocalHead: localHead,
       worktreeHead,
@@ -789,10 +792,13 @@ describe("interrupted moves", () => {
       yield* fs.writeFileString(
         journalFile(fixture),
         JSON.stringify({
-          version: 1,
+          version: 2,
+          localRoot: fixture.local,
+          localGitDir: `${fixture.local}/.git`,
           worktreePath: `${fixture.root}/some-older-worktree`,
           sourceRoot: `${fixture.root}/some-older-worktree`,
           branch: "older",
+          branchHead: yield* fixture.git(fixture.local, ["rev-parse", "HEAD"]),
           previousLocalBranch: "main",
           previousLocalHead: yield* fixture.git(fixture.local, ["rev-parse", "HEAD"]),
           worktreeHead: null,

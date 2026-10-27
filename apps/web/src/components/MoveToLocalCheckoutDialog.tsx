@@ -180,17 +180,19 @@ export function MoveToLocalCheckoutDialog(props: {
     open ? vcsEnvironment.moveToLocalCheckoutPreview({ environmentId, input: { threadId } }) : null,
   );
   const [pending, setPending] = useState(false);
+  // A failed refresh wins over data kept from an earlier check, so Move is never enabled on a
+  // preview the server no longer stands behind.
   const state: PreviewState =
-    query.data !== null && !query.isPending
-      ? { status: "ready", preview: query.data }
-      : query.failure !== null || query.error !== null
-        ? {
-            status: "failed",
-            message: moveErrorMessage(
-              query.failure ?? query.error,
-              "Couldn't check what would move.",
-            ),
-          }
+    query.failure !== null || query.error !== null
+      ? {
+          status: "failed",
+          message: moveErrorMessage(
+            query.failure ?? query.error,
+            "Couldn't check what would move.",
+          ),
+        }
+      : query.data !== null && !query.isPending
+        ? { status: "ready", preview: query.data }
         : { status: "loading" };
 
   const preview = state.status === "ready" ? state.preview : null;

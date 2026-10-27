@@ -1281,7 +1281,8 @@ describe("project roots and late arrivals", () => {
       );
       expectCode(exit, "operation_failed");
       expect(yield* fs.readFileString(`${f.local}/shared.txt`)).toBe("unique late edit\n");
-      expect(JSON.stringify(exit)).toContain("left as they are: shared.txt");
+      expect(failureMessage(exit)).toContain("left as they are");
+      expect(failureMessage(exit)).toContain("shared.txt");
     }).pipe(Effect.provide(gitLayer)),
   );
 });
@@ -1795,7 +1796,7 @@ describe("git reporting success it didn't achieve", () => {
       expect(yield* fs.exists(`${f.local}/untracked.txt`)).toBe(false);
     }).pipe(Effect.provide(gitLayer)),
   );
-  it.effect("won't force the checkout back over a change the move didn't make", () =>
+  it.effect("restores the branch around a change the move didn't make, keeping it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const f = yield* makeFixture();
@@ -1814,7 +1815,10 @@ describe("git reporting success it didn't achieve", () => {
           .pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, driver)),
       );
       expectCode(exit, "operation_failed");
-      expect(failureMessage(exit)).toContain("also failed");
+      expect(failureMessage(exit)).not.toContain("also failed");
+      expect(failureMessage(exit)).toContain("left as they are");
+      expect(yield* currentBranch(f, f.local)).toBe("main");
+      expect(yield* currentBranch(f, f.worktree)).toBe("feature");
       expect(yield* fs.readFileString(`${f.local}/feature.txt`)).toBe("user's own edit\n");
     }).pipe(Effect.provide(gitLayer)),
   );

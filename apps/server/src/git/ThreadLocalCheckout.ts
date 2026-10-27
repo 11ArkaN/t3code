@@ -40,10 +40,16 @@ type MoveOutcome =
 
 // Written to the git dir before the first change, removed when the move ends either way.
 const MoveJournal = Schema.Struct({
-  version: Schema.Literal(1),
+  version: Schema.Literal(2),
+  // Which checkout the move was switching, by its git dir, so a later attempt from a different
+  // linked checkout of the same repository never undoes the wrong one.
+  localRoot: Schema.String,
+  localGitDir: Schema.String,
   worktreePath: Schema.String,
   sourceRoot: Schema.String,
   branch: Schema.String,
+  // The branch's commit when the move started; new commits since mean someone worked there.
+  branchHead: Schema.String,
   previousLocalBranch: Schema.NullOr(Schema.String),
   previousLocalHead: Schema.String,
   worktreeHead: Schema.NullOr(Schema.String),
@@ -201,12 +207,15 @@ export const moveThreadToLocalCheckout = Effect.fn("ThreadLocalCheckout.move")(f
       ),
       Effect.orElseSucceed(() => project.workspaceRoot),
     );
-  const platform = yield* HostProcess.Platform;
   const realRoot = yield* fileSystem
     .realPath(repositoryRoot)
     .pipe(Effect.orElseSucceed(() => path.resolve(repositoryRoot)));
+  // By file identity, so two spellings of one folder on a case-folding volume share the guard.
+  const rootInfo = yield* fileSystem.stat(realRoot).pipe(Effect.option);
   const checkoutKey =
-    platform === "win32" || platform === "darwin" ? realRoot.toLowerCase() : realRoot;
+    Option.isSome(rootInfo) && Option.isSome(rootInfo.value.ino)
+      ? `${rootInfo.value.dev}:${rootInfo.value.ino.value}`
+      : realRoot;
   // Uninterruptible: a client disconnect between git steps would leave both checkouts half
   // switched. Every step is bounded git work.
   return yield* Effect.uninterruptible(
@@ -263,6 +272,22 @@ export const previewMoveThreadToLocalCheckout = Effect.fn("ThreadLocalCheckout.p
   );
 });
 
+/**
+ * Whether two paths name the same file, by device and inode rather than spelling, so case-folding
+ * volumes (APFS and NTFS by default) and case-sensitive ones are both handled correctly.
+ */
+const sameFile = Effect.fn("ThreadLocalCheckout.sameFile")(function* (left: string, right: string) {
+  if (left === right) return true;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const [a, b] = [
+    yield* fileSystem.stat(left).pipe(Effect.option),
+    yield* fileSystem.stat(right).pipe(Effect.option),
+  ];
+  if (Option.isNone(a) || Option.isNone(b)) return false;
+  if (Option.isNone(a.value.ino) || Option.isNone(b.value.ino)) return false;
+  return a.value.dev === b.value.dev && a.value.ino.value === b.value.ino.value;
+});
+
 const OPERATION_MARKERS = [
   "MERGE_HEAD",
   "CHERRY_PICK_HEAD",
@@ -315,14 +340,23 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
     if (yield* fileSystem.exists(target).pipe(Effect.orElseSucceed(() => false))) return true;
     return yield* isSymlink(target);
   });
-  // Windows and macOS file systems ignore case by default, so two spellings can name one folder.
   const platform = yield* HostProcess.Platform;
-  const pathKey = (target: string) =>
-    platform === "win32" || platform === "darwin" ? target.toLowerCase() : target;
-  const samePath = (left: string, right: string) => pathKey(left) === pathKey(right);
-  const within = (folder: string, candidate: string | null) =>
-    candidate !== null &&
-    (samePath(candidate, folder) || pathKey(candidate).startsWith(pathKey(`${folder}${path.sep}`)));
+  const samePath = sameFile;
+  // `candidate` is the folder or one inside it. Walks up comparing file identity, since a
+  // case-folding volume lets one folder be spelled several ways.
+  const within = Effect.fn("ThreadLocalCheckout.within")(function* (
+    folder: string,
+    candidate: string | null,
+  ) {
+    if (candidate === null) return false;
+    let cursor = candidate;
+    while (true) {
+      if (yield* sameFile(cursor, folder)) return true;
+      const parent = path.dirname(cursor);
+      if (parent === cursor) return false;
+      cursor = parent;
+    }
+  });
   const realPath = (target: string) =>
     fileSystem.realPath(target).pipe(Effect.orElseSucceed(() => path.resolve(target)));
   const currentBranch = (cwd: string) =>
@@ -350,7 +384,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
   }
   const localReal = yield* realPath(projectPath);
   const worktreeReal = yield* realPath(worktreePath);
-  if (samePath(worktreeReal, localReal)) {
+  if (yield* samePath(worktreeReal, localReal)) {
     return yield* fail("not_in_worktree", "The thread's workspace is already the local checkout.");
   }
 
@@ -399,7 +433,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       if (
         candidate.id !== input.threadId &&
         candidate.activeRunId !== null &&
-        within(localRootReal, yield* workspaceOf(candidate))
+        (yield* within(localRootReal, yield* workspaceOf(candidate)))
       ) {
         runningLocal.push(candidate);
       }
@@ -424,7 +458,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       // Includes a project whose own folder is this worktree: its local threads work here too.
       if (
         candidate.id !== input.threadId &&
-        within(worktreeFolder, yield* workspaceOf(candidate))
+        (yield* within(worktreeFolder, yield* workspaceOf(candidate)))
       ) {
         sharers.push(candidate);
       }
@@ -678,34 +712,146 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       yield* moveAside(relative);
       yield* dropEmptyParents(relative);
     }
-    // Restoring never writes over a path: the current file is renamed aside, the HEAD version is
-    // written to a scratch folder, and hard-linked in. link() fails if anything appeared at the
-    // path meanwhile, and then the newer file stays.
     for (const batch of chunked(existing)) {
       yield* run("resetIndex", localPath, literal(["reset", "-q", "HEAD", "--", ...batch]));
-      const scratch = path.join(yield* recoveryRoot(), "head-versions");
-      yield* fileSystem.makeDirectory(scratch, { recursive: true });
-      yield* run(
-        "writeHeadVersions",
-        localPath,
-        literal(["checkout-index", "--force", `--prefix=${scratch}${path.sep}`, "--", ...batch]),
-      );
-      for (const relative of batch) {
-        if (yield* occupied(path.join(localPath, relative))) yield* moveAside(relative);
-        // Undoing the snapshot may have removed the folder a deleted file lived in.
-        yield* fileSystem
-          .makeDirectory(path.dirname(path.join(localPath, relative)), { recursive: true })
-          .pipe(Effect.ignore);
-        const linked = yield* fileSystem
-          .link(path.join(scratch, relative), path.join(localPath, relative))
-          .pipe(
-            Effect.as(true),
-            Effect.orElseSucceed(() => false),
-          );
-        if (!linked) keptLocalEdits.push(relative);
-      }
-      yield* fileSystem.remove(scratch, { recursive: true });
+      yield* linkIndexVersions(batch);
     }
+  });
+
+  // Writes each path's index version without writing over anything: the current file is renamed
+  // aside, the index version goes to a scratch folder and is hard-linked in. link() fails if
+  // anything appeared at the path meanwhile, and then the newer file stays and is reported.
+  const linkIndexVersions = Effect.fn("ThreadLocalCheckout.linkIndexVersions")(function* (
+    batch: ReadonlyArray<string>,
+  ) {
+    const scratch = path.join(yield* recoveryRoot(), "head-versions");
+    yield* fileSystem.makeDirectory(scratch, { recursive: true });
+    yield* run(
+      "writeHeadVersions",
+      localPath,
+      literal(["checkout-index", "--force", `--prefix=${scratch}${path.sep}`, "--", ...batch]),
+    );
+    for (const relative of batch) {
+      if (yield* occupied(path.join(localPath, relative))) yield* moveAside(relative);
+      // Undoing the snapshot may have removed the folder a deleted file lived in.
+      yield* fileSystem
+        .makeDirectory(path.dirname(path.join(localPath, relative)), { recursive: true })
+        .pipe(Effect.ignore);
+      const linked = yield* fileSystem
+        .link(path.join(scratch, relative), path.join(localPath, relative))
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!linked) keptLocalEdits.push(relative);
+    }
+    yield* fileSystem.remove(scratch, { recursive: true });
+  });
+
+  // What's on disk for each path, tolerating files that can't be read (held open elsewhere on
+  // Windows): those map to None, and nothing that depends on their content may touch them.
+  const readableEntries = Effect.fn("ThreadLocalCheckout.readableEntries")(function* (
+    paths: ReadonlyArray<string>,
+  ) {
+    const all = yield* workingEntries(localPath, paths).pipe(Effect.option);
+    if (Option.isSome(all)) {
+      return new Map(paths.map((relative) => [relative, Option.some(all.value.get(relative))]));
+    }
+    const each = new Map<string, Option.Option<string | undefined>>();
+    for (const relative of paths) {
+      const one = yield* workingEntries(localPath, [relative]).pipe(Effect.option);
+      each.set(
+        relative,
+        Option.map(one, (entries) => entries.get(relative)),
+      );
+    }
+    return each;
+  });
+
+  // Back to the previous commit without writing over a file: HEAD and the index move by plumbing,
+  // and only files holding exactly the branch's version are swapped back. Anything else, or a file
+  // it can't read, is left and reported. Refuses when the index has someone's staged change.
+  const revertLocalSwitch = Effect.fn("ThreadLocalCheckout.revertLocalSwitch")(function* (target: {
+    readonly previousLocalBranch: string | null;
+    readonly previousLocalHead: string;
+  }) {
+    const nowBranch = yield* currentBranch(localPath);
+    const nowHead = yield* currentHead(localPath);
+    if (
+      nowBranch === target.previousLocalBranch &&
+      nowHead === target.previousLocalHead &&
+      (yield* trackedDifferences("verifyRestore")).length === 0
+    ) {
+      return;
+    }
+    const stayedOn = `so the local checkout stayed on '${nowBranch ?? nowHead}'`;
+    const changed = (yield* run("switchedPaths", localPath, [
+      "diff",
+      "--name-only",
+      "--no-renames",
+      "-z",
+      target.previousLocalHead,
+      nowHead,
+    ])).stdout
+      .split("\0")
+      .filter((relative) => relative.length > 0);
+    const staged = (yield* run("stagedPaths", localPath, [
+      "diff",
+      "--cached",
+      "--name-only",
+      "--no-renames",
+      "-z",
+      nowHead,
+    ])).stdout
+      .split("\0")
+      .filter((relative) => relative.length > 0);
+    if (staged.length > 0) {
+      const [index, atPrevious] = [
+        yield* indexEntries(localPath, staged),
+        yield* treeEntries(localPath, target.previousLocalHead, staged),
+      ];
+      const foreign = staged.filter((relative) => index.get(relative) !== atPrevious.get(relative));
+      if (foreign.length > 0) {
+        return yield* fail(
+          "operation_failed",
+          `it has staged changes the move didn't make (${foreign.slice(0, 5).join(", ")}), ${stayedOn}`,
+        );
+      }
+    }
+    yield* saveRecoveryCommit().pipe(Effect.ignore);
+    yield* run(
+      "restoreHead",
+      localPath,
+      target.previousLocalBranch === null
+        ? ["update-ref", "--no-deref", "HEAD", target.previousLocalHead]
+        : ["symbolic-ref", "HEAD", `refs/heads/${target.previousLocalBranch}`],
+    );
+    yield* run("restoreIndex", localPath, ["read-tree", target.previousLocalHead]);
+    const [atBranch, atPrevious, onDisk] = [
+      yield* treeEntries(localPath, nowHead, changed),
+      yield* treeEntries(localPath, target.previousLocalHead, changed),
+      yield* readableEntries(changed),
+    ];
+    const restore: string[] = [];
+    for (const relative of changed) {
+      const read = onDisk.get(relative) ?? Option.none();
+      if (Option.isNone(read)) {
+        keptLocalEdits.push(relative);
+        continue;
+      }
+      if (sameWorking(read.value, atPrevious.get(relative))) continue;
+      if (!sameWorking(read.value, atBranch.get(relative))) {
+        keptLocalEdits.push(relative);
+        continue;
+      }
+      if (atPrevious.has(relative)) {
+        restore.push(relative);
+      } else {
+        yield* moveAside(relative);
+        yield* dropEmptyParents(relative);
+      }
+    }
+    for (const batch of chunked(restore)) yield* linkIndexVersions(batch);
   });
 
   const commonDirectory = Effect.fn("ThreadLocalCheckout.commonDirectory")(function* (
@@ -719,6 +865,10 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
   });
   const localCommon = yield* commonDirectory(localPath).pipe(
     operationFailed("Unable to read the local checkout's repository"),
+  );
+  const localGitDir = yield* run("gitDir", localPath, ["rev-parse", "--absolute-git-dir"]).pipe(
+    Effect.flatMap((result) => realPath(result.stdout.replace(/\r?\n$/, ""))),
+    operationFailed("Unable to read the local checkout's git folder"),
   );
 
   // A crash between git steps leaves a move half done. Its journal lets the next attempt undo what
@@ -740,6 +890,12 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
     entry: MoveJournal,
   ) {
     if ((yield* currentBranch(localPath)) === entry.branch) {
+      if ((yield* currentHead(localPath)) !== entry.branchHead) {
+        return yield* fail(
+          "operation_failed",
+          `'${entry.branch}' has new commits since the move stopped, so it can't tell what the move left behind. Check the local checkout with \`git status\`, then delete '${journalFile}' to move again`,
+        );
+      }
       if (entry.snapshot !== null) yield* undoSnapshot(entry.snapshot);
       if (entry.untracked.length > 0) {
         // Only copies still identical to the worktree's original; anything else stays put.
@@ -752,13 +908,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
           }
         }
       }
-      yield* run(
-        "recoverLocal",
-        localPath,
-        entry.previousLocalBranch === null
-          ? ["switch", "--quiet", "--no-overwrite-ignore", "--detach", entry.previousLocalHead]
-          : ["switch", "--quiet", "--no-overwrite-ignore", entry.previousLocalBranch],
-      );
+      yield* revertLocalSwitch(entry);
     }
     const worktreeStill =
       entry.worktreeHead !== null &&
@@ -779,7 +929,19 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
     .readFileString(journalFile)
     .pipe(Effect.flatMap(decodeJournal), Effect.option);
   if (Option.isSome(journal)) {
-    if (!samePath(journal.value.worktreePath, worktreePath)) {
+    const sameWorktree = yield* samePath(journal.value.worktreePath, worktreePath);
+    if (sameWorktree && !(yield* samePath(journal.value.localGitDir, localGitDir))) {
+      return yield* fail(
+        "operation_failed",
+        `An earlier move of this thread into '${journal.value.localRoot}' didn't finish, and that isn't this project's checkout any more. Check it with \`git status\`, then delete '${journalFile}' to move again.`,
+      );
+    }
+    if (sameWorktree) {
+      // Undoing it switches branches too, so the same checks guard it.
+      yield* refuseIfLocalBusy();
+      yield* refuseIfWorktreeShared(yield* realPath(journal.value.sourceRoot));
+    }
+    if (!sameWorktree) {
       // The thread has moved on: the interrupted move re-pointed it, or it was handed off again.
       if (!input.preview) yield* removeJournal;
     } else if (input.preview) {
@@ -909,7 +1071,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       operationFailed("Unable to read the worktree's repository"),
     );
     yield* refuseIfWorktreeShared(yield* realPath(sourceRoot));
-    if (!samePath(localCommon, sourceCommon)) {
+    if (!(yield* samePath(localCommon, sourceCommon))) {
       return yield* fail(
         "different_repository",
         `The worktree at '${worktreePath}' belongs to a different repository than the project folder.`,
@@ -1105,10 +1267,17 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
   }
 
   yield* writeJournal({
-    version: 1,
+    version: 2,
+    localRoot: localPath,
+    localGitDir,
     worktreePath,
     sourceRoot,
     branch,
+    branchHead: (yield* run("branchHead", localPath, [
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    ]).pipe(operationFailed("Unable to read the branch's commit"))).stdout.trim(),
     previousLocalBranch,
     previousLocalHead,
     worktreeHead: worktreeOnDisk
@@ -1157,7 +1326,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
           const kept =
             (keptLocalEdits.length === 0
               ? ""
-              : ` These files in the local checkout differ from the worktree's copy, so they were left as they are: ${keptLocalEdits.slice(0, 5).join(", ")}.`) +
+              : ` These files in the local checkout were left as they are, since they hold something other than the move's own copy or can't be read right now: ${keptLocalEdits.slice(0, 5).join(", ")}.`) +
             (recoveryCommit === null
               ? ""
               : ` The checkout's tracked files before the rollback are saved as commit ${recoveryCommit}; \`git stash apply ${recoveryCommit}\` brings them back.`) +
@@ -1202,78 +1371,14 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       const nowBranch = yield* currentBranch(localPath);
       const nowHead = yield* currentHead(localPath);
       if (nowBranch === previousLocalBranch && nowHead === previousLocalHead) return;
-      const target =
-        previousLocalBranch === null ? ["--detach", previousLocalHead] : [previousLocalBranch];
-      const restored = yield* probe("restoreLocal", localPath, [
+      // The ordinary switch back, when git can do it cleanly.
+      yield* probe("restoreLocal", localPath, [
         "switch",
         "--quiet",
         "--no-overwrite-ignore",
-        ...target,
+        ...(previousLocalBranch === null ? ["--detach", previousLocalHead] : [previousLocalBranch]),
       ]);
-      if (restored.exitCode === 0 && (yield* trackedDifferences("verifyRestore")).length === 0) {
-        return;
-      }
-      // A switch that couldn't replace a file (Windows, where another program holds it open)
-      // leaves the old content behind. Forcing back is safe only when every leftover difference
-      // is exactly the previous commit's own content, so nothing of anyone else's is lost.
-      const leftover = (yield* trackedDifferences("leftoverAfterSwitch")).map(
-        (entry) => entry.path,
-      );
-      const atPrevious = yield* treeEntries(localPath, previousLocalHead, leftover);
-      // A file another program holds open can't be read here, and for the same reason the forced
-      // switch can't write it, so it can't lose anything; every readable one must be stale.
-      let onlyStaleCopies = leftover.length > 0;
-      for (const relative of leftover) {
-        const onDisk = yield* workingEntries(localPath, [relative]).pipe(Effect.option);
-        if (
-          Option.isSome(onDisk) &&
-          !sameWorking(onDisk.value.get(relative), atPrevious.get(relative))
-        ) {
-          onlyStaleCopies = false;
-        }
-      }
-      // --force also writes the previous commit's files over untracked and ignored ones.
-      const arriving = (yield* run("restoreAdds", localPath, [
-        "diff",
-        "--name-only",
-        "--no-renames",
-        "--diff-filter=A",
-        "-z",
-        "HEAD",
-        previousLocalHead,
-      ])).stdout
-        .split("\0")
-        .filter((relative) => relative.length > 0);
-      const covered: string[] = [];
-      for (const relative of arriving) {
-        if (yield* occupied(path.join(localPath, relative))) covered.push(relative);
-      }
-      const stayedOn = `so the local checkout stayed on '${nowBranch ?? nowHead}'`;
-      if (leftover.length > 0 && !onlyStaleCopies) {
-        return yield* fail(
-          "operation_failed",
-          `it has changes the move didn't make (${leftover.slice(0, 5).join(", ")}), ${stayedOn}`,
-        );
-      }
-      if (covered.length > 0) {
-        return yield* fail(
-          "operation_failed",
-          `switching back would overwrite ${covered.slice(0, 5).join(", ")}, ${stayedOn}`,
-        );
-      }
-      if (!onlyStaleCopies) {
-        return yield* fail(
-          "operation_failed",
-          `switching back failed (${restored.stderr.trim() || "git exited with an error"}), ${stayedOn}`,
-        );
-      }
-      yield* run("forceRestoreLocal", localPath, [
-        "switch",
-        "--quiet",
-        "--force",
-        "--no-overwrite-ignore",
-        ...target,
-      ]);
+      yield* revertLocalSwitch({ previousLocalBranch, previousLocalHead });
     }),
   );
   yield* step(
@@ -1372,7 +1477,7 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
             }
             yield* ensureDirectory(path.dirname(target));
             const parentReal = yield* realPath(path.dirname(target));
-            if (!within(localRootReal, parentReal)) {
+            if (!(yield* within(localRootReal, parentReal))) {
               return yield* fail(
                 "operation_failed",
                 `'${relative}' would land outside the checkout`,
@@ -1392,7 +1497,10 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
                 Effect.gen(function* () {
                   const output = yield* fileSystem.open(target, { flag: "wx", mode });
                   const landed = yield* realPath(target);
-                  if (!within(localRootReal, landed) || samePath(landed, localRootReal)) {
+                  if (
+                    !(yield* within(localRootReal, landed)) ||
+                    (yield* samePath(landed, localRootReal))
+                  ) {
                     // Unlink the path itself: if it became a symlink, its target is not ours.
                     yield* fileSystem.remove(target, { force: true });
                     return yield* fail(
