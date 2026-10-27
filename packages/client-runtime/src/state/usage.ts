@@ -26,9 +26,10 @@ export function needsCursorKeychainAccess(
 }
 
 /**
- * Any environment reading a Cursor account already reports that account's
- * history from every machine, so the prompt only adds duplicates there. An
- * environment still asking for access has not read its own login's account.
+ * Any environment reading a Cursor login's account already reports that
+ * account's history from every machine, so the prompt only adds duplicates
+ * there. An environment still asking for access has not read its own login's
+ * account, and an instance credential may bill a different account.
  */
 export function cursorKeychainAccessEnvironments<
   E extends { readonly summary: UsageSummary | null; readonly needsCursorKeychainAccess: boolean },
@@ -38,7 +39,9 @@ export function cursorKeychainAccessEnvironments<
       !environment.needsCursorKeychainAccess &&
       environment.summary?.sources.some(
         (source) =>
-          source.fingerprint.provider === "cursor" && source.fingerprint.hostId === "cursor.com",
+          source.fingerprint.provider === "cursor" &&
+          source.fingerprint.hostId === "cursor.com" &&
+          source.instanceCredential !== true,
       ),
   );
   return hasCursorAccount

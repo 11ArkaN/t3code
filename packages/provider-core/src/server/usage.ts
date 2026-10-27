@@ -90,6 +90,7 @@ export interface ProviderUsageScan {
   readonly status?: UsageSource["status"];
   readonly message?: string;
   readonly action?: UsageSource["action"];
+  readonly instanceCredential?: true;
   readonly files:
     | readonly { readonly path: string; readonly records: readonly UsageRecord[] }[]
     | null;

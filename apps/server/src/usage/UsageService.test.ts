@@ -1523,7 +1523,11 @@ describe("UsageService", () => {
           return {
             sources: summary.sources
               .filter((source) => source.fingerprint.provider === "cursor")
-              .map((source) => [source.fingerprint.resolvedHomePath, source.status]),
+              .map((source) => [
+                source.fingerprint.resolvedHomePath,
+                source.status,
+                source.instanceCredential === true,
+              ]),
             outputTokens: totalOutputTokens({
               buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
             }),
@@ -1531,9 +1535,102 @@ describe("UsageService", () => {
         }),
       );
       const account = `cursor-account:${NodeCrypto.createHash("sha256").update(userId).digest("hex")}`;
-      for (const result of results) {
-        assert.deepStrictEqual(result, { sources: [[account, "ok"]], outputTokens: 7 });
-      }
+      // Only an account no CLI login reads is marked as read through an instance credential.
+      assert.deepStrictEqual(
+        results,
+        cases.map((testCase) => ({
+          sources: [[account, "ok", !testCase.cliLogin]],
+          outputTokens: 7,
+        })),
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.live("ignores Cursor account caches keyed by an older account identity", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const authPath = NodePath.join(home, "config", "cursor", "auth.json");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+        await NodeFSP.writeFile(
+          authPath,
+          encodeUnknownJsonString({ accessToken: cursorToken("auth0|user_key-b") }),
+        );
+      });
+      yield* Effect.gen(function* () {
+        const { stateDir } = yield* ServerConfig.ServerConfig;
+        // Written before account keys hashed the user id instead of the whole token subject.
+        const legacyAccountKey = NodeCrypto.createHash("sha256")
+          .update("auth0|user_key-b")
+          .digest("hex");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(stateDir, { recursive: true });
+          await NodeFSP.writeFile(
+            NodePath.join(stateDir, "usage-cursor-account-cache-v1.json"),
+            encodeUnknownJsonString({
+              version: 1,
+              strings: ["claude-fable-5", "conversation-1"],
+              accounts: {
+                [authPath]: {
+                  accountKey: legacyAccountKey,
+                  sinceMs: CURSOR_NOW - 24 * HOUR_MS,
+                  untilMs: CURSOR_NOW,
+                  fetchedAtMs: CURSOR_NOW,
+                  records: [[CURSOR_NOW - 3 * HOUR_MS, 0, 1, 10, 0, 0, 7, null, "event-key-b"]],
+                },
+              },
+            }),
+          );
+        });
+        const summary = yield* (yield* UsageService.make).readSummary({
+          ...WINDOW,
+          awaitRefresh: true,
+        });
+        assert.deepStrictEqual(
+          summary.sources
+            .filter((source) => source.fingerprint.hostId === "cursor.com")
+            .map((source) => source.status),
+          ["ok"],
+        );
+        assert.strictEqual(
+          totalOutputTokens({
+            buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+          }),
+          7,
+        );
+      }).pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-cursor-legacy-cache",
+            home,
+            settings: {
+              providerInstances: {
+                ...settings.providerInstances,
+                [ProviderInstanceId.make("cursor-b")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                  environment: [{ name: "CURSOR_API_KEY", value: "key-b", sensitive: true }],
+                },
+              },
+            },
+            ratesResponse: (request) =>
+              request.url === "https://cursor.com/api/dashboard/get-filtered-usage-events"
+                ? Effect.succeed(
+                    Response.json({
+                      totalUsageEventsCount: 1,
+                      usageEventsDisplay: [
+                        {
+                          timestamp: String(CURSOR_NOW - 3 * HOUR_MS),
+                          model: "claude-fable-5",
+                          tokenUsage: { inputTokens: 10, outputTokens: 7 },
+                        },
+                      ],
+                    }),
+                  )
+                : cursorApi({ "key-b": { outputTokens: 7 } })(request),
+          }),
+        ),
+      );
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 

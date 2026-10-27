@@ -92,6 +92,8 @@ export const UsageSource = Schema.Struct({
   distinctSessions: NonNegativeInt,
   message: Schema.NullOr(TrimmedNonEmptyString),
   action: Schema.optionalKey(Schema.Literal("enableCursorKeychain")),
+  /** Account read only through a provider instance's own credential, not the server's login. */
+  instanceCredential: Schema.optionalKey(Schema.Literal(true)),
   /** Cached response during refresh; repeat with awaitRefresh for fresh data. */
   refreshing: Schema.optionalKey(Schema.Literal(true)),
 });

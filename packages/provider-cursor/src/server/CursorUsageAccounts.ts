@@ -427,6 +427,8 @@ const make = Effect.gen(function* () {
       if (cacheDirty) yield* schedulePersist;
 
       // Two credentials on one account share a fingerprint; keep the readable, freshest read.
+      const hostAccountKey =
+        hostEntry !== null && "account" in hostEntry ? hostEntry.account.key : undefined;
       const sources: ProviderUsageScan[] = [];
       const accounts = new Map<
         string,
@@ -450,7 +452,8 @@ const make = Effect.gen(function* () {
         ) {
           const index = seen?.index ?? sources.length;
           accounts.set(key, { index, ok, fetchedAtMs });
-          sources[index] = source;
+          sources[index] =
+            key === hostAccountKey ? source : { ...source, instanceCredential: true };
         }
       }
       return sources;

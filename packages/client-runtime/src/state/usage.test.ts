@@ -267,5 +267,17 @@ describe("needsCursorKeychainAccess", () => {
         { summary: account, needsCursorKeychainAccess: false },
       ]),
     ).toEqual([]);
+    // An instance key may bill another account than the login this Mac still needs to read.
+    const instanceKeyOnly = {
+      summary: {
+        ...account,
+        sources: account.sources.map((source) => ({
+          ...source,
+          instanceCredential: true as const,
+        })),
+      },
+      needsCursorKeychainAccess: false,
+    };
+    expect(cursorKeychainAccessEnvironments([off, instanceKeyOnly])).toEqual([off]);
   });
 });
