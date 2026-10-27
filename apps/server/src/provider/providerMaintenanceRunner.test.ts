@@ -673,6 +673,30 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
+  it.effect("leaves an inherited proxy alone and does not read the macOS system proxy", () => {
+    const spawns: Array<{ command: string; env: NodeJS.ProcessEnv | undefined }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const runner = yield* makeTestRunner(registry);
+
+      yield* runner.updateProvider(CODEX_DRIVER);
+
+      assert.deepStrictEqual(spawns, [{ command: "npm", env: undefined }]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcess.Platform, "darwin"),
+          Layer.succeed(HostProcess.Environment, { https_proxy: "http://proxy.corp:8080" }),
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner((command, _args, options) => {
+            spawns.push({ command, env: options.env });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("passes the macOS system proxy to the updater when the env has none", () => {
     const updaterEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
     return Effect.gen(function* () {
