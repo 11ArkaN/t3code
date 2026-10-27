@@ -10,6 +10,7 @@ import {
   readNewTaskFlowState,
   resolveRouteDraft,
   stampedEnvironmentProjectsLoading,
+  unsentDraftResumeDue,
   updateNewTaskFlowState,
 } from "./new-task-flow-state";
 
@@ -150,5 +151,41 @@ describe("stampedEnvironmentProjectsLoading", () => {
       }),
     ).toBe(false);
     expect(stampedEnvironmentProjectsLoading({ ...settled, shellHasError: true })).toBe(false);
+  });
+});
+
+describe("unsentDraftResumeDue", () => {
+  const routeProject = { environmentId: EnvironmentId.make("env"), id: ProjectId.make("route") };
+  const fallbackProject = { environmentId: EnvironmentId.make("env"), id: ProjectId.make("first") };
+  const flow = { ...INITIAL_NEW_TASK_FLOW_STATE, draftKey: "new-task:fresh" };
+  const due = (input: Partial<Parameters<typeof unsentDraftResumeDue>[0]>) =>
+    unsentDraftResumeDue({
+      route: { environmentId: "env", projectId: "route" },
+      flow,
+      draftsLoaded: true,
+      selectedProject: routeProject,
+      ...input,
+    });
+
+  it("waits for drafts and the route's project, not the environment's fallback", () => {
+    expect(due({})).toBe(true);
+    expect(due({ draftsLoaded: false })).toBe(false);
+    expect(due({ selectedProject: fallbackProject })).toBe(false);
+    expect(due({ flow: { ...flow, unsentDraftChecked: true } })).toBe(false);
+  });
+
+  it("resumes for the project a picker route settles on", () => {
+    const picker = { route: {}, selectedProject: fallbackProject };
+    expect(due(picker)).toBe(false);
+    expect(due({ ...picker, flow: { ...flow, projectKey: "env:first" } })).toBe(true);
+  });
+
+  it("keeps a fresh draft for draft, branch, clone, and share routes", () => {
+    const route = { environmentId: "env", projectId: "route" };
+    expect(due({ route: { ...route, draftId: "new-task:a" } })).toBe(false);
+    expect(due({ route: { ...route, branch: "feature" } })).toBe(false);
+    expect(due({ route: { ...route, cloning: "1" } })).toBe(false);
+    expect(due({ route: { ...route, incomingShareId: "share" } })).toBe(false);
+    expect(due({ route: { ...route, worktreePath: "/repo/wt" } })).toBe(true);
   });
 });

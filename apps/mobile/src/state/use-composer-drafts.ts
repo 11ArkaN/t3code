@@ -1932,11 +1932,20 @@ export function findNewTaskDraftKeys(
 }
 
 export function findResumableNewTaskDraftKey(
-  _drafts: Readonly<Record<string, ComposerDraft>>,
-  _project: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
-  _exclude: ReadonlySet<string>,
+  drafts: Readonly<Record<string, ComposerDraft>>,
+  project: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
+  exclude: ReadonlySet<string>,
 ): string | null {
-  return null;
+  return (
+    findNewTaskDraftKeys(drafts, project).find((key) => {
+      const draft = drafts[key];
+      return (
+        !exclude.has(key) &&
+        draft !== undefined &&
+        (draft.text.trim().length > 0 || draft.attachments.length > 0)
+      );
+    }) ?? null
+  );
 }
 
 export async function clearComposerDraftsEnvironment(environmentId: EnvironmentId): Promise<void> {
