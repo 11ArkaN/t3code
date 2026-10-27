@@ -86,7 +86,6 @@ it.layer(layer)("PreviewManager", (it) => {
     }),
   );
 
-  // regression: #24911 the desktop host reset server tabs to 100% because open dropped the zoom
   it.effect("opens a tab at the requested zoom", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();

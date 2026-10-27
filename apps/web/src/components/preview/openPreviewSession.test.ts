@@ -90,7 +90,6 @@ describe("openPreviewSession", () => {
     },
   );
 
-  // regression: #24911 server tabs opened at 100% and ignored the default zoom setting
   it.each(["session", "link"] as const)(
     "opens a server %s tab at the saved default zoom",
     async (entryPoint) => {
