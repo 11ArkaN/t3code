@@ -202,3 +202,30 @@ it("returns a newly enabled retention rule to off when its first save fails", as
   await expect.element(daysInput(screen)).not.toBeInTheDocument();
   await expect.element(ruleSwitch(screen)).not.toBeChecked();
 });
+
+it("does not save a stale age when Enter is pressed on invalid text", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "+");
+  await userEvent.keyboard("{Enter}");
+  expect(state.update).not.toHaveBeenCalled();
+});
+
+it("keeps a newer pending age open when an older first save fails", async () => {
+  setup();
+  let failFirst = () => {};
+  const first = new Promise<boolean>((resolve) => (failFirst = () => resolve(false)));
+  state.update.mockReturnValueOnce(first).mockReturnValueOnce(new Promise(() => {}));
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.keyboard("{Enter}");
+  await userEvent.fill(daysInput(screen), "60");
+  await userEvent.keyboard("{Enter}");
+  expect(state.update).toHaveBeenCalledTimes(2);
+
+  await act(async () => failFirst());
+  await expect.element(daysInput(screen)).toHaveValue("60");
+  await expect.element(ruleSwitch(screen)).toBeChecked();
+});

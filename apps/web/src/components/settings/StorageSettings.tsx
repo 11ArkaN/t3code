@@ -114,7 +114,8 @@ function RetentionControl({
   const [draft, setDraft] = useState(value);
   const [savedValue, setSavedValue] = useState(value);
   // Saving an age can start a cleanup sweep, so turning a rule on only opens a draft.
-  const [enabling, setEnabling] = useState<"draft" | "saving" | null>(null);
+  // While its first save is in flight this holds that age.
+  const [enabling, setEnabling] = useState<"draft" | "edited" | number | null>(null);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
@@ -124,14 +125,14 @@ function RetentionControl({
   const commit = async (next: number) => {
     const days = Math.min(3650, Math.max(minimum, Math.round(next)));
     setDraft(days);
-    if (days === value) return;
+    if (days === value || days === enabling) return;
     if (value !== null) {
       void onChange(days);
       return;
     }
-    setEnabling("saving");
+    setEnabling(days);
     if (!(await onChange(days))) {
-      setEnabling((current) => (current === "saving" ? null : current));
+      setEnabling((current) => (current === days ? null : current));
     }
   };
 
@@ -140,7 +141,7 @@ function RetentionControl({
       className="flex items-center gap-3"
       onBlur={(event) => {
         if (event.currentTarget.contains(event.relatedTarget)) return;
-        setEnabling((current) => (current === "draft" ? null : current));
+        setEnabling((current) => (typeof current === "string" ? null : current));
       }}
     >
       {value !== null || enabling !== null ? (
@@ -151,7 +152,10 @@ function RetentionControl({
           step={1}
           size="sm"
           className="w-auto"
-          onValueChange={setDraft}
+          onValueChange={(next) => {
+            setDraft(next);
+            setEnabling((current) => (current === "draft" ? "edited" : current));
+          }}
           onValueCommitted={(next) => {
             if (next === null) setDraft(value);
             else void commit(next);
@@ -166,8 +170,15 @@ function RetentionControl({
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return;
-                if (event.key === "Enter" && draft !== null) void commit(draft);
-                else if (event.key === "Escape" && enabling === "draft") {
+                if (event.key === "Enter") {
+                  // Blurring lets NumberField parse the visible text and commit it once. It
+                  // skips an unedited value, so an untouched draft is committed here.
+                  const input = event.currentTarget;
+                  const shown =
+                    draft !== null && input.value === new Intl.NumberFormat().format(draft);
+                  if (enabling === "draft" && shown) void commit(draft);
+                  input.blur();
+                } else if (event.key === "Escape" && typeof enabling === "string") {
                   // An unhandled Escape closes the settings page.
                   event.preventDefault();
                   event.stopPropagation();
@@ -189,7 +200,7 @@ function RetentionControl({
         checked={value !== null || enabling !== null}
         // Keeps focus in a draft, so switching it off discards it instead of committing on blur.
         onMouseDown={(event) => {
-          if (enabling === "draft") event.preventDefault();
+          if (typeof enabling === "string") event.preventDefault();
         }}
         onCheckedChange={(enabled) => {
           if (enabled) {
@@ -197,7 +208,7 @@ function RetentionControl({
             setEnabling("draft");
             return;
           }
-          if (value !== null || enabling === "saving") void onChange(null);
+          if (value !== null || typeof enabling === "number") void onChange(null);
           setEnabling(null);
         }}
       />
