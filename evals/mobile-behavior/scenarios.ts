@@ -569,9 +569,13 @@ const waitForRow = Effect.fn("scenario.waitForRow")(function* (
     if (nodes.some((node) => node.label?.includes(title))) return;
     // A crowded list can hold the new row below the fold; scroll to the top once.
     if (attempt === 4) yield* ctx.device.run(["scroll", "top"]).pipe(Effect.ignore);
-    // A finished row can stay folded in the Working shelf; open the shelf once.
+    // A finished row can stay folded in the Working shelf; open it once if it is collapsed.
     const shelf = nodes.find((node) => /^\d+ working threads?$/.test(node.label ?? ""));
-    if (attempt === 10 && shelf?.label) yield* ctx.device.press(`label="${shelf.label}"`);
+    const collapsed = (yield* ctx.device.state).homeList?.some(
+      (entry) => entry.type === "v2-working-shelf" && entry.expanded === false,
+    );
+    if (attempt === 10 && collapsed && shelf?.label)
+      yield* ctx.device.press(`label="${shelf.label}"`);
     yield* Effect.sleep("500 millis");
   }
   return yield* new ScenarioFailure({ message: `Row "${title}" never appeared on Home.` });

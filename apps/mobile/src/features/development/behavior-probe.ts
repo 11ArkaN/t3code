@@ -78,6 +78,7 @@ function scanTree() {
     status?: string;
     pinned?: boolean;
     count?: number;
+    expanded?: boolean;
   }> | null = null;
   const enter = (fiber: Fiber, feed: Feed | null): Feed | null => {
     const props = fiber.memoizedProps;
@@ -107,6 +108,7 @@ function scanTree() {
         type?: string;
         item?: { thread?: { id?: string }; pinned?: boolean };
         count?: number;
+        expanded?: boolean;
       }>;
       if (data.some((entry) => entry?.type?.startsWith("v2-"))) {
         const { resolveThreadListV2Status } = require("../threads/threadListV2") as {
@@ -122,6 +124,7 @@ function scanTree() {
               }
             : {}),
           ...(typeof entry.count === "number" ? { count: entry.count } : {}),
+          ...(typeof entry.expanded === "boolean" ? { expanded: entry.expanded } : {}),
         }));
       }
     }

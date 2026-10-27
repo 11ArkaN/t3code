@@ -52,6 +52,7 @@ export interface ProbeState {
     readonly status?: string;
     readonly pinned?: boolean;
     readonly count?: number;
+    readonly expanded?: boolean;
   }> | null;
 }
 
@@ -222,9 +223,13 @@ export function makeDevice(options: DeviceOptions) {
       yield* Effect.sleep("2 seconds");
       yield* waitFor("the thread list after reload", ready, 60_000);
       yield* evaluate(`__t3Behavior.open(${JSON.stringify(`${SCHEME}://`)})`);
+      // Split layouts may keep a thread beside Home, so they get a short wait for the Home route.
+      const home = (value: ProbeState) => ready(value) && value.route?.name === "Home";
+      const state = yield* waitFor("Home", home, 5_000).pipe(Effect.option);
+      if (state._tag === "Some") return state.value;
       return yield* waitFor(
-        "Home",
-        (value) => ready(value) && (value.route?.name === "Home" || value.route?.columns === true),
+        "the split layout",
+        (value) => ready(value) && value.route?.columns === true,
       );
     }),
     recordStart: (withFeed: boolean) => evaluate(`__t3Behavior.recordStart(${withFeed})`),
