@@ -20,7 +20,10 @@ interface RecordedRegistration {
   readonly files: Array<{ readonly path: string; readonly content: string }>;
   readonly commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>;
   readonly copies: Array<{ readonly source: string; readonly destination: string }>;
+  readonly icons: Array<{ readonly path: string; readonly bytes: ReadonlyArray<number> }>;
 }
+
+const ICON_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
 const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {}) =>
   DesktopEnvironment.DesktopEnvironment.of({
@@ -91,6 +94,21 @@ const layerHandler = (
               : Effect.sync(() => {
                   recorded.copies.push({ source, destination });
                 }),
+          readFile: (path) =>
+            path === input.iconSource
+              ? Effect.succeed(ICON_BYTES)
+              : Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "readFile",
+                    pathOrDescriptor: path,
+                  }),
+                ),
+          writeFile: (path, bytes) =>
+            Effect.sync(() => {
+              recorded.icons.push({ path, bytes: [...bytes] });
+            }),
           readFileString: () => Effect.succeed(input.existingEntry ?? ""),
           makeDirectory: (path) =>
             Effect.sync(() => {
@@ -155,6 +173,7 @@ const emptyRecording = (): RecordedRegistration => ({
   files: [],
   commands: [],
   copies: [],
+  icons: [],
 });
 
 describe("DesktopLinuxUrlHandler", () => {
@@ -283,9 +302,9 @@ describe("DesktopLinuxUrlHandler", () => {
         }),
       });
       assert.deepEqual(recorded.files, []);
-      assert.deepEqual(recorded.copies, [
-        { source: "/tmp/.mount_T3/resources/icon.png", destination: iconPath },
-      ]);
+      // Electron's copyFile from app.asar extracts to a temp file it never deletes.
+      assert.deepEqual(recorded.copies, [], "icon must not be copied out of the app bundle");
+      assert.deepEqual(recorded.icons, [{ path: iconPath, bytes: [...ICON_BYTES] }]);
       assert.equal(recorded.commands.at(-1)?.command, "xdg-mime");
     });
   });
