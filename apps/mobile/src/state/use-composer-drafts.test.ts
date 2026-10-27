@@ -31,6 +31,7 @@ import { onTestFinished, vi } from "vite-plus/test";
 const composerDraftFileMocks = vi.hoisted(() => {
   let document = JSON.stringify({ schemaVersion: 1, drafts: {} });
   let readError: Error | null = null;
+  let readErrorsRemaining = Number.POSITIVE_INFINITY;
   let writeError: Error | null = null;
   let releaseRead: (() => void) | null = null;
   let readBarrier = Promise.resolve();
@@ -56,8 +57,9 @@ const composerDraftFileMocks = vi.hoisted(() => {
     setDocument(value: unknown) {
       document = JSON.stringify(value);
     },
-    setReadError(error: Error | null) {
+    setReadError(error: Error | null, times = Number.POSITIVE_INFINITY) {
       readError = error;
+      readErrorsRemaining = times;
     },
     setWriteError(error: Error | null) {
       writeError = error;
@@ -91,7 +93,10 @@ const composerDraftFileMocks = vi.hoisted(() => {
 
       async text() {
         await readBarrier;
-        if (readError) throw readError;
+        if (readError && readErrorsRemaining > 0) {
+          readErrorsRemaining -= 1;
+          throw readError;
+        }
         return document;
       }
 
@@ -185,6 +190,7 @@ import {
   clearComposerDraftsEnvironment,
   ComposerDraftPersistenceError,
   composerDraftsAtom,
+  composerDraftsLoadedAtom,
   composerCloudDraftsAtom,
   createNewTaskDraft,
   createComposerDraftContextHistory,
@@ -1946,6 +1952,21 @@ describe("mobile composer drafts", () => {
         "xai/grok-4.6": [{ id: "thinking", value: "xhigh" }],
         "openai/gpt-5.4": [{ id: "thinking", value: "medium" }],
       },
+    });
+  });
+
+  it("retries a transient read failure while hydrating", async () => {
+    composerDraftFileMocks.setDocument({
+      schemaVersion: 1,
+      drafts: { "environment-1:thread-1": DRAFT },
+    });
+    composerDraftFileMocks.setReadError(new Error("storage busy"), 1);
+
+    await waitForComposerDraftsLoaded();
+
+    expect(appAtomRegistry.get(composerDraftsLoadedAtom)).toBe(true);
+    expect(appAtomRegistry.get(composerDraftsAtom)).toEqual({
+      "environment-1:thread-1": DRAFT,
     });
   });
 

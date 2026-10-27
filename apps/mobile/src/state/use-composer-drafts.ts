@@ -21,7 +21,6 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { useEffect } from "react";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import * as Option from "effect/Option";
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -472,9 +471,10 @@ export const composerDraftsAtom = Atom.make<Record<string, ComposerDraft>>({}).p
 );
 
 /**
- * Whether persisted drafts have merged in. Hydration starts with the app's
- * attachment upload worker; a failed load stays false until the next
- * `ensureComposerDraftsLoaded` caller retries it.
+ * Whether persisted drafts have merged in. Hydration starts at app start with
+ * the attachment upload worker (`installComposerAttachmentUploads`), so the
+ * read hooks below do not start it. A load that still fails after its retries
+ * stays false until the next draft write calls `ensureComposerDraftsLoaded`.
  */
 export const composerDraftsLoadedAtom = Atom.make(false).pipe(
   Atom.keepAlive,
@@ -740,6 +740,24 @@ async function loadPersistedComposerState(): Promise<
       fileName: COMPOSER_DRAFTS_FILE,
       cause,
     });
+  }
+}
+
+const HYDRATE_ATTEMPTS = 3;
+
+async function loadPersistedComposerStateWithRetry(): Promise<
+  ReturnType<typeof decodePersistedComposerState>
+> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await loadPersistedComposerState();
+    } catch (cause) {
+      // Opening or reading the file can fail transiently; a document that does
+      // not decode fails the same way every time.
+      const decodeFailure =
+        cause instanceof ComposerDraftPersistenceError && cause.operation === "decode";
+      if (decodeFailure || attempt >= HYDRATE_ATTEMPTS) throw cause;
+    }
   }
 }
 
@@ -1023,7 +1041,7 @@ export function ensureComposerDraftsLoaded(): void {
   if (loadPromise !== null) {
     return;
   }
-  const loading = loadPersistedComposerState().then((persisted) => {
+  const loading = loadPersistedComposerStateWithRetry().then((persisted) => {
     appAtomRegistry.set(composerCloudDraftsAtom, persisted.cloudDrafts);
     if (Object.keys(persisted.drafts).length > 0) {
       const current = appAtomRegistry.get(composerDraftsAtom);
@@ -2035,27 +2053,13 @@ const composerDraftSettingsAtom = Atom.family((draftKey: string) =>
 const EMPTY_DRAFT_SETTINGS_ATOM = Atom.make(EMPTY_DRAFT_SETTINGS);
 
 export function useComposerDraftSettings(draftKey: string | null): ComposerDraftSettings {
-  const settings = useAtomValue(
-    draftKey ? composerDraftSettingsAtom(draftKey) : EMPTY_DRAFT_SETTINGS_ATOM,
-  );
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return settings;
+  return useAtomValue(draftKey ? composerDraftSettingsAtom(draftKey) : EMPTY_DRAFT_SETTINGS_ATOM);
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft {
-  const draft = useAtomValue(draftKey ? composerDraftAtom(draftKey) : EMPTY_DRAFT_ATOM);
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return draft;
+  return useAtomValue(draftKey ? composerDraftAtom(draftKey) : EMPTY_DRAFT_ATOM);
 }
 
 export function useStickyComposerModelSelection(): ModelSelection | null {
-  const selection = useAtomValue(stickyComposerModelSelectionAtom);
-  useEffect(() => {
-    ensureComposerDraftsLoaded();
-  }, []);
-  return selection;
+  return useAtomValue(stickyComposerModelSelectionAtom);
 }

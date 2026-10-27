@@ -125,6 +125,8 @@ export function createComposerAttachmentUploadWorker(
     ReadonlyArray<ComposerAttachmentUploadRequest>
   > = composerAttachmentUploadRequestsAtom,
 ) {
+  // This is where draft hydration starts at app start; the draft read hooks
+  // rely on it and do not start it themselves.
   ensureComposerDraftsLoaded();
   const queue = createComposerAttachmentUploadQueue({
     onChange: (states) => appAtomRegistry.set(composerAttachmentUploadsAtom, states),
