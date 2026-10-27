@@ -1,5 +1,6 @@
 import { makeProviderSettingsSchema, SourceControlProviderKind } from "@t3tools/contracts";
 import {
+  buildCommitUrl,
   changeRequestUrlBelow,
   defineSourceControl,
   hostCredentialSettingsFields,
@@ -23,7 +24,6 @@ const CHANGE_REQUEST_REFERENCE =
 const CHANGE_REQUEST_PATH = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/|$)/u;
 const COMMIT_PATH =
   /^\/([^/]+\/[^/]+)\/(?:commit|pull\/[1-9]\d*\/commits)\/([0-9a-f]{40}|[0-9a-f]{64})\/?$/iu;
-const FULL_COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu;
 const ISSUE_PATH = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u;
 
 const KIND = SourceControlProviderKind.make("github");
@@ -82,24 +82,8 @@ export const definition = defineSourceControl({
       return null;
     }
   },
-  commitUrl: ({ host, repository, sha, remoteUrl, webUrl }) => {
-    if (!isRepositoryPath(repository) || !FULL_COMMIT_SHA.test(sha)) return null;
-    try {
-      const url = new URL(webUrl || remoteWebOrigin(host, remoteUrl));
-      if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-      const route = `commit/${sha.toLowerCase()}`;
-      url.pathname = webUrl
-        ? changeRequestUrlBelow(url.pathname, route)
-        : `/${repository}/${route}`;
-      url.username = "";
-      url.password = "";
-      url.search = "";
-      url.hash = "";
-      return url.toString();
-    } catch {
-      return null;
-    }
-  },
+  commitUrl: (input) =>
+    isRepositoryPath(input.repository) ? buildCommitUrl(input, "commit") : null,
   parseCommitUrl: (url) => {
     if ((url.protocol !== "https:" && url.protocol !== "http:") || !isGitHubHost(url.hostname))
       return null;

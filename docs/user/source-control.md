@@ -19,7 +19,7 @@ The selected commit shows its name and a clickable source link. Short descriptio
 text generation model and load as you browse the commit list. Hover over a cut-off description
 to read it in full.
 
-GitHub commit links open in the Diff pane when the current thread belongs to the same repository.
+Commit links from supported code hosts open in the Diff pane when the current thread belongs to the same repository.
 Use Command/Ctrl+Click to open the original link in your browser.
 
 ## Connect an account

@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   provider: "github",
   projectEnvironmentId: "local",
   worktreePath: null as string | null,
+  remoteUrl: undefined as string | undefined,
   previewCache: new Map<string, Promise<AtomCommandResult<ReviewDiffPreviewResult, unknown>>>(),
   preview:
     vi.fn<
@@ -102,7 +103,7 @@ function project() {
       provider: state.provider,
       canonicalKey: state.repositoryKey,
       displayName: state.repositoryKey.split("/").slice(1).join("/"),
-      locator: { remoteUrl: `https://${state.repositoryKey}.git` },
+      locator: { remoteUrl: state.remoteUrl ?? `https://${state.repositoryKey}.git` },
     },
   };
 }
@@ -156,6 +157,7 @@ beforeEach(() => {
   state.provider = "github";
   state.projectEnvironmentId = "local";
   state.worktreePath = null;
+  state.remoteUrl = undefined;
   state.previewCache.clear();
   state.preview.mockReset().mockResolvedValue(AsyncResult.success(previewResult()));
   state.openLink.mockReset().mockResolvedValue(undefined);
@@ -165,6 +167,48 @@ beforeEach(() => {
 });
 
 describe("commit link opening", () => {
+  it.each([
+    ["gitlab", "gitlab.com/group/sub/repo", "https://gitlab.com/group/sub/repo/-/commit/"],
+    ["forgejo", "forge.example/git/team/repo", "http://forge.example:3000/git/team/repo/commit/"],
+    ["forgejo", "gitea.github.example/team/repo", "https://gitea.github.example/team/repo/commit/"],
+    ["gitcafe", "git.cafe/team/repo", "https://git.cafe/team/repo/commit/"],
+    ["bitbucket", "bitbucket.org/team/repo", "https://bitbucket.org/team/repo/commits/"],
+    [
+      "azure-devops",
+      "dev.azure.com/org/project/_git/repo",
+      "https://dev.azure.com/org/project/_git/repo/commit/",
+    ],
+    [
+      "azure-devops",
+      "dev.azure.com/org/project/_git/repo",
+      "https://org.visualstudio.com/project/_git/repo/commit/",
+    ],
+  ])("opens a matching %s commit in the thread's Diff panel", async (provider, key, prefix) => {
+    state.provider = provider;
+    state.repositoryKey = key;
+    if (prefix.startsWith("http://")) state.remoteUrl = `${prefix.split("/commit/")[0]}.git`;
+    expect(useOpenChangeRequestLink(ref)(click(), `${prefix}${sha}`)).toBe(true);
+    await state.preview.mock.results[0]?.value;
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, ref)).toBe("diff");
+    expect(selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, ref)).toEqual({
+      kind: "commit",
+      sha,
+      baseRef: null,
+    });
+  });
+
+  it("leaves a different Forgejo HTTP port in the browser", () => {
+    state.provider = "forgejo";
+    state.repositoryKey = "forge.example/team/repo";
+    state.remoteUrl = "http://forge.example:3000/team/repo.git";
+    const event = click();
+    expect(
+      useOpenChangeRequestLink(ref)(event, `http://forge.example:4000/team/repo/commit/${sha}`),
+    ).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(state.preview).not.toHaveBeenCalled();
+  });
+
   it("opens a port-bearing GitHub Enterprise URL for its normalized repository key", async () => {
     state.repositoryKey = "github.acme.test/team/repo";
     expect(

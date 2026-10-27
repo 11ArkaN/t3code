@@ -268,10 +268,55 @@ describe("projectCommitUrl", () => {
     ).toBe(`https://github.com/acme/repo/commit/${sha}`);
   });
 
-  it("does not link other hosts", () => {
+  it.each([
+    ["gitlab", "gitlab.com/group/sub/repo", "-/commit"],
+    ["forgejo", "codeberg.org/team/repo", "commit"],
+    ["gitcafe", "git.cafe/team/repo", "commit"],
+    ["bitbucket", "bitbucket.org/team/repo", "commits"],
+    ["azure-devops", "dev.azure.com/org/project/_git/repo", "commit"],
+  ])("links a %s commit using the repository's URL shape", (provider, key, route) => {
+    const identity = repositoryIdentity(provider, key, `https://${key}.git`);
+    expect(projectCommitUrl(identity, sha)).toBe(`https://${key}/${route}/${sha}`);
+    expect(projectCommitUrl(identity, "short")).toBeNull();
+  });
+
+  it("keeps a resolved Forgejo web path and HTTP port without credentials", () => {
     expect(
       projectCommitUrl(
-        repositoryIdentity("gitlab", "gitlab.com/acme/repo", "https://gitlab.com/acme/repo.git"),
+        {
+          ...repositoryIdentity(
+            "forgejo",
+            "ssh.forge.example/team/repo",
+            "git@ssh.forge.example:team/repo.git",
+          ),
+          webUrl: "http://token@forge.example:3000/git/team/repo?old=1#old",
+        },
+        sha,
+      ),
+    ).toBe(`http://forge.example:3000/git/team/repo/commit/${sha}`);
+  });
+
+  it("builds Azure web links from an SSH repository key", () => {
+    expect(
+      projectCommitUrl(
+        repositoryIdentity(
+          "azure-devops",
+          "ssh.dev.azure.com/v3/org/project/repo",
+          "git@ssh.dev.azure.com:v3/org/project/repo",
+        ),
+        sha,
+      ),
+    ).toBe(`https://dev.azure.com/org/project/_git/repo/commit/${sha}`);
+  });
+
+  it("needs a known project provider", () => {
+    expect(
+      projectCommitUrl(
+        repositoryIdentity(
+          "unknown",
+          "unknown.test/team/repo",
+          "https://unknown.test/team/repo.git",
+        ),
         sha,
       ),
     ).toBeNull();

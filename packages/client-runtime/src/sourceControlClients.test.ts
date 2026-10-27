@@ -381,17 +381,70 @@ describe("sourceControlClients.parseCommitUrl", () => {
   it.each([
     "not a URL",
     `ftp://github.com/team/repo/commit/${sha}`,
-    `https://gitlab.com/team/repo/-/commit/${sha}`,
+    `https://gitlab.com/team/repo/-/commit/short`,
   ])("rejects %s", (url) => {
     expect(sourceControlClients.parseCommitUrl(url)).toBeNull();
   });
 
-  it("does not give other providers commit capabilities", () => {
-    for (const definition of sourceControlClients.definitions.filter(
-      (entry) => entry.kind !== "github",
-    )) {
-      expect(definition.parseCommitUrl).toBeUndefined();
-      expect(definition.commitUrl).toBeUndefined();
+  it.each([
+    ["gitlab", "https://gitlab.com/Group/Nested/Repo/-/commit/", "group/nested/repo"],
+    ["forgejo", "http://forge.example:3000/git/Team/Repo/commit/", "git/team/repo"],
+    ["gitcafe", "https://git.cafe/Team/Repo/commit/", "team/repo"],
+    ["bitbucket", "https://bitbucket.org/Team/Repo/commits/", "team/repo"],
+    [
+      "azure-devops",
+      "https://dev.azure.com/Org/Project/_git/Repo/commit/",
+      "org/project/_git/repo",
+    ],
+    ["azure-devops", "https://org.visualstudio.com/Project/_git/Repo/commit/", "project/_git/repo"],
+    [
+      "azure-devops",
+      "http://code.example:8080/Collection/Project/_git/Repo/commit/",
+      "collection/project/_git/repo",
+    ],
+  ])("reads %s commit links below %s", (kind, prefix, repository) => {
+    const url = new URL(`${prefix}${sha.toUpperCase()}/?view=split#diff`);
+    const parsed = sourceControlClients.parseCommitUrl(url.toString());
+    expect(parsed?.definition.kind).toBe(kind);
+    expect(parsed?.link).toEqual({
+      host: url.hostname,
+      repository,
+      sha,
+      ...(url.port ? { authority: url.host } : {}),
+    });
+    for (const suffix of ["short", `${sha}f`, `${sha}/files`]) {
+      expect(
+        sourceControlClients.get(kind).parseCommitUrl?.(new URL(`${prefix}${suffix}`)),
+      ).toBeNull();
     }
+  });
+
+  it("uses the known project provider for ambiguous self-hosted routes", () => {
+    const url = `https://gitea.github.example/team/repo/commit/${sha}`;
+    expect(
+      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("forgejo"))
+        ?.definition.kind,
+    ).toBe("forgejo");
+    expect(
+      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("gitlab")),
+    ).toBeNull();
+    expect(
+      sourceControlClients.parseCommitUrl(
+        `https://code.example/group/repo/-/commit/${"B".repeat(64)}`,
+      )?.link.sha,
+    ).toBe("b".repeat(64));
+  });
+
+  it("keeps host-specific routes on their own hosts", () => {
+    expect(
+      sourceControlClients
+        .get("gitcafe")
+        .parseCommitUrl?.(new URL(`https://other.test/team/repo/commit/${sha}`)),
+    ).toBeNull();
+    expect(
+      sourceControlClients
+        .get("bitbucket")
+        .parseCommitUrl?.(new URL(`https://other.test/team/repo/commits/${sha}`)),
+    ).toBeNull();
   });
 });

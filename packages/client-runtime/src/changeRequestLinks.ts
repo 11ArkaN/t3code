@@ -182,7 +182,7 @@ export function projectCommitUrl(
   return (
     sourceControlClients.get(identity.provider).commitUrl?.({
       host,
-      repository: sourceControlClients.repositorySelector(identity) ?? path.join("/"),
+      repository: path.join("/"),
       sha,
       remoteUrl: identity.locator.remoteUrl.trim(),
       ...(identity.webUrl !== undefined ? { webUrl: identity.webUrl } : {}),

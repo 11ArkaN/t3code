@@ -77,9 +77,7 @@ export function useOpenChangeRequestLink(
     const serverConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
-    const commit = sourceControlClients.parseCommitUrl(targetUrl)?.link;
-    const commitThread =
-      commit !== undefined && resolvedThreadRef ? readThreadShell(resolvedThreadRef) : null;
+    const commitThread = resolvedThreadRef ? readThreadShell(resolvedThreadRef) : null;
     const commitProject =
       commitThread && resolvedThreadRef
         ? readProject({
@@ -88,14 +86,17 @@ export function useOpenChangeRequestLink(
           })
         : null;
     const identity = commitProject?.repositoryIdentity;
+    const parsedCommit = sourceControlClients.parseCommitUrl(targetUrl, identity?.provider);
     if (
-      commit !== undefined &&
+      parsedCommit !== null &&
       commitThread &&
       resolvedThreadRef &&
       commitProject?.environmentId === resolvedThreadRef.environmentId &&
-      identity?.provider === "github" &&
-      identity.canonicalKey.toLowerCase() === `${commit.host}/${commit.repository}`
+      identity &&
+      identity.provider === parsedCommit.definition.kind &&
+      parsedCommit.definition.isChangeRequestInRepository(identity, parsedCommit.link)
     ) {
+      const commit = parsedCommit.link;
       event.preventDefault();
       event.stopPropagation();
       const userActionRevision = useRightPanelStore.getState().markUserAction(resolvedThreadRef);
