@@ -819,6 +819,65 @@ describe("DesktopWindow", () => {
     }),
   );
 
+  it.effect("persists bounds on the display a maximized window was moved to", () =>
+    Effect.gen(function* () {
+      const displayOne = { x: 0, y: 0, width: 1920, height: 1080 };
+      const displayTwo = { x: 1920, y: 0, width: 1920, height: 1080 };
+      const getAllDisplays = vi.mocked(Electron.screen.getAllDisplays);
+      getAllDisplays.mockReturnValue([
+        { bounds: displayOne, workArea: displayOne },
+        { bounds: displayTwo, workArea: displayTwo },
+      ] as unknown as Electron.Display[]);
+      const fakeWindow = makeFakeBrowserWindow();
+      fakeWindow.isMaximized.mockReturnValue(true);
+      fakeWindow.getBounds.mockReturnValue(displayTwo);
+      fakeWindow.getNormalBounds.mockReturnValue({ x: 220, y: 140, width: 1380, height: 920 });
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+      const mainWindowMaximizedUpdates: boolean[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        mainWindowBoundsUpdates,
+        mainWindowMaximizedUpdates,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        const move = fakeWindow.windowListeners.get("move");
+        if (!move) {
+          return yield* Effect.die("window move listener was not registered");
+        }
+        move();
+        yield* TestClock.adjust(500);
+        yield* Effect.promise(() => Promise.resolve());
+
+        const persisted = mainWindowBoundsUpdates.at(-1);
+        assert.isDefined(persisted, "maximized window bounds were not persisted");
+        const persistedDisplay = [displayOne, displayTwo].findIndex(
+          (display) =>
+            persisted.x >= display.x &&
+            persisted.y >= display.y &&
+            persisted.x + persisted.width <= display.x + display.width &&
+            persisted.y + persisted.height <= display.y + display.height,
+        );
+        assert.equal(
+          persistedDisplay,
+          1,
+          `window maximized on display 2 persisted bounds ${JSON.stringify(persisted)}, which restore on display ${persistedDisplay + 1}`,
+        );
+        assert.deepEqual(mainWindowMaximizedUpdates, [true]);
+      }).pipe(
+        Effect.provide(layer),
+        Effect.ensuring(Effect.sync(() => getAllDisplays.mockReset())),
+      );
+    }),
+  );
+
   it.effect("preserves unrestorable bounds until the user changes the window", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
