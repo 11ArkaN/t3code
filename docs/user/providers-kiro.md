@@ -5,15 +5,17 @@ custom agents, steering, hooks, and MCP configuration.
 
 ## Set Up Kiro
 
-1. Install the Kiro CLI on the machine running the T3 Code server
-   (`curl -fsSL https://cli.kiro.dev/install | bash`).
+1. Install the Kiro CLI on the machine running the T3 Code server. On macOS or Linux, run
+   `curl -fsSL https://cli.kiro.dev/install | bash`. On Windows 11, run
+   `irm 'https://cli.kiro.dev/install.ps1' | iex` in PowerShell. Kiro's
+   [installation guide](https://kiro.dev/docs/getting-started/installation/) lists other options.
 2. Run `kiro-cli login` once in a terminal. Kiro Pro and higher plans can instead set an API key as
    `KIRO_API_KEY` in the Kiro provider's environment variables.
 3. Open **Settings → Providers**, enable Kiro, and refresh it.
 
-If `kiro-cli` is not on the server's `PATH`, set its **Binary path**. The installer usually puts it
-in `~/.local/bin`. T3 Code starts Kiro's CLI V3 engine, so a Kiro CLI that cannot run V3 will not
-start.
+If `kiro-cli` is not on the server's `PATH`, set its **Binary path**. On macOS and Linux, the
+installer usually puts it in `~/.local/bin`. T3 Code starts Kiro's CLI V3 engine, so a Kiro CLI
+that cannot run V3 will not start.
 
 ## Models
 
