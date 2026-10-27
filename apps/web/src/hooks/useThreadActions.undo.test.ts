@@ -147,7 +147,10 @@ describe("unpin Undo", () => {
     threadShell.pinnedAt = "2026-01-01T00:00:00.000Z";
     threadShell.snoozedUntil = "2030-01-01T09:00:00.000Z";
     await useThreadActions().unpinThread(target);
+    vi.mocked(announce).mockClear();
     await currentUndo()();
+    const spoken = vi.mocked(announce).mock.calls.map(([message]) => message);
+    expect(spoken).not.toContainEqual(expect.stringMatching(/\bpinned\b/i));
     expect(commands.pin).toHaveBeenCalledExactlyOnceWith({
       environmentId: target.environmentId,
       input: { threadId: target.threadId, orderKey: "a0" },

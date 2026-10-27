@@ -1,3 +1,4 @@
+import { Cause } from "effect";
 import { AsyncResult } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -96,5 +97,17 @@ describe("thread undo notice", () => {
     await notice().undo();
     const spoken = vi.mocked(announce).mock.calls.map(([message]) => message);
     expect(spoken).toContainEqual(expect.stringMatching(/unpin/i));
+  });
+
+  it("does not announce an undo that failed", async () => {
+    const { options, add } = setup();
+    showThreadUndoNotice({
+      ...options,
+      undo: async () => AsyncResult.failure(Cause.fail(new Error("offline"))),
+    });
+    vi.mocked(announce).mockClear();
+    await notice().undo();
+    expect(add).toHaveBeenCalledOnce();
+    expect(announce).not.toHaveBeenCalled();
   });
 });
