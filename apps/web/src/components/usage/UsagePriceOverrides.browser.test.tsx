@@ -3,13 +3,13 @@ import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 
-const ENVIRONMENT_ID = vi.hoisted(() => "fs-11");
+const ENVIRONMENT_ID = vi.hoisted(() => "workstation");
 
 vi.mock(import("~/state/presentation"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const actual = await original();
   const presentation = {
-    entry: { target: { label: "fs-11" } },
+    entry: { target: { label: "workstation" } },
     connection: { phase: "connected" },
     serverConfig: {
       environment: { capabilities: { usagePriceOverrides: true, usageModelAliases: true } },
@@ -77,7 +77,9 @@ describe("UsagePriceOverrides", () => {
     await expect.element(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
 
     await userEvent.type(page.getByLabelText("Input price for glm-5.3"), "2");
-    await expect.element(page.getByRole("alert")).toHaveTextContent("Output is required on fs-11.");
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("Output is required on workstation.");
     await expect.element(page.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
