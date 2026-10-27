@@ -1931,6 +1931,14 @@ export function findNewTaskDraftKeys(
     .map(([key]) => key);
 }
 
+export function findResumableNewTaskDraftKey(
+  _drafts: Readonly<Record<string, ComposerDraft>>,
+  _project: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId },
+  _exclude: ReadonlySet<string>,
+): string | null {
+  return null;
+}
+
 export async function clearComposerDraftsEnvironment(environmentId: EnvironmentId): Promise<void> {
   ensureComposerDraftsLoaded();
   if (loadPromise !== null) {
