@@ -6810,11 +6810,13 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               sessionApprovals.delete(nativeThreadId);
               // Codex can report cleaned commands before it answers the clean; they must not wake the agent.
-              for (const context of (yield* Ref.get(settledTurns)).values()) {
-                if (context.providerThread.nativeThreadRef?.nativeId === nativeThreadId) {
-                  context.unloading = true;
+              yield* Effect.gen(function* () {
+                for (const context of (yield* Ref.get(settledTurns)).values()) {
+                  if (context.providerThread.nativeThreadRef?.nativeId === nativeThreadId) {
+                    context.unloading = true;
+                  }
                 }
-              }
+              }).pipe(turnTerminalizationPermit.withPermits(1));
               yield* client.raw
                 .request("thread/backgroundTerminals/clean", { threadId: nativeThreadId })
                 .pipe(
