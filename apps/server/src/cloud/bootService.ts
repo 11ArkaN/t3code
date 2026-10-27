@@ -1,6 +1,4 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's copy cannot ask for a clone, which costs no disk on APFS.
-import * as NodeFSP from "node:fs/promises";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -615,6 +613,22 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     unitPath,
   };
 
+  // cp -c clones on APFS and copies all bytes where cloning is unsupported; fs.copy never clones.
+  const copyLauncher = (source: string, destination: string) =>
+    runner
+      .run({
+        command: "cp",
+        args: ["-c", "-pR", source, destination],
+        timeout: Duration.minutes(10),
+      })
+      .pipe(
+        Effect.filterOrFail((result) => result.code === 0),
+        Effect.catch(() =>
+          fs
+            .remove(destination, { recursive: true, force: true })
+            .pipe(Effect.andThen(fs.copy(source, destination))),
+        ),
+      );
   // A running launcher keeps executing its copy, and writing into a running signed
   // Mach-O can kill it, so a new copy is staged beside it and swapped in by rename.
   const publishLauncher = Effect.fn("cloud.boot_service.publish_launcher")(function* (
@@ -624,24 +638,25 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
     const previous = `${directory}.prev`;
     yield* fs.remove(staging, { recursive: true, force: true });
     yield* fs.remove(previous, { recursive: true, force: true });
-    yield* Effect.tryPromise({
-      try: () =>
-        NodeFSP.cp(runtimePaths.versionDir, staging, {
-          recursive: true,
-          verbatimSymlinks: true,
-          mode: NodeFSP.constants.COPYFILE_FICLONE,
-        }),
-      catch: (cause) => new BootServiceInstallError({ cause }),
-    });
-    const replacing = yield* fs.exists(directory);
-    if (replacing) yield* fs.rename(directory, previous);
-    yield* fs
-      .rename(staging, directory)
-      .pipe(
-        Effect.tapError(() =>
-          replacing ? fs.rename(previous, directory).pipe(Effect.ignore) : Effect.void,
-        ),
-      );
+    yield* copyLauncher(runtimePaths.versionDir, staging).pipe(
+      Effect.onError(() =>
+        fs.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore),
+      ),
+    );
+    // Interrupted between the renames, the unit would point at a missing program.
+    yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        const replacing = yield* fs.exists(directory);
+        if (replacing) yield* fs.rename(directory, previous);
+        yield* fs
+          .rename(staging, directory)
+          .pipe(
+            Effect.tapError(() =>
+              replacing ? fs.rename(previous, directory).pipe(Effect.ignore) : Effect.void,
+            ),
+          );
+      }),
+    );
     yield* fs.remove(previous, { recursive: true, force: true }).pipe(Effect.ignore);
   });
   const removeLauncher = (directory: string) =>

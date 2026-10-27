@@ -3,7 +3,9 @@ import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Duration from "effect/Duration";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -79,7 +81,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   const statePath = path.join(baseDir, "runtime", "service-state.json");
   const runtime = pinnedRuntimePaths(path, baseDir, "1.2.3", platform);
   yield* fs.makeDirectory(path.dirname(runtime.entryPath), { recursive: true });
-  yield* fs.writeFileString(runtime.entryPath, "#!/bin/sh\n");
+  yield* fs.writeFileString(runtime.entryPath, "#!/bin/sh\n", { mode: 0o755 });
   yield* fs.writeFileString(runtime.sentinelPath, "1.2.3\n");
 
   const commands: string[] = [];
@@ -106,6 +108,13 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       invocations.push(input);
       timeouts.set(command, input.timeout);
       const failed = command === control.failCommand;
+      // GNU cp has no -c; leave a partial copy so the fallback has to clear it.
+      const copyRejected = input.command === "cp" && input.args[0] === "-c";
+      if (copyRejected) {
+        const destination = input.args.at(-1) ?? "";
+        yield* fs.makeDirectory(destination, { recursive: true }).pipe(Effect.orDie);
+        yield* fs.writeFileString(path.join(destination, "t3"), "partial").pipe(Effect.orDie);
+      }
       if (!failed && command === "loginctl enable-linger --no-ask-password 501")
         control.linger = "yes";
       if (!failed && command === "systemctl --user enable t3code.service") control.enabled = true;
@@ -133,6 +142,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
         stderr: "",
         code: ChildProcessSpawner.ExitCode(
           failed ||
+            copyRejected ||
             (input.args[1] === "is-active" && !control.active) ||
             (input.args[1] === "is-enabled" && !control.enabled)
             ? 1
@@ -155,7 +165,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     Effect.gen(function* () {
       const paths = pinnedRuntimePaths(path, serviceBaseDir, cliVersion, platform);
       yield* fs.makeDirectory(path.dirname(paths.entryPath), { recursive: true });
-      yield* fs.writeFileString(paths.entryPath, "#!/bin/sh\n");
+      yield* fs.writeFileString(paths.entryPath, "#!/bin/sh\n", { mode: 0o755 });
       yield* fs.writeFileString(paths.sentinelPath, `${cliVersion}\n`);
       return yield* BootService.make({
         baseDir: serviceBaseDir,
@@ -772,6 +782,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
         `    <string>${path.join(launcherDir, "t3")}</string>\n    <string>__service-launcher</string>`,
       );
+      expect(commands).toContain(
+        `cp -c -pR ${path.join(baseDir, "runtime", "versions", "1.2.3")} ${launcherDir}.next`,
+      );
       expect(yield* service.status).toMatchObject({
         current: true,
         installedVersion: "1.2.3",
@@ -843,6 +856,58 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       );
       expect(yield* fs.readFileString(path.join(launcherDir, ".install-complete"))).toBe("1.2.4\n");
       expect(yield* fs.readFileString(path.join(launcherDir, "t3"))).toBe("#!/bin/sh\n# 1.2.4\n");
+
+      const failingCopy = yield* makeService(undefined, "1.2.6").pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          copy: (from, to) =>
+            fs
+              .makeDirectory(to)
+              .pipe(Effect.andThen(fs.copy(path.join(from, "missing"), path.join(to, "missing")))),
+        }),
+      );
+      expect((yield* Effect.flip(failingCopy.install({ start: false })))._tag).toBe(
+        "BootServiceInstallError",
+      );
+      expect(yield* fs.exists(`${launcherDir}.next`)).toBe(false);
+      expect(yield* fs.readFileString(path.join(launcherDir, "t3"))).toBe("#!/bin/sh\n# 1.2.4\n");
+    }),
+  );
+
+  it.effect("keeps a launch agent program in place when an update is interrupted mid-swap", () =>
+    Effect.gen(function* () {
+      const { service, makeService, fs, baseDir } = yield* makeHarness("darwin");
+      const path = yield* Path.Path;
+      const launcherDir = path.join(baseDir, "runtime", "launcher");
+      const plan = yield* service.install();
+      const movedAside = yield* Deferred.make<void>();
+      const proceed = yield* Deferred.make<void>();
+      const newer = yield* makeService(undefined, "1.2.4").pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          rename: (from, to) =>
+            from === launcherDir
+              ? fs
+                  .rename(from, to)
+                  .pipe(
+                    Effect.andThen(Deferred.succeed(movedAside, undefined)),
+                    Effect.andThen(Deferred.await(proceed)),
+                  )
+              : fs.rename(from, to),
+        }),
+      );
+
+      const installing = yield* Effect.forkChild(newer.install({ start: false }));
+      yield* Deferred.await(movedAside);
+      const interrupting = yield* Effect.forkChild(Fiber.interrupt(installing), {
+        startImmediately: true,
+      });
+      yield* Deferred.succeed(proceed, undefined);
+      yield* Fiber.join(interrupting);
+
+      const program = BootService.bootServiceProgramOf(yield* fs.readFileString(plan.unitPath));
+      expect(program).toBe(path.join(launcherDir, "t3"));
+      expect((yield* fs.stat(program ?? "")).mode & 0o111).toBe(0o111);
     }),
   );
 
