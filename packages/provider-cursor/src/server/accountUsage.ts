@@ -13,6 +13,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import type { CursorCredentialSource } from "./accountCache.ts";
 import * as CursorKeychain from "./CursorKeychain.ts";
 
 function object(value: unknown): Record<string, unknown> {
@@ -56,7 +57,7 @@ const billedEventIdentity = (...fields: readonly unknown[]) => JSON.stringify(fi
 
 const textEncoder = new TextEncoder();
 
-const accountHash = Effect.fn("accountHash")(function* (value: string) {
+export const accountHash = Effect.fn("accountHash")(function* (value: string) {
   const crypto = yield* Crypto.Crypto;
   return Hex.encode(yield* crypto.digest("SHA-256", textEncoder.encode(value)));
 });
@@ -86,11 +87,46 @@ function boundaryOverlap(previous: readonly string[], current: readonly string[]
 
 const DASHBOARD_USAGE_URL = "https://cursor.com/api/dashboard/get-filtered-usage-events";
 
-/** The session cookie must never follow a redirect off cursor.com. */
+/** Credentials must never follow a redirect off the host they were issued for. */
 const NO_REDIRECT: RequestInit = { redirect: "error" };
 
+const API_KEY_REJECTED = "Cursor rejected the API key. Check it or sign in to Cursor again.";
+
+/** The cursor.com dashboard rejects API keys; they exchange for a token the backend's RPC accepts. */
+const exchangeApiKey = Effect.fn("CursorAccountUsage.exchangeApiKey")(function* (
+  backendUrl: string,
+  apiKey: string,
+) {
+  const response = yield* (yield* HttpClient.HttpClient)
+    .execute(
+      HttpClientRequest.post(`${backendUrl}/auth/exchange_user_api_key`).pipe(
+        HttpClientRequest.bearerToken(apiKey),
+        HttpClientRequest.bodyText("{}", "application/json"),
+      ),
+    )
+    .pipe(
+      Effect.provideService(FetchHttpClient.RequestInit, NO_REDIRECT),
+      Effect.mapError(
+        () => new CursorAccountUsageInvalidError({ reason: "API key exchange failed" }),
+      ),
+    );
+  if (response.status === 401 || response.status === 403) return null;
+  if (response.status < 200 || response.status >= 300)
+    return yield* invalid("API key exchange failed");
+  const accessToken = object(
+    yield* response.json.pipe(
+      Effect.mapError(
+        () => new CursorAccountUsageInvalidError({ reason: "Invalid API key exchange" }),
+      ),
+    ),
+  ).accessToken;
+  if (typeof accessToken !== "string" || !accessToken)
+    return yield* invalid("Invalid API key exchange");
+  return accessToken;
+});
+
 export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(function* (
-  credentialSource: string | { readonly kind: "keychain" },
+  credentialSource: CursorCredentialSource,
   sinceMs: number,
   endDate: number,
   keychainToken: Effect.Effect<
@@ -120,7 +156,9 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
           Effect.flatMap(decodeJson),
           Effect.map((credentials) => object(credentials).accessToken),
         )
-      : keychainToken,
+      : credentialSource.kind === "keychain"
+        ? keychainToken
+        : Effect.succeed(credentialSource.apiKey),
   );
   if (Result.isFailure(credential)) {
     const cause = credential.failure;
@@ -141,8 +179,8 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
             : "Cursor Keychain credentials could not be read.",
     };
   }
-  const accessToken = credential.success;
-  if (typeof accessToken !== "string" || !accessToken) {
+  const credentialToken = credential.success;
+  if (typeof credentialToken !== "string" || !credentialToken) {
     return {
       accountKey: null,
       records: [],
@@ -153,8 +191,24 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
           : "Cursor account history needs a macOS Keychain CLI login on this server.",
     };
   }
+  const apiKeySource =
+    typeof credentialSource === "object" && credentialSource.kind === "apiKey"
+      ? credentialSource
+      : null;
   let accountKey: string | null = null;
+  const rejected = (): CursorAccountUsageReadResult => ({
+    accountKey,
+    records: [],
+    missing: false,
+    error:
+      apiKeySource === null ? "Sign in to Cursor again to read account usage." : API_KEY_REJECTED,
+  });
   const read = Effect.gen(function* () {
+    const accessToken =
+      apiKeySource === null
+        ? credentialToken
+        : yield* exchangeApiKey(apiKeySource.backendUrl, apiKeySource.apiKey);
+    if (accessToken === null) return rejected();
     const payload = Base64Url.decodeString(accessToken.split(".")[1] ?? "");
     if (Result.isFailure(payload)) return yield* invalid("Invalid authentication");
     const subject = object(
@@ -168,6 +222,20 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
     accountKey = yield* accountHash(subject);
     if (!Number.isFinite(sinceMs) || !Number.isFinite(endDate) || sinceMs < 0 || sinceMs > endDate)
       return yield* invalid("Invalid date window");
+    const usageRequest =
+      apiKeySource === null
+        ? HttpClientRequest.post(DASHBOARD_USAGE_URL).pipe(
+            HttpClientRequest.setHeaders({
+              Origin: "https://cursor.com",
+              Cookie: `WorkosCursorSessionToken=${encodeURIComponent(`${userId}::${accessToken}`)}`,
+            }),
+          )
+        : HttpClientRequest.post(
+            `${apiKeySource.backendUrl}/aiserver.v1.DashboardService/GetFilteredUsageEvents`,
+          ).pipe(
+            HttpClientRequest.bearerToken(accessToken),
+            HttpClientRequest.setHeaders({ "connect-protocol-version": "1" }),
+          );
     const records: UsageRecord[] = [];
     const occurrences = new Map<string, number>();
     const pages: unknown[][] = [];
@@ -183,11 +251,7 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
         }
         const response = yield* httpClient
           .execute(
-            HttpClientRequest.post(DASHBOARD_USAGE_URL).pipe(
-              HttpClientRequest.setHeaders({
-                Origin: "https://cursor.com",
-                Cookie: `WorkosCursorSessionToken=${encodeURIComponent(`${userId}::${accessToken}`)}`,
-              }),
+            usageRequest.pipe(
               HttpClientRequest.bodyText(
                 pageRequestBody(page, pageSize, sinceMs, endDate),
                 "application/json",
@@ -200,14 +264,7 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
               () => new CursorAccountUsageInvalidError({ reason: "Account usage request failed" }),
             ),
           );
-        if (response.status === 401 || response.status === 403) {
-          return {
-            accountKey,
-            records: [],
-            missing: false,
-            error: "Sign in to Cursor again to read account usage.",
-          } satisfies CursorAccountUsageReadResult;
-        }
+        if (response.status === 401 || response.status === 403) return rejected();
         if (response.status < 200 || response.status >= 300)
           return yield* invalid("Account usage request failed");
         const parsed: unknown = yield* response.json.pipe(

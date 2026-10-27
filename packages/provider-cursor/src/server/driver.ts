@@ -1,4 +1,5 @@
 import {
+  defaultInstanceIdForDriver,
   ProviderDriverKind,
   ProviderSetupError,
   type ServerProviderModel,
@@ -74,10 +75,19 @@ export const CursorDriver: ProviderDriver<
   usage: {
     kind: "scan",
     provider: "cursor",
-    scan: ({ settings, windowStartMs, retentionCutoffMs, awaitRefresh }) =>
+    scan: ({ instances, settings, windowStartMs, retentionCutoffMs, awaitRefresh }) =>
       CursorUsageAccounts.CursorUsageAccounts.pipe(
         Effect.flatMap((accounts) =>
           accounts.scan({
+            instances: instances.map((instance) => ({
+              instanceId: instance.instanceId,
+              name:
+                settings.providerInstances[instance.instanceId]?.displayName ??
+                (instance.instanceId === defaultInstanceIdForDriver(DRIVER_KIND)
+                  ? CursorDriver.metadata.displayName
+                  : instance.instanceId),
+              environment: instance.environment,
+            })),
             keychainUsageEnabled: settings.cursorKeychainUsageEnabled,
             windowStartMs,
             retentionCutoffMs,

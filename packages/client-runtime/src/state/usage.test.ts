@@ -255,6 +255,12 @@ describe("needsCursorKeychainAccess", () => {
       ],
     };
     expect(cursorKeychainAccessEnvironments([off, off])).toEqual([off, off]);
+    // An instance's own account does not stand in for the host login that still needs access.
+    const instanceAccount = {
+      summary: { ...account, sources: [...cursorPrompt.sources, ...account.sources] },
+      needsCursorKeychainAccess: true,
+    };
+    expect(cursorKeychainAccessEnvironments([instanceAccount])).toEqual([instanceAccount]);
     expect(
       cursorKeychainAccessEnvironments([
         off,

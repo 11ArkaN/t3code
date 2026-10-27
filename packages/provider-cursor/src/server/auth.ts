@@ -50,6 +50,33 @@ export interface CursorAuthOptions {
   readonly login?: (options: SdkLoginOptions) => Promise<SdkLoginResult>;
 }
 
+/** The key an instance bills: its configured CURSOR_API_KEY, else its T3 sign-in. */
+export const readCursorBillingKey = Effect.fn("readCursorBillingKey")(function* (
+  instanceId: ProviderInstanceId,
+  configuredKey: string | undefined,
+  store: SdkCredentialStore,
+) {
+  const apiKey = configuredKey?.trim();
+  if (apiKey) return { apiKey, backendUrl: undefined, expired: false };
+  const credentials = yield* Effect.tryPromise({
+    try: () => store.load(),
+    catch: (cause) =>
+      new ProviderSetupError({
+        instanceId,
+        operation: "credentials",
+        detail: "Could not read the Cursor sign-in. Try signing in again.",
+        cause,
+      }),
+  });
+  if (!credentials) return undefined;
+  const now = yield* Clock.currentTimeMillis;
+  return {
+    apiKey: credentials.apiKey,
+    backendUrl: credentials.backendUrl,
+    expired: credentials.apiKeyExpiresAtMs !== undefined && credentials.apiKeyExpiresAtMs <= now,
+  };
+});
+
 export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: CursorAuthOptions) {
   const scope = yield* Scope.Scope;
   const crypto = yield* Crypto.Crypto;
@@ -74,24 +101,9 @@ export const makeCursorAuth = Effect.fn("makeCursorAuth")(function* (options: Cu
       state: { ...current.state, ...patch },
     }));
 
-  const readApiKey = Effect.gen(function* () {
-    if (configuredKey) return configuredKey;
-    const credentials = yield* Effect.tryPromise({
-      try: () => options.store.load(),
-      catch: (cause) =>
-        new ProviderSetupError({
-          instanceId: options.instanceId,
-          operation: "credentials",
-          detail: "Could not read the Cursor sign-in. Try signing in again.",
-          cause,
-        }),
-    });
-    const now = yield* Clock.currentTimeMillis;
-    return credentials &&
-      (credentials.apiKeyExpiresAtMs === undefined || credentials.apiKeyExpiresAtMs > now)
-      ? credentials.apiKey
-      : undefined;
-  });
+  const readApiKey = readCursorBillingKey(options.instanceId, configuredKey, options.store).pipe(
+    Effect.map((key) => (key === undefined || key.expired ? undefined : key.apiKey)),
+  );
 
   const requireApiKey = Effect.gen(function* () {
     if (operation !== "idle") {

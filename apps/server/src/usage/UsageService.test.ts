@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - the suite seeds and grows real
 // transcript trees on disk, outside the service's Effect FileSystem.
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -29,6 +30,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Scheduler from "effect/Scheduler";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
@@ -142,6 +144,7 @@ const layerService = (input: {
   ) => Effect.Effect<Response, HttpClientError.HttpClientError>;
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
+  readonly secrets?: Readonly<Record<string, string>>;
 }) =>
   layerCursorUsageAccounts(
     CursorAccountReader.layer.pipe(Layer.provide(CursorKeychain.layer)),
@@ -151,7 +154,16 @@ const layerService = (input: {
     Layer.provideMerge(ProviderHostLive.layer),
     Layer.provideMerge(CodexUsageHistory.layer.pipe(Layer.provideMerge(Sqlite.layerMemory))),
     Layer.provideMerge(Layer.mock(BackgroundPolicy.BackgroundPolicy)({})),
-    Layer.provideMerge(Layer.mock(ServerSecretStore.ServerSecretStore)({})),
+    Layer.provideMerge(
+      Layer.mock(ServerSecretStore.ServerSecretStore)({
+        get: (name) =>
+          Effect.succeed(
+            Option.map(Option.fromNullishOr(input.secrets?.[name]), (value) =>
+              new TextEncoder().encode(value),
+            ),
+          ),
+      }),
+    ),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), NodePath.join(input.home, input.prefix)),
     ),
@@ -278,22 +290,25 @@ function cursorSource(summary: { readonly sources: readonly UsageSource[] }) {
   return summary.sources.find((source) => source.fingerprint.provider === "cursor");
 }
 
+const cursorToken = (sub: string) =>
+  `header.${Buffer.from(encodeUnknownJsonString({ sub, exp: 4102444800 })).toString("base64url")}.signature`;
+
 /** Cursor's API: an API key exchanges for a bearer token that reads only its owner's events. */
-const cursorApi = (accounts: Readonly<Record<string, { readonly outputTokens: number }>>) => {
-  const accessToken = (apiKey: string) =>
-    `header.${Buffer.from(encodeUnknownJsonString({ sub: `auth0|user_${apiKey}`, type: "api_key_token", exp: 4102444800 })).toString("base64url")}.signature`;
+const cursorApi = (
+  accounts: Readonly<Record<string, { readonly outputTokens: number }>>,
+  backendUrl = "https://api2.cursor.sh",
+) => {
+  const accessToken = (apiKey: string) => cursorToken(`auth0|user_${apiKey}`);
   return (request: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       const authorization = request.headers["authorization"];
-      if (request.url === "https://api2.cursor.sh/auth/exchange_user_api_key") {
+      if (request.url === `${backendUrl}/auth/exchange_user_api_key`) {
         const apiKey = Object.keys(accounts).find((key) => authorization === `Bearer ${key}`);
         return apiKey === undefined
           ? Response.json({ error: "invalid api key" }, { status: 401 })
           : Response.json({ accessToken: accessToken(apiKey), refreshToken: `refresh-${apiKey}` });
       }
-      if (
-        request.url === "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents"
-      ) {
+      if (request.url === `${backendUrl}/aiserver.v1.DashboardService/GetFilteredUsageEvents`) {
         const account = Object.entries(accounts).find(
           ([key]) => authorization === `Bearer ${accessToken(key)}`,
         );
@@ -1350,16 +1365,19 @@ describe("UsageService", () => {
           platform: "darwin" as const,
           environment: { AGENT_CLI_CREDENTIAL_STORE: "memory" },
           authPath: [".cursor", "auth.json"],
+          message: "Cursor CLI login",
         },
         {
           platform: "linux" as const,
           environment: { AGENT_CLI_CREDENTIAL_STORE: "memory" },
           authPath: ["config", "cursor", "auth.json"],
+          message: "Cursor CLI login",
         },
         {
           platform: "linux" as const,
           environment: { CURSOR_API_KEY: "different-account" },
           authPath: ["config", "cursor", "auth.json"],
+          message: "Cursor: Cursor account usage could not be read.",
         },
       ].entries()) {
         const authPath = NodePath.join(home, ...testCase.authPath);
@@ -1381,10 +1399,10 @@ describe("UsageService", () => {
             }),
           ),
         );
-        const summary = yield* service.readSummary(WINDOW);
+        const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
         const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
         assert.strictEqual(cursor?.status, "missing");
-        assert.include(cursor?.message ?? "", "Cursor CLI login");
+        assert.include(cursor?.message ?? "", testCase.message);
         assert.isFalse(summary.buckets.some((bucket) => bucket.provider === "cursor"));
       }
     }).pipe(Effect.scoped),
@@ -1439,6 +1457,217 @@ describe("UsageService", () => {
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 
+  it.live("counts a CLI login and an instance key on the same Cursor account once", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const subject = "auth0|user_key-b";
+      const cliEvents = (outputTokens: number) =>
+        Response.json({
+          totalUsageEventsCount: 1,
+          usageEventsDisplay: [
+            {
+              timestamp: String(CURSOR_NOW - 3 * HOUR_MS),
+              model: "claude-fable-5",
+              tokenUsage: { inputTokens: 10, outputTokens },
+            },
+          ],
+        });
+      const instanceKey = {
+        [ProviderInstanceId.make("cursor-b")]: {
+          driver: ProviderDriverKind.make("cursor"),
+          environment: [{ name: "CURSOR_API_KEY", value: "key-b", sensitive: true }],
+        },
+      };
+      const api = cursorApi({ "key-b": { outputTokens: 7 } });
+      const cases = [
+        { cliLogin: true, instances: {} },
+        { cliLogin: false, instances: instanceKey },
+        { cliLogin: true, instances: instanceKey },
+      ];
+      const results = yield* Effect.forEach(cases, (testCase, index) =>
+        Effect.gen(function* () {
+          const caseHome = NodePath.join(home, `same-account-${index}`);
+          if (testCase.cliLogin) {
+            yield* Effect.promise(async () => {
+              const authPath = NodePath.join(caseHome, "config", "cursor", "auth.json");
+              await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+              await NodeFSP.writeFile(
+                authPath,
+                encodeUnknownJsonString({ accessToken: cursorToken(subject) }),
+              );
+            });
+          }
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: "usage-service-cursor-same-account",
+                home: caseHome,
+                settings: {
+                  providerInstances: { ...settings.providerInstances, ...testCase.instances },
+                },
+                ratesResponse: (request) =>
+                  request.url === "https://cursor.com/api/dashboard/get-filtered-usage-events"
+                    ? Effect.succeed(cliEvents(7))
+                    : api(request),
+              }),
+            ),
+          );
+          const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+          return {
+            sources: summary.sources
+              .filter((source) => source.fingerprint.provider === "cursor")
+              .map((source) => [source.fingerprint.resolvedHomePath, source.status]),
+            outputTokens: totalOutputTokens({
+              buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+            }),
+          };
+        }),
+      );
+      const account = `cursor-account:${NodeCrypto.createHash("sha256").update(subject).digest("hex")}`;
+      for (const result of results) {
+        assert.deepStrictEqual(result, { sources: [[account, "ok"]], outputTokens: 7 });
+      }
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.live("prefers a readable instance key over a stale CLI login on the same account", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      yield* Effect.promise(async () => {
+        const authPath = NodePath.join(home, "config", "cursor", "auth.json");
+        await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+        await NodeFSP.writeFile(
+          authPath,
+          encodeUnknownJsonString({ accessToken: cursorToken("auth0|user_key-b") }),
+        );
+      });
+      let cliLoginExpired = false;
+      const api = cursorApi({ "key-b": { outputTokens: 7 } });
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-cursor-stale-login",
+            home,
+            settings: {
+              providerInstances: {
+                ...settings.providerInstances,
+                [ProviderInstanceId.make("cursor-b")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                  environment: [{ name: "CURSOR_API_KEY", value: "key-b", sensitive: true }],
+                },
+              },
+            },
+            ratesResponse: (request) => {
+              if (request.url === "https://cursor.com/api/dashboard/get-filtered-usage-events") {
+                return Effect.succeed(
+                  cliLoginExpired
+                    ? Response.json({ error: "unauthenticated" }, { status: 401 })
+                    : Response.json({
+                        totalUsageEventsCount: 1,
+                        usageEventsDisplay: [
+                          {
+                            timestamp: String(CURSOR_NOW - 3 * HOUR_MS),
+                            model: "claude-fable-5",
+                            tokenUsage: { inputTokens: 10, outputTokens: 3 },
+                          },
+                        ],
+                      }),
+                );
+              }
+              // The instance key cannot be read until the CLI login has cached older history.
+              return cliLoginExpired
+                ? api(request)
+                : Effect.succeed(Response.json({ error: "unavailable" }, { status: 503 }));
+            },
+          }),
+        ),
+      );
+      yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      cliLoginExpired = true;
+      yield* TestClock.adjust(Duration.minutes(2));
+      const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      const accounts = summary.sources.filter(
+        (source) => source.fingerprint.hostId === "cursor.com",
+      );
+      assert.deepStrictEqual(
+        accounts.map((source) => source.status),
+        ["ok"],
+      );
+      assert.strictEqual(
+        totalOutputTokens({
+          buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+        }),
+        7,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.live("reads the Cursor account of each instance's stored sign-in", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const backendUrl = "https://cursor-b.example";
+      const signIn = (instanceId: string, apiKeyExpiresAtMs: number) => [
+        `provider-auth-${NodeCrypto.createHash("sha256").update(`6:cursor${instanceId}`).digest("hex")}`,
+        encodeUnknownJsonString({
+          version: 1,
+          backendUrl,
+          apiKey: `key-${instanceId}`,
+          createdAtMs: CURSOR_NOW - HOUR_MS,
+          apiKeyExpiresAtMs,
+        }),
+      ];
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-cursor-stored-sign-in",
+            home,
+            settings: {
+              providerInstances: {
+                ...settings.providerInstances,
+                [ProviderInstanceId.make("cursor-b")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                },
+                [ProviderInstanceId.make("cursor-c")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                },
+              },
+            },
+            secrets: Object.fromEntries([
+              signIn("cursor-b", CURSOR_NOW + HOUR_MS),
+              signIn("cursor-c", CURSOR_NOW - HOUR_MS),
+            ]),
+            ratesResponse: cursorApi(
+              {
+                "key-cursor-b": { outputTokens: 7 },
+                "key-cursor-c": { outputTokens: 11 },
+              },
+              backendUrl,
+            ),
+          }),
+        ),
+      );
+      const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      const cursor = summary.sources.filter((source) => source.fingerprint.provider === "cursor");
+      assert.deepStrictEqual(
+        cursor.map((source) => [source.fingerprint.hostId === "cursor.com", source.status]),
+        [
+          [true, "ok"],
+          [false, "missing"],
+        ],
+      );
+      assert.include(cursor[1]?.message ?? "", "cursor-c");
+      assert.strictEqual(
+        totalOutputTokens({
+          buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+        }),
+        7,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
   it.live("reports a Cursor instance whose account history cannot be read", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
@@ -1465,7 +1694,7 @@ describe("UsageService", () => {
       const cursor = cursorSource(summary);
       assert.isDefined(cursor, "the unreadable Cursor instance has no Usage source");
       assert.notStrictEqual(cursor?.status, "ok");
-      assert.isString(cursor?.message);
+      assert.include(cursor?.message ?? "", "cursor-b");
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );
 

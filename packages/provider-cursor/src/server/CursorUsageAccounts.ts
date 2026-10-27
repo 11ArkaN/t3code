@@ -1,15 +1,18 @@
+import type { ProviderInstanceId } from "@t3tools/contracts";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import type { ProviderUsageScan } from "@t3tools/provider-core/server/usage";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
@@ -24,18 +27,30 @@ import {
   type CursorAccountCache,
   type CursorCredentialSource,
 } from "./accountCache.ts";
+import { accountHash } from "./accountUsage.ts";
+import { readCursorBillingKey } from "./auth.ts";
 import * as CursorAccountReader from "./CursorAccountReader.ts";
+import { makeCursorCredentialStore } from "./credentialStore.ts";
 
 const CURSOR_ACCOUNT_READ_ERROR = "Cursor account usage could not be read.";
+const DEFAULT_CURSOR_BACKEND_URL = "https://api2.cursor.sh";
+const API_KEY_CACHE_PREFIX = "api-key:";
 
 const decodeCacheFile = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Unknown as unknown as Schema.Codec<unknown>),
 );
 
+export interface CursorUsageInstance {
+  readonly instanceId: ProviderInstanceId;
+  readonly name: string;
+  readonly environment: NodeJS.ProcessEnv;
+}
+
 export class CursorUsageAccounts extends Context.Service<
   CursorUsageAccounts,
   {
     readonly scan: (input: {
+      readonly instances: ReadonlyArray<CursorUsageInstance>;
       readonly keychainUsageEnabled: boolean;
       readonly windowStartMs: number;
       readonly retentionCutoffMs: number;
@@ -52,6 +67,7 @@ const make = Effect.gen(function* () {
   const accountReader = yield* CursorAccountReader.CursorAccountReader;
   const hostEnvironment = yield* HostProcess.Environment;
   const platform = yield* HostProcess.Platform;
+  const crypto = yield* Crypto.Crypto;
 
   const cachePath = path.join(host.paths.stateDir, CURSOR_ACCOUNT_CACHE_FILE_NAME);
   const caches = new Map<string, CursorAccountCache>();
@@ -181,7 +197,8 @@ const make = Effect.gen(function* () {
 
   const accountSource = Effect.fn("CursorUsageAccounts.accountSource")(function* (
     credential: CursorCredentialSource,
-    authPath: string,
+    dir: string,
+    label: string | undefined,
     windowStartMs: number,
     retentionStartMs: number,
     awaitRefresh: boolean,
@@ -193,7 +210,14 @@ const make = Effect.gen(function* () {
       return null;
     }
     yield* ensureLoaded;
-    const credentialKey = typeof credential === "string" ? credential : "keychain";
+    const credentialKey =
+      typeof credential === "string"
+        ? credential
+        : credential.kind === "keychain"
+          ? "keychain"
+          : `${API_KEY_CACHE_PREFIX}${yield* accountHash(
+              `${credential.backendUrl}\0${credential.apiKey}`,
+            ).pipe(Effect.provideService(Crypto.Crypto, crypto), Effect.orDie)}`;
     const nowMs = yield* Clock.currentTimeMillis;
     const recentFailure = failures.get(credentialKey);
     let refreshing = false;
@@ -208,88 +232,225 @@ const make = Effect.gen(function* () {
 
     const cache = caches.get(credentialKey);
     const failure = refreshing ? undefined : failures.get(credentialKey);
-    const failureMessage = failure === undefined ? undefined : failure.error;
+    const labelled = (message: string) => (label === undefined ? message : `${label}: ${message}`);
+    const failureMessage =
+      failure === undefined || failure.error === null ? failure?.error : labelled(failure.error);
     if (failureMessage === null) return null;
     if (cache === undefined) {
       return {
-        dir: authPath,
-        // Never combine a local fallback with another server's account-wide history.
-        ...(refreshing
-          ? { files: [], refreshing: true }
-          : { files: null, message: failureMessage ?? CURSOR_ACCOUNT_READ_ERROR }),
-      } satisfies ProviderUsageScan;
+        credentialKey,
+        source: {
+          dir,
+          ...(label === undefined ? {} : { volumeId: "" }),
+          // Never combine a local fallback with another server's account-wide history.
+          ...(refreshing
+            ? { files: [], refreshing: true }
+            : { files: null, message: failureMessage ?? labelled(CURSOR_ACCOUNT_READ_ERROR) }),
+        } satisfies ProviderUsageScan,
+      };
     }
     // Account history spans machines; a stable fingerprint prevents duplicate environment counts.
     const source = `cursor-account:${cache.accountKey}`;
     return {
-      dir: source,
-      hostId: "cursor.com",
-      volumeId: cache.accountKey,
-      files: [
-        {
-          path: source,
-          records: cache.records.filter((record) => record.timestampMs >= windowStartMs),
-        },
-      ],
-      ...(failureMessage === undefined
-        ? { status: "ok" }
-        : { status: "partial", message: failureMessage }),
-      ...(refreshing ? { refreshing: true } : {}),
-    } satisfies ProviderUsageScan;
+      credentialKey,
+      account: { key: cache.accountKey, fetchedAtMs: cache.fetchedAtMs },
+      source: {
+        dir: source,
+        hostId: "cursor.com",
+        volumeId: cache.accountKey,
+        files: [
+          {
+            path: source,
+            records: cache.records.filter((record) => record.timestampMs >= windowStartMs),
+          },
+        ],
+        ...(failureMessage === undefined
+          ? { status: "ok" }
+          : { status: "partial", message: failureMessage }),
+        ...(refreshing ? { refreshing: true } : {}),
+      } satisfies ProviderUsageScan,
+    };
+  });
+
+  const hostSource = Effect.fn("CursorUsageAccounts.hostSource")(function* (
+    keychainUsageEnabled: boolean,
+    hostKeyBilled: boolean,
+    windowStartMs: number,
+    retentionCutoffMs: number,
+    awaitRefresh: boolean,
+  ) {
+    const home = yield* HostProcess.HomeDirectory;
+    const userHome =
+      (platform === "win32" ? hostEnvironment["USERPROFILE"] : hostEnvironment["HOME"]) || home;
+    const configHome = hostEnvironment["XDG_CONFIG_HOME"]?.trim();
+    const cursorHome =
+      platform === "darwin"
+        ? path.join(userHome, "Library", "Application Support")
+        : platform === "win32"
+          ? hostEnvironment["APPDATA"] || path.join(userHome, "AppData", "Roaming")
+          : configHome && path.isAbsolute(configHome)
+            ? configHome
+            : path.join(userHome, ".config");
+    const authPath =
+      platform === "darwin"
+        ? path.join(userHome, ".cursor", "auth.json")
+        : path.join(cursorHome, platform === "win32" ? "Cursor" : "cursor", "auth.json");
+    const credentialStore = hostEnvironment["AGENT_CLI_CREDENTIAL_STORE"];
+    const tokenOrMemoryLogin =
+      Boolean(hostEnvironment["CURSOR_AUTH_TOKEN"]?.trim()) || credentialStore === "memory";
+    const loginUnavailable =
+      tokenOrMemoryLogin || Boolean(hostEnvironment["CURSOR_API_KEY"]?.trim());
+    const useKeychain = platform === "darwin" && credentialStore !== "file";
+    if (useKeychain && !loginUnavailable && !keychainUsageEnabled) {
+      return {
+        source: {
+          dir: authPath,
+          volumeId: "",
+          files: null,
+          message: "Cursor account usage is off on this environment.",
+          action: "enableCursorKeychain",
+        } satisfies ProviderUsageScan,
+      };
+    }
+    if (loginUnavailable) {
+      // An instance source already reads the account the host CURSOR_API_KEY bills.
+      if (hostKeyBilled && !tokenOrMemoryLogin) return null;
+      return {
+        source: {
+          dir: authPath,
+          files: null,
+          message: "Cursor account history needs a Cursor CLI login on this server.",
+        } satisfies ProviderUsageScan,
+      };
+    }
+    return yield* accountSource(
+      useKeychain ? { kind: "keychain" } : authPath,
+      authPath,
+      undefined,
+      windowStartMs,
+      retentionCutoffMs,
+      awaitRefresh,
+    );
+  });
+
+  /** The account an instance's own key bills; null when it has none and bills the host login. */
+  const instanceSource = Effect.fn("CursorUsageAccounts.instanceSource")(function* (
+    instance: CursorUsageInstance,
+    windowStartMs: number,
+    retentionCutoffMs: number,
+    awaitRefresh: boolean,
+  ) {
+    const dir = `cursor-instance:${instance.instanceId}`;
+    const unreadable = (message: string) => ({
+      source: {
+        dir,
+        volumeId: "",
+        files: null,
+        message: `${instance.name}: ${message}`,
+      } satisfies ProviderUsageScan,
+    });
+    const key = yield* makeCursorCredentialStore(instance.instanceId).pipe(
+      Effect.flatMap(({ store }) =>
+        readCursorBillingKey(instance.instanceId, instance.environment["CURSOR_API_KEY"], store),
+      ),
+      Effect.provideService(ProviderHost.ProviderHost, host),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.result,
+    );
+    if (Result.isFailure(key)) return unreadable(key.failure.detail);
+    if (key.success === undefined) return null;
+    if (key.success.expired) return unreadable("Sign in to Cursor again to read account usage.");
+    return yield* accountSource(
+      {
+        kind: "apiKey",
+        apiKey: key.success.apiKey,
+        // Mirrors the in-process SDK, which reads the host's backend override, not the instance's.
+        backendUrl: (
+          key.success.backendUrl ??
+          (hostEnvironment["CURSOR_BACKEND_URL"] || DEFAULT_CURSOR_BACKEND_URL)
+        ).replace(/\/$/, ""),
+      },
+      dir,
+      instance.name,
+      windowStartMs,
+      retentionCutoffMs,
+      awaitRefresh,
+    );
   });
 
   const scan: CursorUsageAccounts["Service"]["scan"] = Effect.fn("CursorUsageAccounts.scan")(
-    function* ({ keychainUsageEnabled, windowStartMs, retentionCutoffMs, awaitRefresh }) {
-      const home = yield* HostProcess.HomeDirectory;
-      const userHome =
-        (platform === "win32" ? hostEnvironment["USERPROFILE"] : hostEnvironment["HOME"]) || home;
-      const configHome = hostEnvironment["XDG_CONFIG_HOME"]?.trim();
-      const cursorHome =
-        platform === "darwin"
-          ? path.join(userHome, "Library", "Application Support")
-          : platform === "win32"
-            ? hostEnvironment["APPDATA"] || path.join(userHome, "AppData", "Roaming")
-            : configHome && path.isAbsolute(configHome)
-              ? configHome
-              : path.join(userHome, ".config");
-      const authPath =
-        platform === "darwin"
-          ? path.join(userHome, ".cursor", "auth.json")
-          : path.join(cursorHome, platform === "win32" ? "Cursor" : "cursor", "auth.json");
-      const credentialStore = hostEnvironment["AGENT_CLI_CREDENTIAL_STORE"];
-      const loginUnavailable =
-        Boolean(hostEnvironment["CURSOR_AUTH_TOKEN"]?.trim()) ||
-        Boolean(hostEnvironment["CURSOR_API_KEY"]?.trim()) ||
-        credentialStore === "memory";
-      const useKeychain = platform === "darwin" && credentialStore !== "file";
-      if (useKeychain && !loginUnavailable && !keychainUsageEnabled) {
-        return [
-          {
-            dir: authPath,
-            volumeId: "",
-            files: null,
-            message: "Cursor account usage is off on this environment.",
-            action: "enableCursorKeychain",
-          },
-        ];
-      }
-      if (loginUnavailable) {
-        return [
-          {
-            dir: authPath,
-            files: null,
-            message: "Cursor account history needs a Cursor CLI login on this server.",
-          },
-        ];
-      }
-      const source = yield* accountSource(
-        useKeychain ? { kind: "keychain" } : authPath,
-        authPath,
-        windowStartMs,
-        retentionCutoffMs,
-        awaitRefresh,
+    function* ({
+      instances,
+      keychainUsageEnabled,
+      windowStartMs,
+      retentionCutoffMs,
+      awaitRefresh,
+    }) {
+      const hostKey = hostEnvironment["CURSOR_API_KEY"]?.trim();
+      const hostKeyBilled =
+        Boolean(hostKey) &&
+        instances.some((instance) => instance.environment["CURSOR_API_KEY"]?.trim() === hostKey);
+      const [hostEntry, instanceEntries] = yield* Effect.all(
+        [
+          hostSource(
+            keychainUsageEnabled,
+            hostKeyBilled,
+            windowStartMs,
+            retentionCutoffMs,
+            awaitRefresh,
+          ),
+          Effect.forEach(
+            instances,
+            (instance) => instanceSource(instance, windowStartMs, retentionCutoffMs, awaitRefresh),
+            { concurrency: "unbounded" },
+          ),
+        ],
+        { concurrency: "unbounded" },
       );
-      return source === null ? [] : [source];
+
+      // Drop history cached for API keys no instance bills any more, such as rotated keys.
+      const billedKeys = new Set(
+        instanceEntries.flatMap((entry) =>
+          entry !== null && "credentialKey" in entry ? [entry.credentialKey] : [],
+        ),
+      );
+      yield* ensureLoaded;
+      for (const credentialKey of caches.keys()) {
+        if (credentialKey.startsWith(API_KEY_CACHE_PREFIX) && !billedKeys.has(credentialKey)) {
+          caches.delete(credentialKey);
+          cacheDirty = true;
+        }
+      }
+      if (cacheDirty) yield* schedulePersist;
+
+      // Two credentials on one account share a fingerprint; keep the readable, freshest read.
+      const sources: ProviderUsageScan[] = [];
+      const accounts = new Map<
+        string,
+        { readonly index: number; readonly ok: boolean; readonly fetchedAtMs: number }
+      >();
+      for (const entry of [hostEntry, ...instanceEntries]) {
+        if (entry === null) continue;
+        const source: ProviderUsageScan = entry.source;
+        const account = "account" in entry ? entry.account : undefined;
+        if (account === undefined) {
+          sources.push(source);
+          continue;
+        }
+        const { key, fetchedAtMs } = account;
+        const ok = source.status === "ok";
+        const seen = accounts.get(key);
+        if (
+          seen === undefined ||
+          (ok && !seen.ok) ||
+          (ok === seen.ok && fetchedAtMs > seen.fetchedAtMs)
+        ) {
+          const index = seen?.index ?? sources.length;
+          accounts.set(key, { index, ok, fetchedAtMs });
+          sources[index] = source;
+        }
+      }
+      return sources;
     },
   );
 
