@@ -273,7 +273,7 @@ describe("pickProjectFavicon", () => {
 });
 
 describe("showContextMenu", () => {
-  it.effect("opens a keyboard-invoked menu as keyboard-sourced so the first item is focused", () =>
+  it.effect("passes a keyboard invocation source to the native popup", () =>
     Effect.gen(function* () {
       menuPopup.mockImplementation((options: Electron.PopupOptions) => options.callback?.());
       const window = { id: 1, webContents: { getZoomFactor: () => 1 } } as Electron.BrowserWindow;
