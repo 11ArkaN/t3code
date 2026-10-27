@@ -413,9 +413,14 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
   const realVersionsDir = yield* fs
     .realPath(versionsDir)
     .pipe(Effect.orElseSucceed(() => versionsDir));
+  const inVersionsDir = (candidate: string) =>
+    launcherOwnsVersionsDir(path, versionsDir, candidate) ||
+    launcherOwnsVersionsDir(path, realVersionsDir, candidate);
   const unrecorded: Array<string> = [];
   const targets: Array<string> = [];
   for (const launcher of [...recorded, ...found]) {
+    // A runtime's own entry, reached through a version directory on the service PATH.
+    if (inVersionsDir(launcher)) continue;
     const target =
       platform === "win32"
         ? yield* fs.readFileString(launcher).pipe(
@@ -426,12 +431,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
           yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined));
     if (target === undefined) continue;
     targets.push(target);
-    if (
-      (launcherOwnsVersionsDir(path, versionsDir, target) ||
-        launcherOwnsVersionsDir(path, realVersionsDir, target)) &&
-      !recorded.includes(launcher) &&
-      !unrecorded.includes(launcher)
-    ) {
+    if (inVersionsDir(target) && !recorded.includes(launcher) && !unrecorded.includes(launcher)) {
       unrecorded.push(launcher);
     }
   }

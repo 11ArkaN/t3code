@@ -429,9 +429,20 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
   );
 
   it.effect.each([
-    { name: "its directory is on PATH", onPath: true, recorded: false },
-    { name: "an earlier prune recorded its entry as a launcher", onPath: false, recorded: true },
-  ])("removes a runtime only its own entry names when $name", ({ onPath, recorded }) =>
+    { name: "its directory is on PATH", onPath: true, recorded: false, linkedHome: false },
+    {
+      name: "an earlier prune recorded its entry as a launcher",
+      onPath: false,
+      recorded: true,
+      linkedHome: false,
+    },
+    {
+      name: "its real directory in a symlinked home is on PATH",
+      onPath: true,
+      recorded: false,
+      linkedHome: true,
+    },
+  ])("removes a runtime only its own entry names when $name", ({ onPath, recorded, linkedHome }) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -447,8 +458,13 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
         );
       }
 
+      const home = linkedHome
+        ? path.join(yield* fs.makeTempDirectoryScoped({ prefix: "t3-pinned-link-" }), "home")
+        : baseDir;
+      if (linkedHome) yield* fs.symlink(baseDir, home);
+
       // The launch agent puts the running runtime's own directory on PATH.
-      const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(
+      const removed = yield* prunePinnedRuntimes({ baseDir: home, keep: ["2.0.0"] }).pipe(
         Effect.provideService(
           ProcessRunner.ProcessRunner,
           lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
