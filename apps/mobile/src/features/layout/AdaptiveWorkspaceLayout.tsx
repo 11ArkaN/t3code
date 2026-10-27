@@ -47,6 +47,10 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { activeNewTaskProjectKeyAtom } from "../../state/active-new-task";
 import { useProjects } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
+import {
+  pendingThreadCreationOutcomesAtom,
+  selectThreadCreationDetail,
+} from "../../state/pending-thread-creation";
 import { threadOutboxManager } from "../../state/thread-outbox";
 import { workspaceConnections } from "../../state/workspace";
 import { environmentThreadShells } from "../../state/threads";
@@ -533,21 +537,25 @@ function AdaptiveWorkspaceLayoutContent(
     const environmentId = first(params?.environmentId);
     const threadId = first(params?.threadId);
     // The index includes subagent threads, which the navigation list leaves out. A thread whose
-    // creation is still queued is not indexed yet, so its queued creation names the project.
+    // creation is queued or failed is not indexed, so its pending creation names the project.
     const threadProjectId = (() => {
       if (!environmentId || !threadId) return undefined;
       const ref = {
         environmentId: EnvironmentId.make(environmentId),
         threadId: ThreadId.make(threadId),
       };
-      const queued = appAtomRegistry.get(threadOutboxManager.queuedMessagesByThreadKeyAtom);
+      const { pendingCreation } = selectThreadCreationDetail({
+        threadRef: ref,
+        threadKey: scopedThreadKey(ref.environmentId, ref.threadId),
+        queuedMessagesByThreadKey: appAtomRegistry.get(
+          threadOutboxManager.queuedMessagesByThreadKeyAtom,
+        ),
+        outcomes: appAtomRegistry.get(pendingThreadCreationOutcomesAtom),
+      });
       return (
         appAtomRegistry
           .get(environmentThreadShells.environmentThreadIndexAtom(ref.environmentId))
-          .get(ref.threadId)?.projectId ??
-        queued[scopedThreadKey(ref.environmentId, ref.threadId)]?.find(
-          (message) => message.creation,
-        )?.creation?.projectId
+          .get(ref.threadId)?.projectId ?? pendingCreation?.message.creation?.projectId
       );
     })();
     // An open draft's route may not name the project it shows, so read the draft's selection.
