@@ -578,23 +578,20 @@ describe("AssetAccess", () => {
         yield* fs.makeDirectory(path.dirname(filePath), { recursive: true });
         yield* fs.writeFile(filePath, screenshotPng);
         const canonicalFile = yield* fs.realPath(filePath);
+        const drivePath = "C:\\Users\\me\\Pictures\\shot.png";
 
-        const result = yield* underWsl(
-          issueAssetUrl({
-            resource: {
-              _tag: "media-file",
-              threadId: ThreadId.make("thread-1"),
-              path: "C:\\Users\\me\\Pictures\\shot.png",
-            },
-            workspaceRoot,
-          }),
-        );
-        expect(result.imageDimensions).toEqual({ width: 390, height: 844 });
-        const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
-        const separator = suffix.indexOf("/");
-        expect(
-          yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1)),
-        ).toMatchObject({ kind: "file", path: canonicalFile, mimeType: "image/png" });
+        for (const resource of [
+          { _tag: "media-file", threadId: ThreadId.make("thread-1"), path: drivePath },
+          { _tag: "draft-workspace-file", cwd: workspaceRoot, path: drivePath },
+        ] as const) {
+          const result = yield* underWsl(issueAssetUrl({ resource, workspaceRoot }));
+          expect(result.imageDimensions).toEqual({ width: 390, height: 844 });
+          const suffix = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+          const separator = suffix.indexOf("/");
+          expect(
+            yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1)),
+          ).toMatchObject({ kind: "file", path: canonicalFile, mimeType: "image/png" });
+        }
       }).pipe(Effect.provide(layerTest)),
   );
 
