@@ -8,8 +8,10 @@ pkgrel="${PKGREL:-1}"
 
 if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   pkgname='t3code-bin'
+  asset_name='T3-Code-x86_64.AppImage'
 elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
   pkgname='t3code-nightly-bin'
+  asset_name='T3-Code-Nightly-x86_64.AppImage'
 else
   echo "Release $tag does not publish an AUR package."
   exit 0
@@ -17,7 +19,6 @@ fi
 
 version="${tag#v}"
 pkgver="${version//-/_}"
-asset_name="T3-Code-${version}-x86_64.AppImage"
 release_json="$(gh api "repos/$repo/releases/tags/$tag")"
 asset_digest="$(jq -r --arg name "$asset_name" \
   '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
