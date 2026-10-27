@@ -1228,28 +1228,6 @@ describe("orphan worktree reports", () => {
     ),
   );
 
-  it.live("keeps nested worktrees found next to an unreadable folder", (context) =>
-    runCleanupTest(
-      Effect.gen(function* () {
-        if ((yield* HostProcess.isWindows) || (yield* HostProcess.UserId) === 0)
-          return context.skip();
-        const fixture = yield* cleanupFixture();
-        fixture.setThreads([]);
-        const replay = `${fixture.config.worktreesDir}/repository/replay`;
-        const worktree = `${replay}/1376`;
-        const blocked = `${replay}/z-blocked`;
-        yield* fixture.command(fixture.repo, ["worktree", "add", "-b", "nested", worktree]);
-        yield* fixture.fs.makeDirectory(blocked);
-        yield* fixture.fs.chmod(blocked, 0);
-        for (const folder of [worktree, replay]) yield* fixture.fs.utimes(folder, 1, 1);
-        const report = yield* fixture.service.runNow.pipe(
-          Effect.ensuring(fixture.fs.chmod(blocked, 0o700).pipe(Effect.orDie)),
-        );
-        expect(report.entries.map((entry) => entry.path)).toEqual([worktree]);
-      }),
-    ),
-  );
-
   it.live("continues after an inaccessible directory's git probe", (context) =>
     runCleanupTest(
       Effect.gen(function* () {

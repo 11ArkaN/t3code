@@ -452,30 +452,15 @@ const make = Effect.gen(function* () {
       },
       Effect.orElseSucceed(() => undefined),
     );
-    const gitEntryType = (directory: string) =>
-      fs.stat(path.join(directory, ".git")).pipe(
-        Effect.map((info) => info.type),
-        Effect.orElseSucceed(() => null),
-      );
-    // Linked worktrees can sit deeper inside a plain folder, like <repository>/replay/<n>.
-    // One budget of checked folders per report keeps large non-git trees cheap; a folder whose
-    // scan runs out is still reported itself so nothing it holds silently disappears.
-    let nestedBudget = 10_000;
-    const nestedWorktrees = Effect.fnUntraced(function* (folder: string, managedRoot: string) {
-      const found: string[] = [];
-      if ((yield* gitEntryType(folder)) !== null) return found;
-      const pending = [folder];
-      for (let index = 0; index < pending.length; index++) {
-        if (nestedBudget <= 0) return [...found, folder];
-        for (const directory of yield* directories(pending[index]!, managedRoot)) {
-          nestedBudget--;
-          if (referenced.has(pathKey(directory))) continue;
-          const type = yield* gitEntryType(directory);
-          if (type === null) pending.push(directory);
-          else if (type === "File") found.push(directory);
-        }
-      }
-      return found;
+    // Linked worktrees can sit deeper inside a plain folder, like <repository>/replay/<n>. Ask
+    // the projects' Git for them rather than walking folders that may hold large non-git trees.
+    let registered: ReadonlyArray<string> | undefined;
+    const nestedWorktrees = Effect.fnUntraced(function* (folder: string) {
+      if (yield* fs.exists(path.join(folder, ".git"))) return [];
+      registered ??= (yield* Effect.forEach(new Set(projectRoots), (root) =>
+        git.listWorktreePaths(root).pipe(Effect.orElseSucceed((): string[] => [])),
+      )).flat();
+      return registered.filter((worktree) => inside(folder, worktree));
     });
     for (const root of roots) {
       // Worktrees can be <root>/<repository>/<branch> or explicitly <root>/<name>.
@@ -488,7 +473,7 @@ const make = Effect.gen(function* () {
             return;
           }
           for (const worktreePath of yield* directories(projectDirectory, root)) {
-            const nested = yield* nestedWorktrees(worktreePath, root);
+            const nested = yield* nestedWorktrees(worktreePath);
             for (const target of nested.length > 0 ? nested : [worktreePath]) yield* report(target);
           }
         }).pipe(Effect.orElseSucceed(() => undefined));
