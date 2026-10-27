@@ -366,6 +366,92 @@ describe("ConnectionCatalogDocument", () => {
     expect(removeConnectionFromCatalog(document, ENVIRONMENT_ID).credentials).toEqual([]);
   });
 
+  it("a new pairing gives every paired address its login, and it outlives the new route", () => {
+    const tailnet = new BearerConnectionTarget({
+      ...BEARER_TARGET,
+      connectionId: "bearer-tailnet",
+    });
+    const learned = new BearerConnectionTarget({
+      ...BEARER_TARGET,
+      connectionId: `learned:${ENVIRONMENT_ID}:http://100.64.0.9:3773@${BEARER_TARGET.connectionId}`,
+    });
+    const ssh = new SshConnectionTarget({
+      environmentId: ENVIRONMENT_ID,
+      label: "Remote",
+      connectionId: "ssh-1",
+    });
+    const other = new BearerConnectionTarget({
+      ...BEARER_TARGET,
+      environmentId: EnvironmentId.make("environment-2"),
+      connectionId: "bearer-other",
+    });
+    const routes = [BEARER_TARGET, tailnet, learned, ssh, RELAY_TARGET];
+    const document: ConnectionCatalogDocument = {
+      ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
+      targets: [...routes, other],
+      profiles: [BEARER_PROFILE],
+      credentials: [BEARER_TARGET, tailnet, ssh, other].map(({ connectionId }) => ({
+        connectionId,
+        credential: BEARER_CREDENTIAL,
+      })),
+    };
+    const paired = new BearerConnectionTarget({ ...BEARER_TARGET, connectionId: "bearer-new" });
+    const fresh = new BearerConnectionCredential({ token: "fresh-token" });
+    const registered = registerConnectionInCatalog(
+      document,
+      new BearerConnectionRegistration({
+        target: paired,
+        profile: new BearerConnectionProfile({
+          ...BEARER_PROFILE,
+          connectionId: paired.connectionId,
+          httpBaseUrl: "https://new.example.test",
+        }),
+        credential: fresh,
+      }),
+      [paired, ...routes],
+    );
+    const removed = setRoutesInCatalog(registered, ENVIRONMENT_ID, routes);
+
+    expect(
+      new Map(removed.credentials.map((value) => [value.connectionId, value.credential])),
+    ).toEqual(
+      new Map([
+        [BEARER_TARGET.connectionId, fresh],
+        [tailnet.connectionId, fresh],
+        [ssh.connectionId, BEARER_CREDENTIAL],
+        [other.connectionId, BEARER_CREDENTIAL],
+      ]),
+    );
+  });
+
+  it("editing a saved address does not copy its login to the other addresses", () => {
+    const tailnet = new BearerConnectionTarget({
+      ...BEARER_TARGET,
+      connectionId: "bearer-tailnet",
+    });
+    const fresh = new BearerConnectionCredential({ token: "fresh-token" });
+    const document: ConnectionCatalogDocument = {
+      ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
+      targets: [BEARER_TARGET, tailnet],
+      profiles: [BEARER_PROFILE],
+      credentials: [
+        { connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL },
+        { connectionId: tailnet.connectionId, credential: fresh },
+      ],
+    };
+    const edited = registerConnectionInCatalog(
+      document,
+      new BearerConnectionRegistration({
+        target: BEARER_TARGET,
+        profile: new BearerConnectionProfile({ ...BEARER_PROFILE, label: "Edited" }),
+        credential: BEARER_CREDENTIAL,
+      }),
+      document.targets,
+    );
+
+    expect(edited.credentials).toEqual(expect.arrayContaining([...document.credentials]));
+  });
+
   it("keeps every route of an environment and drops only a removed route's records", () => {
     const withBearer = registerConnectionInCatalog(
       { ...EMPTY_CONNECTION_CATALOG_DOCUMENT, remoteDpopTokens: [REMOTE_TOKEN] },

@@ -134,7 +134,40 @@ export function registerConnectionInCatalog(
   switch (registration._tag) {
     case "RelayConnectionRegistration":
       return next;
-    case "BearerConnectionRegistration":
+    case "BearerConnectionRegistration": {
+      const { connectionId } = registration.target;
+      const isNewLogin =
+        document.credentials.find((value) => value.connectionId === connectionId)?.credential
+          .token !== registration.credential.token;
+      // The server accepts a login at any of its addresses, so a new pairing
+      // replaces the one every paired address uses. Learned routes borrow it.
+      const owners = new Set([
+        connectionId,
+        ...(isNewLogin
+          ? routes.flatMap((target) =>
+              target._tag === "BearerConnectionTarget" &&
+              !target.connectionId.startsWith("learned:")
+                ? [target.connectionId]
+                : [],
+            )
+          : []),
+      ]);
+      return {
+        ...next,
+        profiles: replaceCatalogValue(
+          next.profiles,
+          (value) => value.connectionId,
+          registration.profile,
+        ),
+        credentials: [
+          ...next.credentials.filter((value) => !owners.has(value.connectionId)),
+          ...Array.from(owners, (owner) => ({
+            connectionId: owner,
+            credential: registration.credential,
+          })),
+        ],
+      };
+    }
     case "SshConnectionRegistration":
       return {
         ...next,
