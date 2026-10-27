@@ -428,6 +428,41 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
     }),
   );
 
+  it.effect.each([
+    { name: "its directory is on PATH", onPath: true, recorded: false },
+    { name: "an earlier prune recorded its entry as a launcher", onPath: false, recorded: true },
+  ])("removes a runtime only its own entry names when $name", ({ onPath, recorded }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
+      const binDir = path.join(baseDir, "bin");
+      yield* fs.makeDirectory(binDir);
+      yield* fs.symlink(path.join(versionsDir, "1.1.0", "t3"), path.join(binDir, "t3"));
+      const ownDir = path.join(versionsDir, "1.0.0");
+      if (recorded) {
+        yield* fs.writeFileString(
+          path.join(baseDir, "runtime", "launchers"),
+          `${path.join(ownDir, "t3")}\n`,
+        );
+      }
+
+      // The launch agent puts the running runtime's own directory on PATH.
+      const removed = yield* prunePinnedRuntimes({ baseDir, keep: ["2.0.0"] }).pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          lsofRunner("p1\nftxt\nn/sbin/launchd\n"),
+        ),
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(HostProcess.Environment, {
+          T3CODE_INSTALL_BIN_DIR: binDir,
+          PATH: onPath ? `${ownDir}:/usr/bin:/bin` : "/usr/bin:/bin",
+        }),
+      );
+      assert.deepEqual(removed, ["1.0.0"]);
+    }),
+  );
+
   it.effect("matches a Windows shim whatever its casing", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
