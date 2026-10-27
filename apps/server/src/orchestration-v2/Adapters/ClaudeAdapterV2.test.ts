@@ -3041,6 +3041,78 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
+  // regression: #25796 a `now` steer offered mid-compaction aborts the compaction
+  it.effect("holds steers sent during compaction until the compaction ends", () =>
+    Effect.gen(function* () {
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const harness = yield* makeWakeHarness;
+      const input = makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId: RunAttemptId.make("steer-during-compaction"),
+        text: "Keep going.",
+        attachments: [],
+      });
+      yield* harness.runtime.startTurn(input);
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "00000000-0000-4000-8000-000000000821",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      const providerTurnId = idAllocator.derive.providerTurn({
+        driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+        nativeTurnId: `turn:${input.attemptId}`,
+      });
+      for (const text of ["First steer.", "Second steer."]) {
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: input.runId,
+          providerThread: harness.providerThread,
+          providerTurnId,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make(`compaction-${text}`),
+            text,
+            attachments: [],
+          },
+        });
+      }
+      assert.lengthOf(
+        harness.offeredMessages,
+        1,
+        "a steer sent while compacting reached Claude before the compaction ended",
+      );
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "status",
+          status: null,
+          compact_result: "success",
+          uuid: "00000000-0000-4000-8000-000000000822",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* harness.until(() => harness.offeredMessages.length >= 3);
+      const steers = harness.offeredMessages.slice(1);
+      assert.deepEqual(
+        steers.map((message) => message.priority),
+        ["now", "now"],
+      );
+      assert.match(encodeJsonString(steers[0]?.message.content), /First steer/);
+      assert.match(encodeJsonString(steers[1]?.message.content), /Second steer/);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   const attachmentBudgetOutcomes = [
     "resume",
     "legacy",
