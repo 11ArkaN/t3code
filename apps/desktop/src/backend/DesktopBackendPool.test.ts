@@ -52,7 +52,6 @@ const windowsConfig: DesktopBackendStartConfig = {
 
 function makeProcess(
   exitCode: ChildProcessSpawner.ChildProcessHandle["exitCode"],
-  kill: ChildProcessSpawner.ChildProcessHandle["kill"] = () => Effect.void,
 ): ChildProcessSpawner.ChildProcessHandle {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(123),
@@ -61,7 +60,7 @@ function makeProcess(
     all: Stream.empty,
     exitCode,
     isRunning: Effect.succeed(false),
-    kill,
+    kill: () => Effect.void,
     stdin: Sink.drain,
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
@@ -269,18 +268,16 @@ describe("DesktopBackendPool", () => {
           yield* Deferred.await(firstExit);
           yield* TestClock.adjust(Duration.minutes(1));
 
-          assert.isNotEmpty(
-            yield* Ref.get(errors),
-            "the user should be told the WSL backend could not start",
-          );
+          assert.deepEqual(yield* Ref.get(errors), ["WSL backend is still unavailable"]);
           const current = yield* settings.get;
           assert.isFalse(current.wslOnly, "wslOnly should be off in memory for this launch");
-          const executables = yield* Queue.takeAll(spawned);
-          assert.equal(
-            executables.at(-1),
+          // The manager's own restart after the third crash comes up on Windows.
+          assert.deepEqual(yield* Queue.takeAll(spawned), [
+            "wsl.exe",
+            "wsl.exe",
+            "wsl.exe",
             "/electron",
-            "the restarted primary should be the Windows backend",
-          );
+          ]);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.provide(TestClock.layer())),
     ),
@@ -321,7 +318,7 @@ describe("DesktopBackendPool", () => {
     ),
   );
 
-  it.effect("replaces a running WSL primary that never becomes ready with Windows", () =>
+  it.effect("keeps a live WSL primary probing after a readiness timeout", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const spawned = yield* Queue.unbounded<string>();
@@ -340,32 +337,27 @@ describe("DesktopBackendPool", () => {
               ? { ...windowsConfig, executablePath: "wsl.exe", runningDistro: "Ubuntu" }
               : windowsConfig;
           }),
-          // Both stay up until killed; the WSL one is unreachable, so readiness times out.
+          // A cold WSL boot: the process stays up but is not ready within one readiness window.
           spawn: (command) => {
             Queue.offerUnsafe(spawned, command._tag === "StandardCommand" ? command.command : "");
-            const exited = Deferred.makeUnsafe<ChildProcessSpawner.ExitCode>();
-            return makeProcess(Deferred.await(exited), () =>
-              Deferred.succeed(exited, ChildProcessSpawner.ExitCode(143)).pipe(Effect.asVoid),
-            );
+            return makeProcess(Effect.never);
           },
           showErrorBox: (title) => Ref.update(errors, (shown) => [...shown, title]),
           onReadinessProbe: Deferred.succeed(firstProbe, undefined).pipe(Effect.asVoid),
         });
         yield* Effect.gen(function* () {
-          const pool = yield* DesktopBackendPool.DesktopBackendPool;
-          const primary = yield* pool.primary;
+          const primary = yield* (yield* DesktopBackendPool.DesktopBackendPool).primary;
           yield* primary.start;
-          assert.equal(yield* Queue.take(spawned), "wsl.exe");
           yield* Deferred.await(firstProbe);
-          // Exactly the readiness timeout: the Windows replacement's own window is still open.
           yield* TestClock.adjust(Duration.minutes(1));
 
-          assert.deepEqual(yield* Ref.get(errors), ["WSL backend is still unavailable"]);
-          assert.equal(yield* Queue.take(spawned), "/electron");
           const startup = yield* SubscriptionRef.get(
             (yield* DesktopState.DesktopState).primaryBackendStartup,
           );
-          assert.notEqual(startup._tag, "Failing");
+          assert.equal(startup._tag, "Failing");
+          assert.deepEqual(yield* Ref.get(errors), []);
+          assert.deepEqual(yield* Queue.takeAll(spawned), ["wsl.exe"]);
+          assert.isTrue((yield* (yield* DesktopAppSettings.DesktopAppSettings).get).wslOnly);
         }).pipe(Effect.provide(layer));
       }).pipe(Effect.provide(TestClock.layer())),
     ),

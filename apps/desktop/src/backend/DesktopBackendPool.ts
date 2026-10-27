@@ -160,22 +160,21 @@ export const layer = Layer.effect(
       },
     );
 
+    // Only a crash loop falls back: a live WSL process past its readiness window is often a slow cold boot.
     const handlePrimaryStartupFailure = Effect.fn("desktop.backendPool.primaryStartupFailed")(
       function* (failure: DesktopBackendManager.BackendStartupFailure) {
         const config = yield* primary.currentConfig;
         const runningOnWsl = Option.exists(config, (value) => value.runningDistro !== undefined);
-        if (!runningOnWsl || !(yield* appSettings.get).wslOnly) {
+        const crashed = Option.isNone((yield* primary.snapshot).activePid);
+        if (!runningOnWsl || !crashed || !(yield* appSettings.get).wslOnly) {
           return yield* SubscriptionRef.set(primaryBackendStartup, { _tag: "Failing", ...failure });
         }
         yield* logBackendPoolWarning(
           "primary WSL backend failed to start; using Windows for this launch",
-          {
-            reason: failure.reason,
-          },
+          { reason: failure.reason },
         );
+        // The manager's scheduled restart re-resolves settings and comes up on Windows.
         yield* useWindowsForThisLaunch(failure.reason);
-        // Forked: this runs under the instance mutex or on the run's own readiness fiber.
-        yield* primary.stop().pipe(Effect.andThen(primary.start), Effect.forkIn(layerScope));
       },
     );
 
