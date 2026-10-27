@@ -7660,7 +7660,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         payload: completionPlan.message,
       });
     }
-    return completionPlan.parentRun?.id;
   });
 
   const dispatchCreatedThreadRecord = Effect.fn("orchestrationV2.dispatch.createdThreadRecord")(
@@ -11754,7 +11753,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
         readonly reason: string;
       };
-      readonly delegatedCompletionOnlyRunIds?: ReadonlyArray<RunId>;
+      readonly updateDelegatedCompletionOnlyRunId?: RunId;
     },
     OrchestratorV2Error
   > {
@@ -11772,7 +11771,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           readonly reason: string;
         }
       | undefined;
-    let delegatedCompletionOnlyRunId: RunId | undefined;
+    let updateDelegatedCompletionOnlyRunId: RunId | undefined;
     switch (command.type) {
       case "thread.create":
         yield* dispatchThreadCreate(command, events);
@@ -12080,14 +12079,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* dispatchDelegatedTaskRequest(command, events, effects);
         break;
       case "delegated_task.wake-policy":
-        delegatedCompletionOnlyRunId = yield* dispatchDelegatedTaskWakePolicy(command, events);
+        yield* dispatchDelegatedTaskWakePolicy(command, events);
         break;
       case "delegated_task.completion-delivery.acknowledge":
       case "delegated_task.completion-delivery.dispose":
-        delegatedCompletionOnlyRunId = yield* dispatchDelegatedTaskCompletionDeliveryResolution(
-          command,
-          events,
-        );
+        updateDelegatedCompletionOnlyRunId =
+          yield* dispatchDelegatedTaskCompletionDeliveryResolution(command, events);
         break;
       case "thread.created.record":
         yield* dispatchCreatedThreadRecord(command, events);
@@ -12102,9 +12099,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       events: yield* Ref.get(events),
       effects: yield* Ref.get(effects),
       ...(cancelUnsettledEffects === undefined ? {} : { cancelUnsettledEffects }),
-      ...(delegatedCompletionOnlyRunId === undefined
+      ...(updateDelegatedCompletionOnlyRunId === undefined
         ? {}
-        : { delegatedCompletionOnlyRunIds: [delegatedCompletionOnlyRunId] }),
+        : { updateDelegatedCompletionOnlyRunId }),
     };
   });
 
@@ -12281,9 +12278,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(plan.cancelUnsettledEffects === undefined
           ? {}
           : { cancelUnsettledEffects: plan.cancelUnsettledEffects }),
-        ...(plan.delegatedCompletionOnlyRunIds === undefined
+        ...(plan.updateDelegatedCompletionOnlyRunId === undefined
           ? {}
-          : { delegatedCompletionOnlyRunIds: plan.delegatedCompletionOnlyRunIds }),
+          : { updateDelegatedCompletionOnlyRunId: plan.updateDelegatedCompletionOnlyRunId }),
       })
       .pipe(
         Effect.mapError(

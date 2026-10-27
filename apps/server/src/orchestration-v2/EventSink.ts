@@ -142,12 +142,12 @@ export interface EventSinkV2Shape {
     readonly acceptedAt: DateTime.Utc;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
     readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
-    /** Runs whose run.updated is rebuilt as in writeWithEffects' updateDelegatedCompletionOnly. */
-    readonly delegatedCompletionOnlyRunIds?: ReadonlyArray<RunId>;
     readonly cancelUnsettledEffects?: {
       readonly effectTypes: ReadonlyArray<EffectOutbox.OrchestrationEffectRequestV2["type"]>;
       readonly reason: string;
     };
+    /** Like writeWithEffects' updateDelegatedCompletionOnly, for this run's run.updated only. */
+    readonly updateDelegatedCompletionOnlyRunId?: RunId;
   }) => Effect.Effect<
     {
       readonly receipt: CommandReceiptStore.CommandReceiptV2;
@@ -385,15 +385,14 @@ const layerBase: Layer.Layer<
         return yield* runOutcomes.prepare(storedEvents);
       });
 
-    // Checkpoint capture can finish after a cohort writer reads its parent run.
-    // Merge in this transaction so the event log and projection keep that completion.
-    const keepStoredRunLifecycle = (
+    // The enclosing write or commit span already traces this per-event projection merge.
+    const updateDelegatedCompletionOnly = Effect.fnUntraced(function* (
       events: ReadonlyArray<OrchestrationV2DomainEvent>,
-      isCohortOnly: (runId: RunId) => boolean,
-    ) =>
-      Effect.forEach(events, (event) =>
+      includesRun: (runId: RunId) => boolean,
+    ) {
+      return yield* Effect.forEach(events, (event) =>
         Effect.gen(function* () {
-          if (event.type !== "run.updated" || !isCohortOnly(event.payload.id)) return event;
+          if (event.type !== "run.updated" || !includesRun(event.payload.id)) return event;
           const { runs } = yield* projectionStore.getThreadRecords(event.threadId, ["runs"], {
             runIds: [event.payload.id],
           });
@@ -402,13 +401,11 @@ const layerBase: Layer.Layer<
             ? event
             : {
                 ...event,
-                payload: {
-                  ...current,
-                  delegatedCompletion: event.payload.delegatedCompletion,
-                },
+                payload: { ...current, delegatedCompletion: event.payload.delegatedCompletion },
               };
         }),
       );
+    });
 
     const writeEffect = Effect.fn("orchestrationV2.EventSink.write")(function* (
       input: Parameters<EventSinkV2Shape["writeWithEffects"]>[0],
@@ -435,8 +432,10 @@ const layerBase: Layer.Layer<
             `;
             if (owners.length > 0) return { committed: [], outcomes: [] };
           }
+          // Checkpoint capture can finish after a cohort writer reads its parent run.
+          // Merge in this transaction so the event log and projection keep that completion.
           const events = input.updateDelegatedCompletionOnly
-            ? yield* keepStoredRunLifecycle(input.events, () => true)
+            ? yield* updateDelegatedCompletionOnly(input.events, () => true)
             : input.events;
           const normalized = yield* normalizeEvents(
             input.guardPendingUserInputCancellations === true
@@ -652,13 +651,11 @@ const layerBase: Layer.Layer<
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
           }
 
-          const cohortOnlyRunIds = input.delegatedCompletionOnlyRunIds ?? [];
+          const runId = input.updateDelegatedCompletionOnlyRunId;
           const normalized = yield* normalizeEvents(
-            cohortOnlyRunIds.length === 0
+            runId === undefined
               ? input.events
-              : yield* keepStoredRunLifecycle(input.events, (runId) =>
-                  cohortOnlyRunIds.includes(runId),
-                ),
+              : yield* updateDelegatedCompletionOnly(input.events, (id) => id === runId),
           );
           const storedEvents = yield* eventStore.append({
             commandId: input.commandId,
