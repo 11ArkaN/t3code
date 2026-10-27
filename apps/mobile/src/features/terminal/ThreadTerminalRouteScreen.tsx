@@ -354,7 +354,7 @@ function readLiveTerminalSessions(
     }));
 }
 
-// `useKeyboardState` only flips on willShow and didHide; the accessory must
+// `useKeyboardState` only flips to hidden on didHide; the accessory must
 // leave as soon as the keyboard starts hiding, so it follows the will-events.
 let keyboardShowing = KeyboardController.isVisible();
 function subscribeKeyboardShowing(onChange: () => void) {
