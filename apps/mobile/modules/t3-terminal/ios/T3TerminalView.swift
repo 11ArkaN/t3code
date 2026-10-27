@@ -110,10 +110,8 @@ private enum TerminalHardwareKeyEncoder {
   }
 }
 
-/// Ghostty's io thread queues app messages (title changes, bells) and calls `wakeup_cb`.
-/// Unless the main thread drains them with `ghostty_app_tick`, the bounded queue fills, the
-/// io thread blocks, and the next feed or surface free on the main thread hangs the app.
-private final class GhosttyAppWakeup {
+/// Weak handle for Ghostty callbacks, which can run on the io thread after the view is gone.
+private final class TerminalViewRef {
   weak var view: T3TerminalView?
 }
 
@@ -215,7 +213,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   private var pendingVerticalScrollPoints: CGFloat = 0
   private var menuText: String?
   private var app: ghostty_app_t?
-  private var appWakeup: GhosttyAppWakeup?
+  private let callbackRef = TerminalViewRef()
   private var surface: ghostty_surface_t?
   private var isCreatingSurface = false
   private var surfaceCreationFailed = false
@@ -263,7 +261,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     didSet {
       guard oldValue != fontSize else { return }
       inputField.font = UIFont.monospacedSystemFont(ofSize: max(fontSize, 13), weight: .regular)
-      refreshSurface()
+      resetSurface()
     }
   }
 
@@ -299,14 +297,14 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     didSet {
       guard oldValue != appearanceScheme else { return }
       appearance = TerminalAppearanceScheme(value: appearanceScheme)
-      refreshSurface()
+      resetSurface()
     }
   }
 
   var themeConfig: String = "" {
     didSet {
       guard oldValue != themeConfig else { return }
-      refreshSurface()
+      resetSurface()
     }
   }
 
@@ -322,6 +320,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
 
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
+    callbackRef.view = self
 
     applyTheme()
     clipsToBounds = true
@@ -593,15 +592,15 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     isCreatingSurface = true
     defer { isCreatingSurface = false }
 
-    let wakeup = GhosttyAppWakeup()
-    wakeup.view = self
     var runtimeConfig = ghostty_runtime_config_s(
-      userdata: Unmanaged.passUnretained(wakeup).toOpaque(),
+      userdata: Unmanaged.passUnretained(callbackRef).toOpaque(),
       supports_selection_clipboard: false,
+      // The io thread queues app messages (titles, bells) in a bounded mailbox. Unless the main
+      // thread drains it, the io thread blocks and the next feed or surface free hangs the app.
       wakeup_cb: { userdata in
         guard let userdata else { return }
-        let wakeup = Unmanaged<GhosttyAppWakeup>.fromOpaque(userdata).takeUnretainedValue()
-        DispatchQueue.main.async { wakeup.view?.tickApp() }
+        let ref = Unmanaged<TerminalViewRef>.fromOpaque(userdata).takeUnretainedValue()
+        DispatchQueue.main.async { ref.view?.tickApp() }
       },
       action_cb: { _, _, _ in false },
       read_clipboard_cb: { _, _, _, _, _, _ in GHOSTTY_CLIPBOARD_READ_UNSUPPORTED },
@@ -639,7 +638,6 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     }
 
     app = createdApp
-    appWakeup = wakeup
     surface = createdSurface
     ghostty_app_set_color_scheme(createdApp, appearance.ghosttyColorScheme)
     ghostty_surface_set_color_scheme(createdSurface, appearance.ghosttyColorScheme)
@@ -662,11 +660,6 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     setNeedsLayout()
   }
 
-  private func refreshSurface() {
-    resetSurface()
-    createSurfaceIfPossible()
-  }
-
   private func destroySurface() {
     // Unblock the io thread before ghostty_surface_free joins it.
     tickApp()
@@ -679,7 +672,6 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     }
     surface = nil
     app = nil
-    appWakeup = nil
   }
 
   private func tickApp() {
@@ -717,7 +709,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
     output.write(bytes, reset: reset)
     streamedOutput = output
     if reset {
-      refreshSurface()
+      resetSurface()
     } else if surface == nil {
       createSurfaceIfPossible()
     } else {
@@ -748,15 +740,15 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   private func setupWriteCallback() {
     guard let surface else { return }
 
-    let userdata = Unmanaged.passUnretained(self).toOpaque()
+    let userdata = Unmanaged.passUnretained(callbackRef).toOpaque()
     ghostty_surface_set_write_callback(surface, { userdata, data, len in
       guard let userdata, let data, len > 0 else { return }
-      let view = Unmanaged<T3TerminalView>.fromOpaque(userdata).takeUnretainedValue()
+      let ref = Unmanaged<TerminalViewRef>.fromOpaque(userdata).takeUnretainedValue()
       let bytes = Data(bytes: data, count: len)
       guard let input = String(data: bytes, encoding: .utf8), !input.isEmpty else { return }
 
       DispatchQueue.main.async {
-        view.emitInput(input)
+        ref.view?.emitInput(input)
       }
     }, userdata)
   }
