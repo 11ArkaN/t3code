@@ -40,6 +40,7 @@ import {
 import * as ServerConfig from "../config.ts";
 import {
   agentDeviceConfigPath,
+  decodeAgentDeviceConfig,
   agentDeviceSession,
   writeAgentDeviceConfig,
 } from "./AgentDeviceTarget.ts";
@@ -1053,13 +1054,15 @@ export const make = Effect.gen(function* () {
         if (!(yield* fs.exists(file))) return;
         const entryPath = yield* installedAgentDeviceEntry(config.baseDir);
         if (entryPath === null) return;
+        const endpoint = yield* decodeAgentDeviceConfig(yield* fs.readFileString(file));
         const result = yield* runner.run({
           command: yield* resolveNodeExecutable("Device automation"),
           args: [entryPath, "close", "--config", file, "--session", session],
+          // agent-device 0.21.31 ignores the config file's token; the environment one authenticates.
           env: {
             ELECTRON_RUN_AS_NODE: "1",
-            AGENT_DEVICE_DAEMON_BASE_URL: undefined,
-            AGENT_DEVICE_DAEMON_AUTH_TOKEN: undefined,
+            AGENT_DEVICE_DAEMON_BASE_URL: endpoint.daemonBaseUrl,
+            AGENT_DEVICE_DAEMON_AUTH_TOKEN: endpoint.daemonAuthToken,
             AGENT_DEVICE_CONFIG: undefined,
           },
           timeout: Duration.seconds(15),

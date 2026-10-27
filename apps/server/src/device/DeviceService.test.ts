@@ -607,6 +607,7 @@ it.effect("closing a thread's device ends the agent-device session its agent was
     yield* fs.writeFileString(path.join(installDir, ".install-complete"), AGENT_DEVICE_VERSION);
 
     const commands: Array<ReadonlyArray<string>> = [];
+    const closeEnv: Array<Readonly<Record<string, string | undefined>> | undefined> = [];
     const http = HttpClient.make((request) =>
       Effect.succeed(
         HttpClientResponse.fromWeb(
@@ -671,6 +672,7 @@ it.effect("closing a thread's device ends the agent-device session its agent was
         run: (input) =>
           Effect.sync(() => {
             commands.push([input.command, ...input.args]);
+            if (input.args.includes("close")) closeEnv.push(input.env);
             return {
               code: ChildProcessSpawner.ExitCode(0),
               stdout: "",
@@ -711,6 +713,11 @@ it.effect("closing a thread's device ends the agent-device session its agent was
       );
     });
     expect(closed, `agent-device close for session ${flag("--session")}`).toHaveLength(1);
+    // agent-device authenticates the close with the token from the environment, not the config file.
+    expect(closeEnv[0]).toMatchObject({
+      AGENT_DEVICE_DAEMON_BASE_URL: "http://agent.test",
+      AGENT_DEVICE_DAEMON_AUTH_TOKEN: "test",
+    });
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
