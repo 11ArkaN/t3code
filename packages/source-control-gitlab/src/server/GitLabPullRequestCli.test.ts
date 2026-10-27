@@ -81,6 +81,34 @@ function mergeRequestJson(overrides: Record<string, unknown>): string {
   });
 }
 
+function servePipeline(input: {
+  readonly headPipeline: Record<string, unknown>;
+  readonly jobs: ReadonlyArray<Record<string, unknown>>;
+  readonly bridges: ReadonlyArray<Record<string, unknown>>;
+}) {
+  const pipelinePath = `projects/${input.headPipeline.project_id}/pipelines/${input.headPipeline.id}`;
+  mockedExecute.mockImplementation(({ cwd, args }) => {
+    const path = args[1] ?? "";
+    if (path.startsWith("projects/acme%2Fweb/merge_requests/7?")) {
+      return Effect.succeed(output(mergeRequestJson({ head_pipeline: input.headPipeline })));
+    }
+    if (path.startsWith(`${pipelinePath}/jobs?`)) {
+      return Effect.succeed(output(JSON.stringify(input.jobs)));
+    }
+    if (path.startsWith(`${pipelinePath}/bridges?`)) {
+      return Effect.succeed(output(JSON.stringify(input.bridges)));
+    }
+    return Effect.fail(
+      new GitLabCli.GitLabCliCommandError({
+        operation: "execute",
+        command: "glab",
+        cwd,
+        cause: new Error(`404 Not Found: ${path}`),
+      }),
+    );
+  });
+}
+
 function argsOfCall(index: number): ReadonlyArray<string> {
   return callAt(index).args;
 }
@@ -961,6 +989,113 @@ layer("GitLabPullRequestCli.layer", (it) => {
 
       assert.strictEqual(error._tag, "GitLabDiffRefsUnavailableError");
     }),
+  );
+
+  it.effect(
+    "shows each job of the head pipeline as its own check, naming the one that failed",
+    () =>
+      Effect.gen(function* () {
+        servePipeline({
+          headPipeline: {
+            id: 900,
+            project_id: 42,
+            status: "failed",
+            source: "merge_request_event",
+            web_url: "https://gitlab.com/acme/web/-/pipelines/900",
+          },
+          jobs: [
+            {
+              id: 2,
+              name: "unit-tests",
+              stage: "test",
+              status: "failed",
+              allow_failure: false,
+              web_url: "https://gitlab.com/acme/web/-/jobs/2",
+            },
+            {
+              id: 1,
+              name: "build",
+              stage: "build",
+              status: "success",
+              allow_failure: false,
+              web_url: "https://gitlab.com/acme/web/-/jobs/1",
+            },
+          ],
+          bridges: [],
+        });
+        const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+        const detail = yield* cli.getMergeRequestDetail({
+          cwd: "/w",
+          repository: "acme/web",
+          number: 7,
+        });
+
+        expect(
+          detail.checks
+            .map(({ name, status, url }) => ({ name, status, url }))
+            .toSorted((left, right) => left.name.localeCompare(right.name)),
+        ).toEqual([
+          { name: "build", status: "success", url: "https://gitlab.com/acme/web/-/jobs/1" },
+          { name: "unit-tests", status: "failure", url: "https://gitlab.com/acme/web/-/jobs/2" },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "fails a trigger job whose child pipeline failed, though the head pipeline passed",
+    () =>
+      Effect.gen(function* () {
+        servePipeline({
+          headPipeline: {
+            id: 901,
+            project_id: 42,
+            status: "success",
+            source: "merge_request_event",
+            web_url: "https://gitlab.com/acme/web/-/pipelines/901",
+          },
+          jobs: [
+            {
+              id: 11,
+              name: "build",
+              stage: "build",
+              status: "success",
+              allow_failure: false,
+              web_url: "https://gitlab.com/acme/web/-/jobs/11",
+            },
+          ],
+          bridges: [
+            {
+              id: 12,
+              name: "deploy-preview",
+              stage: "deploy",
+              status: "success",
+              allow_failure: false,
+              web_url: "https://gitlab.com/acme/web/-/jobs/12",
+              downstream_pipeline: {
+                id: 950,
+                status: "failed",
+                web_url: "https://gitlab.com/acme/preview/-/pipelines/950",
+              },
+            },
+          ],
+        });
+        const cli = yield* GitLabPullRequestCli.GitLabPullRequestCli;
+
+        const detail = yield* cli.getMergeRequestDetail({
+          cwd: "/w",
+          repository: "acme/web",
+          number: 7,
+        });
+
+        expect(
+          detail.checks.map(({ name, status, url }) => ({ name, status, url })),
+        ).toContainEqual({
+          name: "deploy-preview",
+          status: "failure",
+          url: "https://gitlab.com/acme/preview/-/pipelines/950",
+        });
+      }),
   );
 
   it.effect("reads who has access to the project and who is already on the merge request", () =>
