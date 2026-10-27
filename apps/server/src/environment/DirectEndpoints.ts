@@ -21,6 +21,7 @@ import {
   formatHostForUrl,
   isLoopbackHost,
   isPrivateNetworkAddress,
+  isVpnTunnelAddress,
   isWildcardHost,
   VIRTUAL_INTERFACE,
 } from "../startupAccess.ts";
@@ -38,11 +39,10 @@ export class DirectEndpoints extends Context.Service<
 >()("t3/environment/DirectEndpoints") {}
 
 // Credentials travel over HTTP; public IPs leak them and hostnames can resolve differently per client.
-// VPN and proxy clients put their tunnels in 198.18.0.0/15 (RFC 2544), which is never a LAN.
 const isAdvertisableAddress = (address: string): boolean =>
   NodeNet.isIPv4(address) &&
   !address.startsWith("127.") &&
-  !/^198\.1[89]\./.test(address) &&
+  !isVpnTunnelAddress(address) &&
   isPrivateNetworkAddress(address);
 
 // macOS utun names need Tailscale's IPv6 range to identify them; WARP shares its IPv4 range.

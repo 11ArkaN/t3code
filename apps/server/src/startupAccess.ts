@@ -55,6 +55,9 @@ export const isPrivateNetworkAddress = (address: string): boolean => {
   return NodeNet.isIPv4(ipv4) && !ipv4.startsWith("169.254.") && isPrivateNetworkHost(ipv4);
 };
 
+/** VPN and proxy clients put their tunnels in 198.18.0.0/15 (RFC 2544), which is never a LAN. */
+export const isVpnTunnelAddress = (address: string): boolean => /^198\.1[89]\./.test(address);
+
 /**
  * A private-network listener binds every interface but serves only
  * connections that stay on loopback, a LAN, or the tailnet. Both ends must be
@@ -101,7 +104,8 @@ const resolveHeadlessConnectionHost = (
     (entry) =>
       !entry.internal &&
       isIpv4Family(entry.family) &&
-      (!privateNetworkOnly || isPrivateNetworkAddress(entry.address)),
+      (!privateNetworkOnly ||
+        (isPrivateNetworkAddress(entry.address) && !isVpnTunnelAddress(entry.address))),
   );
   // A tailnet or other CGNAT address reaches fewer devices than the LAN one.
   const externalIpv4 = privateNetworkOnly
