@@ -723,14 +723,16 @@ const make = Effect.gen(function* () {
     const refreshedDefaultRefs = new Map<string, Set<string>>();
     const defaultBranches = new Map<string, string | null>();
     // Threads may store one checkout through different symlinked spellings; compare real paths.
+    // Keys are only compared, never opened, so they take pathKey's Windows case folding.
     const canonicalPaths = new Map<string, string>();
     const canonical = Effect.fnUntraced(function* (target: string) {
       const resolved = path.resolve(target);
       const cached = canonicalPaths.get(resolved);
       if (cached !== undefined) return cached;
       const realPath = yield* fs.realPath(resolved).pipe(Effect.orElseSucceed(() => resolved));
-      canonicalPaths.set(resolved, realPath);
-      return realPath;
+      const key = pathKey(realPath);
+      canonicalPaths.set(resolved, key);
+      return key;
     });
     const hasTerminal = Effect.fnUntraced(function* (worktreeKey: string) {
       for (const terminal of [...liveTerminals.values()].flatMap((entries) => [
