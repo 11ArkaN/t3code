@@ -1,8 +1,6 @@
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
-function formatWorkingTimer(startIso: string, endIso: string): string | null {
-  const startedAtMs = Date.parse(startIso);
-  const endedAtMs = Date.parse(endIso);
+function formatWorkingTimer(startedAtMs: number, endedAtMs: number): string | null {
   if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
     return null;
   }
@@ -15,6 +13,12 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return formatDuration(elapsedSeconds * 1_000);
 }
 
-export function formatWorkingTimerNow(startIso: string): string {
-  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
+// A server clock running ahead puts the start in the browser's future; count from mount instead.
+export function formatWorkingTimerNow(
+  startIso: string,
+  mountedAtMs: number,
+  nowMs: number,
+): string {
+  const startedAtMs = Math.min(Date.parse(startIso), mountedAtMs);
+  return formatWorkingTimer(startedAtMs, nowMs) ?? "0s";
 }

@@ -110,9 +110,10 @@ export const WorkGroupSection = memo(function WorkGroupSection({
 });
 
 function WorkingTimer({ createdAt }: { createdAt: string }) {
+  const [mountedAtMs] = useState(Date.now);
   return (
     <span
-      ref={tickTextContent(() => formatWorkingTimerNow(createdAt), true)}
+      ref={tickTextContent((nowMs) => formatWorkingTimerNow(createdAt, mountedAtMs, nowMs), true)}
       className="tabular-nums"
     />
   );
@@ -282,7 +283,7 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
     <CompactingLabel label={compacting} />
   ) : row.createdAt ? (
     <>
-      Working for <WorkingTimer createdAt={row.createdAt} />
+      Working for <WorkingTimer key={row.createdAt} createdAt={row.createdAt} />
     </>
   ) : (
     "Working..."
