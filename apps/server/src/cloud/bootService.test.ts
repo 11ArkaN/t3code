@@ -6,6 +6,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { HttpClient } from "effect/http";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -68,6 +69,36 @@ it.each([
 const macInstallerPath =
   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";
 
+const output = {
+  stdout: "",
+  stderr: "",
+  timedOut: false,
+  stdoutTruncated: false,
+  stderrTruncated: false,
+  stdoutInvalidUtf8: false,
+  stderrInvalidUtf8: false,
+};
+
+// launchctl on macOS 15: `bootout --wait` is a usage error (64) that leaves the job loaded,
+// bootout of an unloaded job fails with ESRCH (3), and bootstrap over a loaded label is EIO (5).
+const launchctl = (job: { loaded: boolean }, args: ReadonlyArray<string>) => {
+  if (args.includes("--wait")) return 64;
+  switch (args[0]) {
+    case "bootout":
+      if (!job.loaded) return 3;
+      job.loaded = false;
+      return 0;
+    case "print":
+      return job.loaded ? 0 : 113;
+    case "bootstrap":
+      if (job.loaded) return 5;
+      job.loaded = true;
+      return 0;
+    default:
+      return 0;
+  }
+};
+
 const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
   platform: NodeJS.Platform = "linux",
   installerPath = macInstallerPath,
@@ -91,6 +122,7 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     linger: string;
     enabled: boolean;
     active: boolean;
+    launchd?: { loaded: boolean };
   } = {
     failCommand: undefined,
     linger: "yes",
@@ -105,6 +137,12 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       commands.push(command);
       invocations.push(input);
       timeouts.set(command, input.timeout);
+      if (control.launchd !== undefined && input.command === "launchctl") {
+        return {
+          ...output,
+          code: ChildProcessSpawner.ExitCode(launchctl(control.launchd, input.args)),
+        };
+      }
       const failed = command === control.failCommand;
       if (!failed && command === "loginctl enable-linger --no-ask-password 501")
         control.linger = "yes";
@@ -835,6 +873,29 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       yield* service.install();
       expect((yield* service.status).current).toBe(true);
+    }),
+  );
+
+  // regression: #11995 macOS 15 launchctl rejects `bootout --wait` without stopping the job
+  it.effect("reinstalls over a loaded launch agent when launchctl rejects bootout --wait", () =>
+    Effect.gen(function* () {
+      const { service, control } = yield* makeHarness("darwin");
+      control.launchd = { loaded: false };
+      yield* service.install();
+
+      expect(yield* service.install().pipe(Effect.flip, Effect.option)).toEqual(Option.none());
+      expect(control.launchd.loaded).toBe(true);
+    }),
+  );
+
+  it.effect("uninstall unloads the launch agent when launchctl rejects bootout --wait", () =>
+    Effect.gen(function* () {
+      const { service, control } = yield* makeHarness("darwin");
+      control.launchd = { loaded: false };
+      yield* service.install();
+
+      expect(yield* service.uninstall).toBe(true);
+      expect(control.launchd.loaded).toBe(false);
     }),
   );
 
