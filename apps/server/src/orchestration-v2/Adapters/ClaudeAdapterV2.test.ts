@@ -8903,14 +8903,15 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  const bufferNotificationAfterRosterEmpties = Effect.gen(function* () {
+  const bufferWakeNotification = Effect.fn("bufferWakeNotification")(function* (options: {
+    readonly devServer: boolean;
+  }) {
     const harness = yield* makeWakeHarness;
-    const hasPendingBackgroundWorkForThread = harness.runtime.hasPendingBackgroundWorkForThread;
-    if (hasPendingBackgroundWorkForThread === undefined) {
-      return yield* Effect.die(
-        "Claude adapter runtime must expose hasPendingBackgroundWorkForThread.",
-      );
+    const hasPendingWakeForThread = harness.runtime.hasPendingWakeForThread;
+    if (hasPendingWakeForThread === undefined) {
+      return yield* Effect.die("Claude adapter runtime must expose hasPendingWakeForThread.");
     }
+    const hasPendingWake = () => hasPendingWakeForThread(harness.providerThread);
     const now = yield* DateTime.now;
 
     yield* harness.runtime.startTurn(
@@ -8924,27 +8925,47 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       }),
     );
     yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
+    if (options.devServer) {
+      yield* Queue.offer(
+        harness.sdkMessages,
+        claudeSdkFrame({
+          type: "system",
+          subtype: "background_tasks_changed",
+          tasks: [WAKE_TASK_ID, "dev-server"].map((taskId) => ({
+            task_id: taskId,
+            task_type: "local_bash",
+            description: taskId,
+          })),
+          uuid: "00000000-0000-4000-8000-000000000311",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+    }
     yield* Queue.offer(harness.sdkMessages, turnOneResult);
     yield* harness.awaitTerminal(1);
-    assert.isTrue(yield* hasPendingBackgroundWorkForThread(harness.providerThread));
+    const remaining = options.devServer ? 1 : 0;
+    assert.isFalse(yield* hasPendingWake());
 
     yield* harness.offerAndWait(wakeNotification);
     yield* harness.until(
       () =>
         (providerThreadRosterEvents(harness.events).at(-1)?.providerThread.pendingBackgroundTasks
-          ?.length ?? 0) === 0,
+          ?.length ?? 0) === remaining,
     );
     assert.lengthOf(harness.continuationRequests, 0);
-    return () => hasPendingBackgroundWorkForThread(harness.providerThread);
+    return hasPendingWake;
   });
 
-  it.effect("keeps the thread's background work pending until the wake turn claims it", () =>
+  it.effect.each([
+    { work: "no other background work", devServer: false },
+    { work: "a dev server still running", devServer: true },
+  ])("reports a pending wake from the buffered notification with $work", ({ devServer }) =>
     Effect.scoped(
       Effect.gen(function* () {
-        const hasPendingWork = yield* bufferNotificationAfterRosterEmpties;
+        const hasPendingWake = yield* bufferWakeNotification({ devServer });
         assert.isTrue(
-          yield* hasPendingWork(),
-          "the buffered task notification will wake Claude, so the thread still has background work",
+          yield* hasPendingWake(),
+          "the buffered task notification will wake Claude, so a wake turn is still pending",
         );
       }).pipe(
         Effect.provide(
@@ -8954,14 +8975,14 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  it.effect("stops holding the thread for a notification whose wake turn never opens", () =>
+  it.effect("stops reporting a pending wake for a notification whose wake turn never opens", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const hasPendingWork = yield* bufferNotificationAfterRosterEmpties;
+        const hasPendingWake = yield* bufferWakeNotification({ devServer: false });
         yield* TestClock.adjust("119 seconds");
-        assert.isTrue(yield* hasPendingWork());
+        assert.isTrue(yield* hasPendingWake());
         yield* TestClock.adjust("1 second");
-        assert.isFalse(yield* hasPendingWork());
+        assert.isFalse(yield* hasPendingWake());
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

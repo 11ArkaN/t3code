@@ -1018,9 +1018,10 @@ it.effect.each(["missing-session-terminal", "returned-interrupt", "superseded-at
 );
 
 it.effect.each([
-  { case: "a finished task awaits its wake turn", devServer: false, settles: false },
-  { case: "only a dev server it already lists runs", devServer: true, settles: true },
-])("Auto-settle with live background work when $case", ({ devServer, settles }) =>
+  { case: "waits for a pending wake turn", wakePending: true, devServer: false },
+  { case: "waits for a pending wake turn beside a dev server", wakePending: true, devServer: true },
+  { case: "settles a thread running only a dev server", wakePending: false, devServer: false },
+])("Auto-settle $case", ({ wakePending, devServer }) =>
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("background-work-auto-settle");
@@ -1051,8 +1052,8 @@ it.effect.each([
                 lastError: null,
               },
               events: Stream.fromQueue(events),
-              // Either an awaited task finished before its wake turn attached, or a dev server runs.
               hasPendingBackgroundWorkForThread: () => Effect.succeed(true),
+              hasPendingWakeForThread: () => Effect.succeed(wakePending),
               ensureThread: ({ threadId }) =>
                 Effect.succeed({
                   id: ProviderThreadId.make(`provider-thread:codex:${threadId}`),
@@ -1202,13 +1203,13 @@ it.effect.each([
         yield* worker.drain();
 
         const after = yield* orchestrator.getThreadProjection(threadId);
-        if (settles) {
+        if (!wakePending) {
           assert.equal(after.thread.settledOverride, "settled");
           return;
         }
         assert.isNull(
           after.thread.settledOverride,
-          "auto-settle settled the thread while its live provider session still reported background work",
+          "auto-settle settled the thread before its pending wake turn attached",
         );
         assert.deepEqual(
           after.providerSessions.map((session) => session.status),

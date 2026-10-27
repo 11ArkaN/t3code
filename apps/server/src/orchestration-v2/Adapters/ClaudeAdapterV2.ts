@@ -10573,25 +10573,31 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (nativeThreadId === undefined || nativeThreadId === null) {
               return false;
             }
-            if (
+            return (
               rosterForNativeThread(
                 yield* Ref.get(pendingBackgroundTasksByNativeThread),
                 nativeThreadId,
               ).size > 0
-            ) {
-              return true;
-            }
-            // A finished task's notification will wake Claude unless no wake frame ever follows.
-            const buffered = (yield* Ref.get(wakeBuffers)).get(nativeThreadId);
-            return (
-              buffered?.wakeNotificationBufferedAtMs != null &&
-              buffered.messages.some(
-                (message) => message.type === "system" && message.subtype === "task_notification",
-              ) &&
-              (yield* Clock.currentTimeMillis) - buffered.wakeNotificationBufferedAtMs <
-                Duration.toMillis(CLAUDE_WAKE_TURN_START_DEADLINE)
             );
           }),
+          hasPendingWakeForThread: Effect.fn("ClaudeAdapterV2.hasPendingWakeForThread")(
+            function* (providerThread) {
+              const nativeThreadId = providerThread.nativeThreadRef?.nativeId;
+              if (nativeThreadId === undefined || nativeThreadId === null) {
+                return false;
+              }
+              // A finished task's notification will wake Claude unless no wake frame ever follows.
+              const buffered = (yield* Ref.get(wakeBuffers)).get(nativeThreadId);
+              return (
+                buffered?.wakeNotificationBufferedAtMs != null &&
+                buffered.messages.some(
+                  (message) => message.type === "system" && message.subtype === "task_notification",
+                ) &&
+                (yield* Clock.currentTimeMillis) - buffered.wakeNotificationBufferedAtMs <
+                  Duration.toMillis(CLAUDE_WAKE_TURN_START_DEADLINE)
+              );
+            },
+          ),
           ensureThread: Effect.fn("ClaudeAdapterV2.ensureThread")(
             function* (threadInput: ProviderAdapter.ProviderAdapterV2EnsureThreadInput) {
               const createdAt = yield* DateTime.now;
