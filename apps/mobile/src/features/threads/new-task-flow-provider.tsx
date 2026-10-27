@@ -22,7 +22,6 @@ import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
 import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
-import { composerDraftHasUserContent } from "../../state/pending-new-tasks-model";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
@@ -49,6 +48,7 @@ import {
   createNewTaskDraft,
   findResumableNewTaskDraftKey,
   getComposerDraftSnapshot,
+  isComposerDraftInUse,
   isNewTaskDraftKey,
   removeComposerDraftAttachment,
   replaceComposerDraftAttachments,
@@ -414,8 +414,8 @@ export function NewTaskFlowProvider(
       return;
     }
     if (!resumeUnsentDraft) return;
-    // Text the user typed before drafts loaded wins over an older unsent draft.
-    const unsentDraftKey = composerDraftHasUserContent(getComposerDraftSnapshot(activeDraftKey))
+    // Work the user started before drafts loaded wins over an older unsent draft.
+    const unsentDraftKey = isComposerDraftInUse(activeDraftKey)
       ? null
       : findResumableNewTaskDraftKey(
           appAtomRegistry.get(composerDraftsAtom),

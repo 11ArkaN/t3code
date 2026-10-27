@@ -194,6 +194,7 @@ import {
   type ComposerDraft,
   findNewTaskDraftKeys,
   findResumableNewTaskDraftKey,
+  isComposerDraftInUse,
   flushComposerDrafts,
   getComposerDraftSnapshot,
   mergeComposerDraftContentState,
@@ -1991,6 +1992,22 @@ describe("mobile composer drafts", () => {
 
     const { "new-task:free": _free, ...withoutFree } = drafts;
     expect(findResumableNewTaskDraftKey(withoutFree, project, exclude)).toBeNull();
+  });
+
+  it("keeps a fresh draft the user is attaching to, so a resume cannot strand the attachment", () => {
+    const key = createNewTaskDraft({
+      environmentId: EnvironmentId.make("environment-1"),
+      projectId: ProjectId.make("project-1"),
+    });
+    expect(isComposerDraftInUse(key)).toBe(false);
+
+    const picker = startComposerDraftOperation(key);
+    expect(isComposerDraftInUse(key)).toBe(true);
+    picker.finish();
+    expect(isComposerDraftInUse(key)).toBe(false);
+
+    setComposerDraftText(key, "typed before drafts loaded");
+    expect(isComposerDraftInUse(key)).toBe(true);
   });
 
   it("merges persisted option memory without replacing newer choices", async () => {
