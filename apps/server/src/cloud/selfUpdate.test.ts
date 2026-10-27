@@ -408,6 +408,7 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     readonly managed?: boolean;
     readonly symlinkedHome?: boolean;
     readonly servicePlistStarts?: string;
+    readonly servicePlistThroughLink?: boolean;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -429,7 +430,11 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
     if (input.servicePlistStarts !== undefined) {
       const agentsDir = path.join(userHome, "Library", "LaunchAgents");
       yield* fs.makeDirectory(agentsDir, { recursive: true });
-      const program = path.join(versionsDir, input.servicePlistStarts, "t3");
+      const programHome = input.servicePlistThroughLink
+        ? path.join(tempDir, "alias-home")
+        : baseDir;
+      if (input.servicePlistThroughLink) yield* fs.symlink(realHome, programHome);
+      const program = path.join(programHome, "runtime", "versions", input.servicePlistStarts, "t3");
       yield* fs.writeFileString(
         path.join(agentsDir, "com.t3tools.t3code.service.plist"),
         `<plist><dict>\n<key>ProgramArguments</key>\n<array>\n<string>${program}</string>\n<string>__service-launcher</string>\n</array>\n</dict></plist>\n`,
@@ -477,11 +482,15 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
   );
 
   // In-place updates move the active version but leave the launch agent on the launcher's runtime.
-  it.effect("keeps the runtime a stopped service's launch agent starts", () =>
+  it.effect.each([
+    { name: "", throughLink: false },
+    { name: " through a symlinked T3 home", throughLink: true },
+  ])("keeps the runtime a stopped service's launch agent starts$name", ({ throughLink }) =>
     Effect.gen(function* () {
       const { removed, remaining } = yield* pruneOnStart({
         executable: "own runtime",
         servicePlistStarts: staleVersion,
+        servicePlistThroughLink: throughLink,
       });
       expect(removed).toEqual([]);
       expect(remaining).toEqual([staleVersion, packageJson.version].toSorted());
