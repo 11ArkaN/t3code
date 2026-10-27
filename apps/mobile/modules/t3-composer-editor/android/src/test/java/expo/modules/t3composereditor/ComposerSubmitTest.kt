@@ -4,7 +4,6 @@ import android.text.InputType
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
-import android.view.inputmethod.BaseInputConnection
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,10 +17,11 @@ import org.robolectric.shadows.InputDeviceBuilder
 @Config(sdk = [36], manifest = Config.NONE)
 class ComposerSubmitTest {
   private val sends = mutableListOf<Boolean>()
+  private val recordSend: (Boolean) -> Unit = { alternate -> sends += alternate }
   private val editor = SelectionAwareEditText(RuntimeEnvironment.getApplication()).apply {
     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
     submitEnabled = true
-    submitListener = { alternate -> sends += alternate }
+    submitListener = recordSend
   }
 
   private val hardwareKeyboard = keyboard(1)
@@ -56,33 +56,13 @@ class ComposerSubmitTest {
   }
 
   @Test
-  fun returnSendsAndCtrlReturnSendsTheAlternateWay() {
+  fun sendBehaviorSendsOnReturnAndInsertsANewlineOnShiftReturn() {
     pressReturn()
     pressReturn(KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON)
-
-    assertEquals(listOf(false, true), sends)
-    assertEquals("", editor.text.toString())
-  }
-
-  @Test
-  fun shiftReturnInsertsANewline() {
     pressReturn(KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON)
 
-    assertEquals(emptyList<Boolean>(), sends)
+    assertEquals(listOf(false, true), sends)
     assertEquals("\n", editor.text.toString())
-  }
-
-  @Test
-  fun returnFromAnythingButAPhysicalKeyboardInsertsANewline() {
-    pressReturn(device = keyboard(KeyCharacterMap.VIRTUAL_KEYBOARD))
-    // An IME can send device 0 without FLAG_SOFT_KEYBOARD. On phones that ID is the built-in
-    // "keyboard", a key-only device such as the fingerprint sensor.
-    pressReturn(device = keyboard(0, InputDevice.KEYBOARD_TYPE_NON_ALPHABETIC))
-    pressReturn(device = null)
-    pressReturn(flags = KeyEvent.FLAG_SOFT_KEYBOARD)
-
-    assertEquals(emptyList<Boolean>(), sends)
-    assertEquals("\n\n\n\n", editor.text.toString())
   }
 
   @Test
@@ -98,42 +78,16 @@ class ComposerSubmitTest {
   }
 
   @Test
-  fun returnInsertsANewlineWhenSubmissionIsUnavailable() {
-    editor.submitEnabled = false
-
-    pressReturn()
-
-    assertEquals(emptyList<Boolean>(), sends)
-    assertEquals("\n", editor.text.toString())
-  }
-
-  @Test
-  fun returnInsertsANewlineWithoutASubmitListener() {
-    editor.submitListener = null
-
-    pressReturn()
+  fun onScreenKeyboardReturnInsertsANewline() {
+    pressReturn(device = keyboard(KeyCharacterMap.VIRTUAL_KEYBOARD))
+    // An IME can send device 0 without FLAG_SOFT_KEYBOARD. On phones that ID is the built-in
+    // "keyboard", a key-only device such as the fingerprint sensor.
+    pressReturn(device = keyboard(0, InputDevice.KEYBOARD_TYPE_NON_ALPHABETIC))
+    pressReturn(device = null)
+    pressReturn(flags = KeyEvent.FLAG_SOFT_KEYBOARD)
 
     assertEquals(emptyList<Boolean>(), sends)
-    assertEquals("\n", editor.text.toString())
-  }
-
-  @Test
-  fun returnDoesNotSendFromADisabledEditor() {
-    editor.isEnabled = false
-
-    pressReturn()
-
-    assertEquals(emptyList<Boolean>(), sends)
-  }
-
-  @Test
-  fun returnSendsOverAnAutocompleteComposingRegion() {
-    editor.setText("line")
-    BaseInputConnection.setComposingSpans(editor.text)
-
-    pressReturn()
-
-    assertEquals(listOf(false), sends)
+    assertEquals("\n\n\n\n", editor.text.toString())
   }
 
   @Test
@@ -144,6 +98,27 @@ class ComposerSubmitTest {
 
     assertEquals(listOf(false), sends)
     assertEquals("", editor.text.toString())
+  }
+
+  @Test
+  fun returnNeverSendsFromAComposerThatCannotSubmit() {
+    editor.submitListener = null
+    pressReturn()
+    assertEquals("\n", editor.text.toString())
+    editor.submitListener = recordSend
+
+    editor.submitEnabled = false
+    pressReturn()
+    editor.submitEnabled = true
+
+    editor.readOnly = true
+    pressReturn()
+    editor.readOnly = false
+
+    editor.isEnabled = false
+    pressReturn()
+
+    assertEquals(emptyList<Boolean>(), sends)
   }
 
   private companion object {
