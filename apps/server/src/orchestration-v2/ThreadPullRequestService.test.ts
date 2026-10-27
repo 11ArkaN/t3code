@@ -112,15 +112,8 @@ describe("ThreadPullRequestServiceV2 reads", () => {
         const dependencies = Layer.mergeAll(
           Layer.mock(Orchestrator.OrchestratorV2)({
             streamDomainEvents: Stream.fromQueue(domainEvents),
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 2,
-                snapshotSequence: 1,
-                threads: [thread],
-                archivedThreads: [],
-              }),
-            getThreadEventSequence: () => Effect.succeed(1),
-            getThreadShell: () => Effect.succeed(thread),
+            getPullRequestSyncSnapshot: () =>
+              Effect.succeed({ snapshotSequence: 1, threads: [thread] }),
           }),
           Layer.mock(ProjectStore.ProjectStoreV2)({
             listShells: () => Effect.succeed([project]),
@@ -294,7 +287,8 @@ describe("ThreadPullRequestServiceV2 reads", () => {
       const dependencies = Layer.mergeAll(
         Layer.mock(Orchestrator.OrchestratorV2)({
           streamDomainEvents: Stream.never,
-          getShellSnapshot: (options) => Effect.orDie(projectionStore.getShellSnapshot(options)),
+          getPullRequestSyncSnapshot: (options) =>
+            Effect.orDie(projectionStore.getPullRequestSyncSnapshot(options)),
         }),
         Layer.mock(ProjectStore.ProjectStoreV2)({
           listShells: () => Effect.succeed([project]),
@@ -407,14 +401,9 @@ describe("ThreadPullRequestServiceV2 reads", () => {
           const dependencies = Layer.mergeAll(
             Layer.mock(Orchestrator.OrchestratorV2)({
               streamDomainEvents: Stream.never,
-              getShellSnapshot: () =>
+              getPullRequestSyncSnapshot: () =>
                 Deferred.succeed(sweepStarted, undefined).pipe(
-                  Effect.as({
-                    schemaVersion: 2,
-                    snapshotSequence: 1,
-                    threads: [thread],
-                    archivedThreads: [],
-                  }),
+                  Effect.as({ snapshotSequence: 1, threads: [thread] }),
                 ),
               dispatch: (command) =>
                 Effect.sync(() => {

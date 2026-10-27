@@ -731,6 +731,11 @@ function makeLocalCommandHarness(input: {
           getThreadRecords,
           getTurnStartContext,
           getRuntimeRecoveryProjection,
+          getRun: (_threadId, id) =>
+            Effect.as(
+              failReadIfRunning,
+              projection.runs.find((candidate) => candidate.id === id),
+            ),
           getTurnStartHistory: () =>
             Effect.fail(
               new ProjectionStore.ProjectionStoreReadError({
@@ -1362,10 +1367,11 @@ effectIt.effect("checks the run's status without loading the thread's history", 
     expect(yield* controls.shouldStartProviderTurn!()).toBe(true);
     expect(yield* controls.shouldFinalizeRun!()).toBe(true);
     // Each check needs one run row; the recovery projection reads every run and open turn item.
+    // The one read left is the start's inherited background items snapshot, not a status check.
     expect(
       harness.getRuntimeRecoveryProjection.mock.calls.length,
-      "run status checks that loaded the thread's recovery projection",
-    ).toBe(0);
+      "recovery projection reads beyond the inherited background items snapshot",
+    ).toBe(1);
   }),
 );
 
