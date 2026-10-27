@@ -2,7 +2,12 @@ import { ThreadId, TurnItemId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import type { WorkLogEntry } from "../../session-logic";
-import { toolGroupStats, withoutLeadingCd, withoutWorkspaceRoot } from "./ToolCallCard.logic";
+import {
+  toolCallState,
+  toolGroupStats,
+  withoutLeadingCd,
+  withoutWorkspaceRoot,
+} from "./ToolCallCard.logic";
 
 const at = (ms: number) => DateTime.makeUnsafe(new Date(Date.UTC(2026, 9, 27, 12, 0, 0, ms)));
 
@@ -75,5 +80,13 @@ describe("withoutWorkspaceRoot", () => {
     expect(withoutWorkspaceRoot('grep -rn "tool" /repo --exclude-dir=.git', "/repo")).toBe(
       'grep -rn "tool" . --exclude-dir=.git',
     );
+  });
+});
+
+describe("toolCallState", () => {
+  it("marks an unfinished call outside the working run as stopped, not done", () => {
+    const entry = { ...commandEntry("a", 0, 400), toolLifecycleStatus: "inProgress" as const };
+    expect(toolCallState(entry, true)).toBe("running");
+    expect(toolCallState(entry, false)).toBe("stopped");
   });
 });

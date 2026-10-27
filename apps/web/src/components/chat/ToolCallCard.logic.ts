@@ -2,7 +2,7 @@ import { workLogEntryIsToolLike, workEntryDisplayIndicatesToolFailure } from "..
 import type { WorkLogEntry } from "../../session-logic";
 import * as DateTime from "effect/DateTime";
 
-export type ToolCallState = "running" | "done" | "failed" | "none";
+export type ToolCallState = "running" | "done" | "failed" | "stopped" | "none";
 
 function entryItem(entry: WorkLogEntry) {
   return entry.projectedItem?.item ?? entry.structuredPayload;
@@ -30,7 +30,10 @@ export function toolCallStartedAt(entry: WorkLogEntry): string {
 export function toolCallState(entry: WorkLogEntry, live: boolean): ToolCallState {
   if (!workLogEntryIsToolLike(entry) || entry.itemType === "reasoning") return "none";
   if (workEntryDisplayIndicatesToolFailure(entry)) return "failed";
-  if (entry.toolLifecycleStatus === "inProgress") return live ? "running" : "none";
+  // An unfinished call outside the working run was interrupted; it must not read as done.
+  if (entry.toolLifecycleStatus === "inProgress" || entry.toolLifecycleStatus === "stopped") {
+    return live && entry.toolLifecycleStatus === "inProgress" ? "running" : "stopped";
+  }
   return "done";
 }
 

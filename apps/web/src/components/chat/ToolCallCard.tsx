@@ -17,7 +17,7 @@ const cardFrame = "border-border bg-foreground/[0.025]";
 const toolCardClassName = {
   whole: cn(cardFrame, "mt-1.5 rounded-xl border"),
   top: cn(cardFrame, "mt-1.5 rounded-t-xl border border-b-0"),
-  bottom: cn(cardFrame, "rounded-b-xl border border-t-0"),
+  bottom: cn(cardFrame, "mb-2 rounded-b-xl border border-t-0"),
 };
 
 function entryIconKey(entry: TimelineWorkEntry) {
@@ -40,16 +40,16 @@ function ToolStack({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
     if (seen.size === STACK_LIMIT) break;
   }
   return (
-    <span className="flex shrink-0 items-center [&>*+*]:-ms-1.5" aria-hidden>
+    <span className="flex shrink-0 items-center [&>*+*]:-ms-1" aria-hidden>
       {[...seen].map(([key, entry]) => (
         <span
           key={key}
-          className="flex size-5 items-center justify-center rounded-full bg-background text-icon-muted ring-1 ring-foreground/15"
+          className="flex size-5 items-center justify-center rounded-full bg-muted text-icon-muted ring-2 ring-background"
         >
           <ToolActivityIconView
             icon={entry.toolIcon ?? entry.toolSource?.icon}
             fallbackName={workEntryIconName(entry)}
-            className="block size-3 shrink-0 stroke-2"
+            className="block size-3.5 shrink-0 stroke-2"
             muted={false}
           />
         </span>
@@ -92,7 +92,7 @@ function CardHeader(props: {
       )}
     >
       <ToolStack entries={props.entries} />
-      <span className="min-w-0 truncate text-secondary-label">{props.label}</span>
+      <span className="min-w-0 truncate text-muted-foreground">{props.label}</span>
       {props.failedCount > 0 ? (
         <span className="shrink-0 text-destructive-foreground before:me-2 before:text-muted-foreground before:content-['·']">
           {props.failedCount} failed

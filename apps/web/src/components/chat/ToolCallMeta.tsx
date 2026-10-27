@@ -1,4 +1,4 @@
-import { CheckIcon, CircleDashedIcon, XIcon } from "lucide-react";
+import { CheckIcon, CircleDashedIcon, MinusIcon, XIcon } from "lucide-react";
 import { use } from "react";
 import { formatDuration, type WorkLogEntry } from "../../session-logic";
 import { cn } from "~/lib/utils";
@@ -33,13 +33,18 @@ function StatusGlyph({ state }: { state: ToolCallState }) {
   if (state === "failed") {
     return <XIcon className="size-3.5 shrink-0 text-destructive-foreground" aria-hidden />;
   }
+  if (state === "stopped") {
+    return <MinusIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />;
+  }
   return <CircleDashedIcon className="size-3.5 shrink-0 text-foreground/80" aria-hidden />;
 }
 
 /** Trailing result note, duration, and status for one call. Running calls tick their elapsed time. */
 export function ToolCallMeta({ entry, state }: { entry: WorkLogEntry; state: ToolCallState }) {
   const { timestampFormat } = use(TimelineRowCtx);
-  if (state === "none") return null;
+  if (state === "none") {
+    return <TimelineRowTimestamp createdAt={entry.createdAt} timestampFormat={timestampFormat} />;
+  }
   const durationMs = state === "done" || state === "failed" ? toolCallDurationMs(entry) : null;
   const note = state === "failed" ? toolCallResultNote(entry) : null;
   const startedAt = toolCallStartedAt(entry);

@@ -293,13 +293,12 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
         ? "Thinking"
         : "Thought"
       : questionHeading ||
-        (displayLabel ??
-          (toolCallCards && workEntry.command
-            ? withoutWorkspaceRoot(
-                withoutLeadingCd(workEntryDisplayLabel(workEntry, workspaceRoot)),
-                workspaceRoot,
-              )
-            : workEntryDisplayLabel(workEntry, workspaceRoot)));
+        (toolCallCards && workEntry.command
+          ? withoutWorkspaceRoot(
+              withoutLeadingCd(displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot)),
+              workspaceRoot,
+            )
+          : (displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot)));
   const answerPreview =
     workEntry.questionAnswer && hasQuestionAnswer(workEntry.questionAnswer)
       ? getQuestionAnswerPreview(workEntry.questionAnswer)
@@ -380,9 +379,11 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ? "font-medium text-destructive"
       : cardState !== "none"
         ? "text-foreground/90"
-        : workLogEntryIsToolLike(workEntry)
-          ? "text-secondary-label"
-          : "text-foreground/80";
+        : toolCallCards && isReasoning
+          ? "text-muted-foreground"
+          : workLogEntryIsToolLike(workEntry)
+            ? "text-secondary-label"
+            : "text-foreground/80";
   const threadLabel = isReasoning ? null : threadReadLabel(previewText, threadTarget);
   const accessiblePreview = [threadLabel?.text ?? previewText, answerPreview]
     .filter(Boolean)
@@ -398,8 +399,8 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       ]
         .filter(Boolean)
         .join(", ")
-    : cardState === "running"
-      ? `${accessiblePreview}, running`
+    : cardState === "running" || cardState === "stopped"
+      ? `${accessiblePreview}, ${cardState}`
       : cardState === "done"
         ? `${accessiblePreview}, completed${callDurationMs !== null ? ` in ${formatDuration(callDurationMs)}` : ""}`
         : accessiblePreview;
