@@ -656,7 +656,7 @@ function ThreadTerminal(props: {
     return result._tag === "Success";
   };
 
-  const pasteFromClipboard = async (readText: () => Promise<string> = Clipboard.getStringAsync) => {
+  const pasteText = async (readText: () => Promise<string>) => {
     await pasteSession.paste({
       readText,
       write: writeInput,
@@ -679,7 +679,7 @@ function ThreadTerminal(props: {
       hostPlatform,
     });
     if (resolved.kind === "paste") {
-      void pasteFromClipboard();
+      void pasteText(Clipboard.getStringAsync);
       return;
     }
     void writeInput(resolved.data);
@@ -691,11 +691,6 @@ function ThreadTerminal(props: {
     }
 
     writeModifiedInput(data);
-  };
-
-  const handleNativePaste = (text: string) => {
-    setPendingModifier(null);
-    void pasteFromClipboard(async () => text);
   };
 
   const handleResize = (size: { readonly cols: number; readonly rows: number }) => {
@@ -802,9 +797,9 @@ function ThreadTerminal(props: {
     writeModifiedInput(action.data);
   };
 
-  const handlePaste = () => {
+  const handlePaste = (readText: () => Promise<string>) => {
     setPendingModifier(null);
-    void pasteFromClipboard();
+    void pasteText(readText);
   };
 
   const handleDismissKeyboard = () => {
@@ -973,7 +968,7 @@ function ThreadTerminal(props: {
                       Dialog.alert("No terminal output", "There is no visible output to attach.");
                   }}
                   onInput={handleInput}
-                  onPaste={handleNativePaste}
+                  onPaste={(text) => handlePaste(async () => text)}
                   onResize={handleResize}
                   style={{ flex: 1 }}
                   terminalKey={terminalKey}
@@ -1055,7 +1050,7 @@ function ThreadTerminal(props: {
                       <ComposerToolbarButton
                         accessibilityLabel="Paste"
                         icon={{ ios: "doc.on.clipboard", android: "content_paste" }}
-                        onPress={handlePaste}
+                        onPress={() => handlePaste(Clipboard.getStringAsync)}
                         showChevron={false}
                       />
                       <ComposerToolbarButton

@@ -110,7 +110,7 @@ private enum TerminalHardwareKeyEncoder {
   }
 }
 
-/// Weak handle for Ghostty callbacks, which can run on the io thread after the view is gone.
+/// Ghostty callbacks can fire during deinit and hop to main after it, so they must not retain the view.
 private final class TerminalViewRef {
   weak var view: T3TerminalView?
 }
@@ -836,7 +836,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate, UIEditMenuInte
   }
 
   private func emitPaste() {
-    guard !readOnly, let text = UIPasteboard.general.string, !text.isEmpty else { return }
+    guard let text = UIPasteboard.general.string, !text.isEmpty else { return }
     onPaste(["text": text])
   }
 
