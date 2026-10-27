@@ -92,13 +92,14 @@ export async function loadWindowsRegionCapture(): Promise<
         if (bitmap === 0n) throw new Error("Windows window capture could not allocate a bitmap.");
         try {
           const previous = call(gdi32, "SelectObject", [memory, bitmap]);
-          let copied: number;
+          let copied: { value: number; errnoCode: number; errnoMessage: string };
           try {
             // BOOL is 32 bits; ffi-rs reads a Boolean return as one byte.
             copied = load({
               library: gdi32,
               funcName: "BitBlt",
               retType: DataType.I32,
+              errno: true as const,
               paramsType: [
                 DataType.BigInt,
                 DataType.I32,
@@ -126,7 +127,11 @@ export async function loadWindowsRegionCapture(): Promise<
             // GetDIBits and DeleteObject both need the bitmap deselected.
             call(gdi32, "SelectObject", [memory, previous]);
           }
-          if (copied === 0) throw new Error("Windows window capture failed to copy the screen.");
+          if (copied.value === 0) {
+            throw new Error(
+              `Windows window capture failed to copy the screen: ${copied.errnoMessage}`,
+            );
+          }
 
           const info = Buffer.alloc(BITMAPINFO_SIZE);
           info.writeUInt32LE(BITMAPINFOHEADER_SIZE, 0);
