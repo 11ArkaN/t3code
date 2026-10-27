@@ -93,6 +93,13 @@ export function PullRequestGuideTab({
         {running ? "Reading the change..." : label}
       </Button>
     ) : null;
+  // A failed run's detail can be hundreds of lines of CLI stderr.
+  const failureDetail =
+    failure === null ? null : (
+      <div className="max-h-40 w-full overflow-y-auto text-left font-mono text-xs whitespace-pre-wrap wrap-anywhere">
+        {failure}
+      </div>
+    );
 
   if (guide === null) {
     if (query.isPending && data === null) {
@@ -103,18 +110,21 @@ export function PullRequestGuideTab({
       );
     }
     return (
-      <div className="flex h-full min-h-48 flex-col items-center justify-center-safe gap-2 overflow-y-auto scrollbar-gutter-both px-4 py-10 text-center [&>*]:shrink-0">
+      <div className="flex max-h-full min-h-48 flex-col items-center justify-center-safe gap-2 overflow-y-auto scrollbar-gutter-both px-4 py-10 text-center [&>*]:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {running ? "Writing a review guide" : "No review guide yet"}
         </p>
-        {/* A failed run's detail can be hundreds of lines of CLI stderr. */}
-        <p className="max-h-48 max-w-md overflow-y-auto text-xs whitespace-pre-wrap wrap-break-word text-muted-foreground">
-          {failure ??
-            query.error ??
-            (running
-              ? "An agent is reading the change. A large one takes a few minutes. You can leave; you will be told when it is ready."
-              : "A guide is a tour of the change: stops through the code in reading order, with the calls only a maintainer can make.")}
+        <p className="max-w-md text-xs text-muted-foreground">
+          {failure !== null
+            ? "The last attempt failed."
+            : (query.error ??
+              (running
+                ? "An agent is reading the change. A large one takes a few minutes. You can leave; you will be told when it is ready."
+                : "A guide is a tour of the change: stops through the code in reading order, with the calls only a maintainer can make."))}
         </p>
+        {failureDetail === null ? null : (
+          <div className="w-full max-w-md text-muted-foreground">{failureDetail}</div>
+        )}
         {writeButton(failure === null ? "Write guide" : "Try again", "sm")}
       </div>
     );
@@ -125,11 +135,12 @@ export function PullRequestGuideTab({
       <Alert variant={running ? "info" : "warning"}>
         {running ? <Spinner /> : <TriangleAlertIcon />}
         <AlertDescription>
-          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap wrap-break-word">
-            {running
-              ? "Rewriting this guide. You will be told when the new one is ready."
-              : (failure ?? "Written before the latest push.")}
-          </div>
+          {running
+            ? "Rewriting this guide. You will be told when the new one is ready."
+            : failure !== null
+              ? "The last rewrite failed."
+              : "Written before the latest push."}
+          {running ? null : failureDetail}
         </AlertDescription>
         {!running && canWrite ? <AlertAction>{writeButton("Rewrite", "xs")}</AlertAction> : null}
       </Alert>
