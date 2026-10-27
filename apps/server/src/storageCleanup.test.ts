@@ -1313,18 +1313,30 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
-  it.live.each(["before-check", "while-measuring"] as const)(
-    "keeps a worktree protected by a missing project root (%s)",
-    (timing) =>
+  it.live.each([
+    ["before-check", "stored"],
+    ["while-measuring", "stored"],
+    ["before-check", "symlinked parent"],
+    ["while-measuring", "symlinked parent"],
+  ] as const)(
+    "keeps a worktree protected by a missing project root (%s, %s spelling)",
+    ([timing, spelling]) =>
       runCleanupTest(
         Effect.gen(function* () {
           const fixture = yield* pausedMeasurementFixture();
+          let worktree = fixture.worktree;
+          if (spelling === "symlinked parent") {
+            const linkedParent = `${yield* fixture.fs.makeTempDirectoryScoped({ prefix: "cleanup-link-" })}/worktrees`;
+            yield* fixture.fs.symlink(fixture.config.worktreesDir, linkedParent);
+            worktree = `${linkedParent}/feature`;
+            fixture.setThreads([shell({ branch: "feature", worktreePath: worktree })]);
+          }
           if (timing === "before-check")
-            fixture.setProjectRoots([fixture.repo, `${fixture.worktree}/removed-checkout`]);
+            fixture.setProjectRoots([fixture.repo, `${worktree}/removed-checkout`]);
           const cleanup = yield* fixture.service.runNow.pipe(Effect.forkChild);
           if (timing === "while-measuring") {
             yield* Deferred.await(fixture.measuring);
-            fixture.setProjectRoots([fixture.repo, `${fixture.worktree}/removed-checkout`]);
+            fixture.setProjectRoots([fixture.repo, `${worktree}/removed-checkout`]);
           }
           yield* Deferred.succeed(fixture.resume, undefined);
           const report = yield* Fiber.join(cleanup);

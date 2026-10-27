@@ -321,18 +321,21 @@ const make = Effect.gen(function* () {
   });
 
   const containsProjectRoot = Effect.fn("StorageCleanup.containsProjectRoot")(function* (
-    worktreePath: string,
+    worktreePaths: ReadonlyArray<string>,
     projects: ReadonlyArray<{ readonly workspaceRoot: string }>,
   ) {
+    const contains = (projectPath: string) =>
+      worktreePaths.some(
+        (worktreePath) =>
+          pathKey(projectPath) === pathKey(worktreePath) || inside(worktreePath, projectPath),
+      );
     for (const project of projects) {
       const projectPath = path.resolve(project.workspaceRoot);
-      if (pathKey(projectPath) === pathKey(worktreePath) || inside(worktreePath, projectPath))
-        return true;
+      if (contains(projectPath)) return true;
       const realPath = yield* fs
         .realPath(projectPath)
         .pipe(Effect.orElseSucceed(() => projectPath));
-      if (pathKey(realPath) === pathKey(worktreePath) || inside(worktreePath, realPath))
-        return true;
+      if (contains(realPath)) return true;
     }
     return false;
   });
@@ -816,7 +819,9 @@ const make = Effect.gen(function* () {
           return keep("worktree is a symbolic link");
         if (!roots.some((root) => inside(root, realPath)))
           return keep("outside the managed worktree folder");
-        if (yield* containsProjectRoot(worktreeKey, [project, ...snapshot.projects]))
+        if (
+          yield* containsProjectRoot([worktreePath, worktreeKey], [project, ...snapshot.projects])
+        )
           return keep("contains a project checkout");
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File")
           return keep("not a linked worktree");
@@ -934,7 +939,7 @@ const make = Effect.gen(function* () {
         // Re-read this path's threads and sessions so new activity cancels removal; full per-worktree snapshots take seconds.
         const blockedSinceCheck = Effect.fnUntraced(function* () {
           const latestProjects = yield* projectStore.listShells();
-          if (yield* containsProjectRoot(worktreeKey, [project, ...latestProjects]))
+          if (yield* containsProjectRoot([worktreePath, worktreeKey], [project, ...latestProjects]))
             return "contains a project checkout";
           const bindings = yield* projections.getThreadWorktreePaths({ includeArchived: true });
           const bindingKeys = yield* Effect.forEach(bindings, (binding) =>
