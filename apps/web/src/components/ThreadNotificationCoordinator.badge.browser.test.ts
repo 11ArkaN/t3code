@@ -92,6 +92,7 @@ const thread = {
   archivedAt: null as string | null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
+  pendingRequestId: "request-1",
   session: null as { status: string } | null,
   latestTurn: { turnId: "turn", state: "running", completedAt: null as string | null },
 };
@@ -130,9 +131,9 @@ function toV2ThreadShell(input: typeof thread) {
           ? "failed"
           : "running",
     pendingRuntimeRequest: input.hasPendingUserInput
-      ? { id: "request-1", kind: "user_input", createdAt: SHELL_NOW }
+      ? { id: input.pendingRequestId, kind: "user_input", createdAt: SHELL_NOW }
       : input.hasPendingApprovals
-        ? { id: "request-1", kind: "command", createdAt: SHELL_NOW }
+        ? { id: input.pendingRequestId, kind: "command", createdAt: SHELL_NOW }
         : null,
     latestVisibleMessage: null,
     latestUserMessageAt: null,
@@ -244,4 +245,24 @@ it("holds a completion through a continuation gap and notifies once it settles",
   expect(TestNotification.sent).toEqual([]);
   await vi.advanceTimersByTimeAsync(1);
   expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Thread completed"]);
+});
+
+it("notifies a pending approval once while runs queue behind it", async () => {
+  await using app = setup();
+  app.start();
+  const waiting = (turnId: string, pendingRequestId = "request-1") => ({
+    hasPendingApprovals: true,
+    pendingRequestId,
+    latestTurn: { turnId, state: "running", completedAt: null },
+  });
+  state.shells.set("one", shell(waiting("turn-1")));
+  // Each queued message becomes the shell's latest run while the approval stays pending.
+  state.shells.set("one", shell(waiting("turn-2")));
+  state.shells.set("one", shell(waiting("turn-3")));
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Approval needed"]);
+  state.shells.set("one", shell(waiting("turn-3", "request-2")));
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual([
+    "Approval needed",
+    "Approval needed",
+  ]);
 });
