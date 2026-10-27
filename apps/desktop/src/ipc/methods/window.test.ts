@@ -8,13 +8,15 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { vi } from "vite-plus/test";
 
-const { focusedWebContents, ownerWindow } = vi.hoisted(() => ({
+const { focusedWebContents, ownerWindow, menuPopup } = vi.hoisted(() => ({
   focusedWebContents: vi.fn(),
   ownerWindow: vi.fn(),
+  menuPopup: vi.fn(),
 }));
 vi.mock("electron", () => ({
   webContents: { getFocusedWebContents: focusedWebContents },
   BrowserWindow: { fromWebContents: ownerWindow },
+  Menu: { buildFromTemplate: () => ({ popup: menuPopup }) },
 }));
 
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
@@ -22,12 +24,14 @@ import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
+import * as ElectronMenu from "../../electron/ElectronMenu.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import {
   getLocalEnvironmentBootstraps,
   getRelayTelemetryEnabled,
   pickProjectFavicon,
   probeRemoteEditors,
+  showContextMenu,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -264,6 +268,35 @@ describe("pickProjectFavicon", () => {
 
       assert.strictEqual(result, null);
       assert.strictEqual(pickFiles.mock.calls.length, 0);
+    }),
+  );
+});
+
+describe("showContextMenu", () => {
+  it.effect("opens a keyboard-invoked menu as keyboard-sourced so the first item is focused", () =>
+    Effect.gen(function* () {
+      menuPopup.mockImplementation((options: Electron.PopupOptions) => options.callback?.());
+      const window = { id: 1, webContents: { getZoomFactor: () => 1 } } as Electron.BrowserWindow;
+
+      yield* showContextMenu
+        .handler({
+          items: [{ id: "open-in-preview", label: "Open in integrated browser" }],
+          position: { x: 40, y: 20 },
+          source: "keyboard",
+        })
+        .pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ElectronMenu.layer,
+              Layer.mock(ElectronWindow.ElectronWindow)({
+                focusedMainOrFirst: Effect.succeedSome(window),
+              }),
+            ),
+          ),
+        );
+
+      assert.strictEqual(menuPopup.mock.calls.length, 1);
+      assert.strictEqual(menuPopup.mock.calls[0]?.[0]?.sourceType, "keyboard");
     }),
   );
 });
