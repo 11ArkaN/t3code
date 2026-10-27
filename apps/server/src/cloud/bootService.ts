@@ -186,7 +186,10 @@ export interface BootServiceStep {
   /** Non-zero exit is logged and ignored. */
   readonly optional?: boolean;
   readonly timeout?: Duration.Input;
-  /** After the command succeeds, rerun the command with these args until they fail, within `timeout`. */
+  /**
+   * Then rerun the command with these args until they fail, within `timeout`. The step succeeds
+   * once they fail, whatever the first command exited with.
+   */
   readonly waitWhile?: ReadonlyArray<string>;
 }
 
@@ -298,8 +301,8 @@ function launchdManager(input: {
   const domainTarget = `gui/${input.uid}`;
   const serviceTarget = `${domainTarget}/${BOOT_SERVICE_LAUNCHD_LABEL}`;
   // Unloaded jobs may reject bootout/enable. Bootstrap starts RunAtLoad/KeepAlive jobs; kickstart would restart them.
-  // bootout can return while the job drains through ExitTimeOut, and a bootstrap then fails EIO,
-  // so wait until `print` no longer finds the label. macOS 15 rejects the undocumented `bootout --wait`.
+  // bootout can return (0, or 36 EINPROGRESS) while the job drains through ExitTimeOut, and a bootstrap
+  // then fails EIO, so wait until `print` no longer finds the label. macOS 15 rejects `bootout --wait`.
   const bootout = {
     command: "launchctl",
     args: ["bootout", serviceTarget],
@@ -632,28 +635,30 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
   const succeeded = (result: Option.Option<ProcessRunner.ProcessRunOutput>) =>
     Option.isSome(result) && result.value.code === 0;
 
-  const waitWhile = (entry: BootServiceStep) =>
-    entry.waitWhile === undefined
-      ? Effect.void
-      : probe(entry.command, entry.waitWhile).pipe(
-          Effect.repeat({ while: succeeded, schedule: Schedule.spaced(WAIT_WHILE_INTERVAL) }),
-          Effect.timeoutOrElse({
-            duration: entry.timeout ?? STOP_STEP_TIMEOUT,
-            orElse: () => Effect.fail(new BootServiceCommandError({ step: entry.step })),
-          }),
-          Effect.tapError(logFailure),
-        );
+  const waitWhile = (entry: BootServiceStep, args: ReadonlyArray<string>) =>
+    probe(entry.command, args).pipe(
+      Effect.repeat({ while: succeeded, schedule: Schedule.spaced(WAIT_WHILE_INTERVAL) }),
+      Effect.timeoutOrElse({
+        duration: entry.timeout ?? STOP_STEP_TIMEOUT,
+        orElse: () => Effect.fail(new BootServiceCommandError({ step: entry.step })),
+      }),
+      Effect.tapError(logFailure),
+    );
 
   const runSteps = (steps: ReadonlyArray<BootServiceStep>) =>
     Effect.forEach(
       steps,
       (entry) => {
-        const run = runStep(
+        const command = runStep(
           entry.step,
           entry.command,
           entry.args,
           entry.timeout === undefined ? undefined : { timeout: entry.timeout },
-        ).pipe(Effect.andThen(waitWhile(entry)));
+        );
+        const run =
+          entry.waitWhile === undefined
+            ? Effect.asVoid(command)
+            : command.pipe(Effect.ignore, Effect.andThen(waitWhile(entry, entry.waitWhile)));
         return entry.optional === true ? run.pipe(Effect.ignore) : run.pipe(Effect.asVoid);
       },
       { discard: true },

@@ -84,7 +84,8 @@ const output = {
 
 // launchctl on macOS 15: `bootout --wait` is a usage error (64) that leaves the job loaded,
 // bootout of an unloaded job fails with ESRCH (3), and bootstrap over a loaded label is EIO (5).
-// A booted-out job stays loaded for `exitPrints` more prints while it drains through ExitTimeOut.
+// A booted-out job stays loaded for `exitPrints` more prints while it drains through ExitTimeOut,
+// and bootout then returns EINPROGRESS (36).
 interface LaunchdJob {
   loaded: boolean;
   exitPrints?: number;
@@ -97,7 +98,7 @@ const launchctl = (job: LaunchdJob, args: ReadonlyArray<string>) => {
       if (!job.loaded) return 3;
       job.exiting = job.exitPrints ?? 0;
       job.loaded = job.exiting > 0;
-      return 0;
+      return job.loaded ? 36 : 0;
     case "print":
       if (job.exiting !== undefined && --job.exiting < 0) {
         job.loaded = false;
@@ -920,15 +921,16 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const { service, control, commands } = yield* makeHarness("darwin");
       yield* service.install();
       control.launchd = { loaded: true, exitPrints: 2 };
-      const bootedOut = yield* Deferred.make<void>();
+      // The first command after bootout is the wait's print, or a premature bootstrap.
+      const afterBootout = yield* Deferred.make<void>();
       control.onCommand = (command) =>
-        command.startsWith("launchctl bootout ")
-          ? Deferred.succeed(bootedOut, undefined)
+        /^launchctl (print|bootstrap) /.test(command)
+          ? Deferred.succeed(afterBootout, undefined)
           : Effect.void;
       commands.length = 0;
 
       const reinstall = yield* service.install().pipe(Effect.forkChild);
-      yield* Deferred.await(bootedOut);
+      yield* Deferred.await(afterBootout);
       yield* TestClock.adjust("1 second");
       yield* Fiber.join(reinstall);
 
