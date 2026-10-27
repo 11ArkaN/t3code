@@ -19,12 +19,13 @@ that cannot run V3 will not start.
 
 ## Models
 
-The model picker lists the models your Kiro account can use once Kiro is signed in. **Kiro
-default** lets Kiro choose (its `auto` model). A model your account cannot use stops the turn with
-an error instead of running on another model.
+The model picker lists the models your Kiro account can use once Kiro is signed in. New threads
+start on your Kiro default model: `auto`, which lets Kiro choose, unless your account or
+organization sets another. A model your account cannot use stops the turn with an error instead of
+running on another model.
 
 Models with adjustable reasoning effort, such as recent Claude Opus and Sonnet models and GPT-5.6,
-show a **Reasoning** setting with only the levels Kiro offers for that model. **Kiro default** and
+show a **Reasoning** setting with only the levels Kiro offers for that model. Your default model and
 models without effort control run at Kiro's own setting.
 
 ## Agents

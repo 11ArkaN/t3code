@@ -180,17 +180,17 @@ describe("KiroProvider", () => {
         "chat --list-models --format json": { stdout: `${KIRO_MODEL_LIST}\n`, code: 0 },
       });
       assert.deepEqual(
-        snapshot.models.map((model) => [model.slug, model.isDefault === true]),
+        snapshot.models.map((model) => [model.slug, model.name, model.isDefault === true]),
         [
-          ["default", true],
-          ["claude-sonnet-4.5", false],
-          ["claude-haiku-4.5", false],
+          ["default", "auto", true],
+          ["claude-sonnet-4.5", "claude-sonnet-4.5", false],
+          ["claude-haiku-4.5", "claude-haiku-4.5", false],
         ],
       );
     }),
   );
 
-  it.effect("keeps the id Kiro's model list names as its default for Kiro default", () =>
+  it.effect("names Kiro default after the model Kiro's list names as its default", () =>
     Effect.gen(function* () {
       const signedIn = {
         "--version": { stdout: "kiro-cli 2.27.0\n", code: 0 },
@@ -206,12 +206,21 @@ describe("KiroProvider", () => {
           code: 0,
         },
       });
+      assert.deepEqual(
+        listed.snapshot.models.map((model) => [model.slug, model.name]),
+        [
+          ["auto", "auto"],
+          ["default", "claude-sonnet-4.5"],
+          ["claude-haiku-4.5", "claude-haiku-4.5"],
+        ],
+      );
       assert.equal(kiroDefaultModelId(listed.snapshot.models), "claude-sonnet-4.5");
       // An unparsable list keeps the built-in entry, which falls back to `auto`.
       const unlisted = yield* check({
         ...signedIn,
         "chat --list-models --format json": { stdout: "not json\n", code: 0 },
       });
+      assert.equal(unlisted.snapshot.models[0]?.name, "Kiro default");
       assert.equal(kiroDefaultModelId(unlisted.snapshot.models), "auto");
     }),
   );
@@ -227,10 +236,10 @@ describe("KiroProvider", () => {
         },
       });
       assert.deepEqual(
-        snapshot.models.map((model) => [model.slug, model.isDefault === true]),
+        snapshot.models.map((model) => [model.slug, model.name, model.isDefault === true]),
         [
-          ["default", true],
-          ["claude-sonnet-4.5", false],
+          ["default", "Kiro default", true],
+          ["claude-sonnet-4.5", "claude-sonnet-4.5", false],
         ],
       );
       assert.equal(kiroDefaultModelId(snapshot.models), "auto");

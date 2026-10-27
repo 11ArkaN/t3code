@@ -225,8 +225,9 @@ const decodeKiroModelList = Schema.decodeUnknownOption(KiroModelList);
 
 /**
  * Reads `kiro-cli chat --list-models --format json`, the account's models. The
- * default entry becomes "Kiro default" with Kiro's id as its alias. Sessions
- * advertise models only after they start; anything unparsable keeps the built-in list.
+ * default entry keeps its name but takes the "default" slug, with Kiro's id as its
+ * alias. Sessions advertise models only after they start; anything unparsable
+ * keeps the built-in list.
  */
 function kiroModelsFromList(
   output: { readonly code: number; readonly stdout: string } | undefined,
@@ -235,9 +236,11 @@ function kiroModelsFromList(
   const list = Option.getOrUndefined(decodeKiroModelList(output.stdout.trim()));
   if (list === undefined || list.models.length === 0) return undefined;
   const defaultId = list.default_model ?? KIRO_FALLBACK_DEFAULT_MODEL;
+  const listedDefault = list.models.find((model) => model.model_id === defaultId);
   const defaultModel: ServerProviderModel = {
     slug: KIRO_DEFAULT_MODEL_SLUG,
-    name: "Kiro default",
+    // Named after the model it runs, so a named default isn't hidden behind "Kiro default".
+    name: listedDefault ? (listedDefault.model_name ?? listedDefault.model_id) : "Kiro default",
     aliases: [defaultId],
     isCustom: false,
     isDefault: true,
@@ -246,7 +249,7 @@ function kiroModelsFromList(
     capabilities: EMPTY_CAPABILITIES,
   };
   const models = list.models.map((model) =>
-    model.model_id === defaultId
+    model === listedDefault
       ? defaultModel
       : {
           slug: model.model_id,
