@@ -22,13 +22,11 @@ import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useDeviceType, useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { WorkspaceEmptyDetail } from "../layout/WorkspaceEmptyDetail";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
-import { checkForAppUpdateOnLaunch, startAppUpdateForegroundRecheck } from "../updates/app-updates";
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { HomeHeader } from "./HomeHeader";
 import { useHomeListOptions } from "./home-list-options";
 import { useAtomValueWhileVisible, useHomeRouteVisible } from "./home-route-visibility";
-import { useHomeThreadRouteSelection, useHomeThreadSelection } from "./home-thread-navigation";
 import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
@@ -36,6 +34,7 @@ import { getConnectionAwareBrandHeaderOptions } from "./WorkspaceConnectionTitle
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceTab } from "../workspace/useSelectWorkspaceTab";
+import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 export function HomeRouteScreen() {
   const { width: windowWidth } = useWindowDimensions();
@@ -45,9 +44,9 @@ export function HomeRouteScreen() {
   const headerWidth = nativePrimaryColumn ? (columnMetrics?.width ?? windowWidth) : windowWidth;
   const { layout, panes, primarySidebarSearchQuery, setPrimarySidebarSearchQuery, startNewTask } =
     useAdaptiveWorkspaceLayout();
+  const selectDetail = useSelectWorkspaceDetail();
   const projects = useProjects();
-  // Streaming turns rewrite thread shells many times a second. While a Thread
-  // covers Home, rebuilding this list is invisible work.
+  // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
   const threads = useAtomValueWhileVisible(
     environmentThreadShells.navigationThreadShellsAtom,
@@ -68,8 +67,18 @@ export function HomeRouteScreen() {
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
     else setLocalSearchQuery(query);
   };
-  const handleSelectThread = useHomeThreadSelection();
-  const selectThreadRoute = useHomeThreadRouteSelection();
+  const handleSelectThread = useCallback(
+    (thread: EnvironmentThreadShell) =>
+      selectDetail({
+        name: "Thread",
+        params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+      }),
+    [selectDetail],
+  );
+  const selectThreadRoute = useCallback(
+    (params: ReactNavigation.RootParamList["Thread"]) => selectDetail({ name: "Thread", params }),
+    [selectDetail],
+  );
   const handleNewThreadOnBranch = useCallback(
     (thread: EnvironmentThreadShell) => {
       selectThreadRoute({
@@ -84,11 +93,6 @@ export function HomeRouteScreen() {
     },
     [selectThreadRoute],
   );
-
-  useEffect(() => {
-    void checkForAppUpdateOnLaunch();
-    startAppUpdateForegroundRecheck();
-  }, []);
 
   const {
     archiveThread,
@@ -105,7 +109,8 @@ export function HomeRouteScreen() {
     unsettleThread,
   } = useThreadListActions();
   const pendingTasks = usePendingNewTasks();
-  const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
+  const { openPendingTask, confirmDeletePendingTask } =
+    usePendingTaskListActions(selectThreadRoute);
   const environments = useMemo(() => {
     const connectionStateByEnvironmentId = new Map(
       workspaceEnvironments.map(
@@ -207,8 +212,7 @@ export function HomeRouteScreen() {
       onStartNewTask={startNewTask}
     >
       <>
-        {/* Restore the header after leaving split view; screen options are
-            shallow-merged. */}
+        {/* Screen options merge shallowly; restore the header after split view. */}
         {workspace !== null && Platform.OS === "ios" ? null : (
           <NativeStackScreenOptions
             optionsVersion={headerWidth}

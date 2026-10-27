@@ -208,7 +208,7 @@ function ToolCallBody(
     readonly args?: unknown;
     readonly toolName?: string | null;
     readonly exitCode?: number | undefined;
-    /** Replaces the fetched output, e.g. with a command's live output. */
+    /** Replaces fetched output. */
     readonly outputSlot?: ReactNode;
   },
 ) {
@@ -415,7 +415,10 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
       {item.type === "todo_list" ? (
         <StructuredValue
           value={item.steps
-            .map((step) => `${step.status === "completed" ? "✓" : "○"} ${step.text}`)
+            .map(
+              (step) =>
+                `${step.status === "completed" ? "✓" : step.status === "running" ? "◉" : "○"} ${step.text}`,
+            )
             .join("\n")}
         />
       ) : null}

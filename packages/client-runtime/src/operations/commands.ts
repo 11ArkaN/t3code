@@ -229,11 +229,6 @@ export interface ResumeThreadQueueInput extends ThreadCommandInput {
   readonly runId?: RunId;
 }
 
-export interface ReorderQueuedRunInput extends ThreadCommandInput {
-  readonly runId: RunId;
-  readonly beforeRunId: RunId | null;
-}
-
 export interface PromoteQueuedRunInput extends ThreadCommandInput {
   readonly queuedRunId: RunId;
   readonly targetRunId: RunId;
@@ -832,7 +827,7 @@ export const interruptThreadTurn = Effect.fn("EnvironmentCommands.interruptThrea
     const projection = yield* getProjection(input.threadId);
     const subagent = projection.subagents.find((agent) => agent.id === input.subagentId);
     if (subagent?.origin === "app_owned" && subagent.childThreadId !== null) {
-      // The parent ends the task even when its child lost track of it (#19002). Older
+      // The parent ends the task even when its child lost track of it. Older
       // servers reject this for app-owned tasks, so the child stop below still runs.
       if (subagent.runId !== null) {
         yield* dispatch({
@@ -1061,18 +1056,6 @@ export const resumeThreadQueue = Effect.fn("EnvironmentCommands.resumeThreadQueu
       : { type: "queued-run.start" as const, runId: input.runId }),
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
-  });
-});
-
-export const reorderQueuedRun = Effect.fn("EnvironmentCommands.reorderQueuedRun")(function* (
-  input: ReorderQueuedRunInput,
-) {
-  return yield* dispatch({
-    type: "queued-run.reorder",
-    commandId: yield* allocateCommandId(input),
-    threadId: input.threadId,
-    runId: input.runId,
-    beforeRunId: input.beforeRunId,
   });
 });
 

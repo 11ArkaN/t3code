@@ -46,6 +46,7 @@ import {
   PullRequestProjectNotFoundError,
   PullRequestsToolkit,
   type ThreadPullRequestEntry,
+  CHILD_PULL_REQUEST_REPORT_NEXT,
 } from "./tools.ts";
 
 interface ResolvedTarget {
@@ -165,8 +166,7 @@ function projectForPullRequest(
   target: { readonly host: string; readonly repository: string },
   preferred: OrchestrationProjectShell | undefined,
 ): OrchestrationProjectShell | undefined {
-  // The same rule the guide service uses: a pull request reads through a project whose checkout
-  // names it with the same host-level key, which also maps Azure DevOps' org/project/_git/repo.
+  // Match the guide service's host-level repository key, including Azure DevOps org/project/_git/repo.
   const matches = (project: OrchestrationProjectShell) => {
     const own = pullRequestSyncKey(
       { projectId: project.id, host: target.host, repository: target.repository, number: 1 },
@@ -221,10 +221,10 @@ const make = Effect.gen(function* () {
     if (threadId === undefined) {
       return yield* new PullRequestThreadRequiredError();
     }
-    const thread = yield* engine
-      .getThreadShell(threadId)
-      .pipe(Effect.map(Option.fromNullishOr))
-      .pipe(Effect.mapError((cause) => new Failure({ cause })));
+    const thread = yield* engine.getThreadShell(threadId).pipe(
+      Effect.map(Option.fromNullishOr),
+      Effect.mapError((cause) => new Failure({ cause })),
+    );
     if (Option.isNone(thread) || thread.value.deletedAt !== null) {
       return yield* new PullRequestThreadNotFoundError({ threadId });
     }
@@ -362,13 +362,17 @@ const make = Effect.gen(function* () {
     link_pull_request: writesThread((input) =>
       Effect.gen(function* () {
         const thread = yield* requireThread(PullRequestLinkFailedError, input.threadId);
+        const next =
+          thread.lineage.relationshipToParent === "subagent"
+            ? { next: CHILD_PULL_REQUEST_REPORT_NEXT }
+            : {};
         const project = yield* projectOf(thread, PullRequestLinkFailedError);
         const target = yield* resolveTarget(input, project);
         const existing = threadPullRequestsOf(thread).find((link) =>
           threadPullRequestKeysEqual(link, target),
         );
         if (existing && existing.source !== "stack-dismissed")
-          return { ...target, alreadyLinked: true };
+          return { ...target, alreadyLinked: true, ...next };
         const alreadyLinked = yield* engine
           .dispatch({
             type: "thread.pull-request.link",
@@ -385,7 +389,7 @@ const make = Effect.gen(function* () {
 
             Effect.catchCause(dispatchFailure(PullRequestLinkFailedError)),
           );
-        return { ...target, alreadyLinked };
+        return { ...target, alreadyLinked, ...next };
       }),
     ),
     unlink_pull_request: writesThread((input) =>
