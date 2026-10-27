@@ -96,7 +96,7 @@ function storedToolCall(
   item: { readonly type: string; readonly input?: unknown; readonly output?: unknown } | null,
 ) {
   if (item?.type !== "dynamic_tool") return undefined;
-  return mcpAppToolCall(item) as {
+  return mcpAppToolCall({ input: item.input, output: item.output }) as {
     readonly arguments: unknown;
     readonly result: McpAppCallToolResult | undefined;
   };
