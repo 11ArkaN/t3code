@@ -3,7 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { extractFile } from "@electron/asar";
+import { createPackageWithOptions, extractFile } from "@electron/asar";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
@@ -46,6 +46,7 @@ import {
   copyDirectoryPreservingSymlinks,
   LinuxBrowserSecretHostError,
   stageBrowserSecret,
+  validateLinuxPackagedPayload,
   validateWindowsPackagedPayload,
   verifyPackagedBundleIsSelfContained,
   WindowsPrimaryNativeProbeError,
@@ -209,6 +210,26 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     generatedAsarPath,
     appExecutableName,
   } as const;
+});
+
+const makeLinuxPayloadFixture = Effect.fn("test.makeLinuxPayloadFixture")(function* (input: {
+  readonly serverEntrySource: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-linux-payload-test-" });
+  const sourceDir = path.join(tempDir, "app-source");
+  const serverEntryPath = path.join(sourceDir, "apps/server/dist/bin.mjs");
+  yield* fs.makeDirectory(path.dirname(serverEntryPath), { recursive: true });
+  yield* fs.writeFileString(serverEntryPath, input.serverEntrySource);
+
+  const stageDistDir = path.join(tempDir, "dist");
+  const resourcesDir = path.join(stageDistDir, "linux-unpacked/resources");
+  yield* fs.makeDirectory(resourcesDir, { recursive: true });
+  yield* Effect.promise(() =>
+    createPackageWithOptions(sourceDir, path.join(resourcesDir, "app.asar"), {}),
+  );
+  return { stageDistDir } as const;
 });
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
@@ -1296,6 +1317,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           targetArch: "arm64",
           appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
         });
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(HostProcess.Platform, "linux"),
+          Layer.succeed(HostProcess.Architecture, "x64"),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("rejects a Linux app whose packaged server bundle cannot resolve", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeLinuxPayloadFixture({
+          serverEntrySource: 'import "t3code-deliberately-missing-package";\n',
+        });
+        const error = yield* validateLinuxPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          targetArch: "x64",
+          verbose: false,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, BundleNotSelfContainedError);
+        assert.include(error.output, "t3code-deliberately-missing-package");
       }),
     ).pipe(
       Effect.provide(
