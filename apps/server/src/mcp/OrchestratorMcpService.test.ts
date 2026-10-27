@@ -197,6 +197,162 @@ describe("OrchestratorMcpService", () => {
     }),
   );
 
+  it.effect("acknowledges a failed task's result only once the read shows its report", () =>
+    Effect.gen(function* () {
+      const parentThreadId = ThreadId.make("thread:mcp-read-ack-parent");
+      const childThreadId = ThreadId.make("thread:mcp-read-ack-child");
+      const childRunId = RunId.make("run:mcp-read-ack-child");
+      const taskId = NodeId.make("node:mcp-read-ack-task");
+      const at = DateTime.makeUnsafe("2026-10-03T10:00:00Z");
+      const acknowledgements = yield* Ref.make(0);
+      const parentProjection = {
+        thread: { ...liveThreadShell(parentThreadId), lineage: { parentThreadId: null } },
+        runs: [],
+        messages: [],
+        providerThreads: [],
+        runtimeRequests: [],
+        contextTransfers: [
+          {
+            id: "transfer:mcp-read-ack",
+            type: "subagent_result",
+            sourceThreadId: childThreadId,
+            targetThreadId: parentThreadId,
+            sourcePoint: { runId: childRunId },
+          },
+        ],
+        subagents: [
+          {
+            id: taskId,
+            threadId: parentThreadId,
+            origin: "app_owned",
+            childThreadId,
+            driver: "codex",
+            model: "gpt-5.6-terra",
+            status: "failed",
+            result: "terminal result",
+            completionDelivery: { state: "pending" },
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const report = {
+        id: "item:mcp-read-ack-report",
+        runId: childRunId,
+        type: "assistant_message",
+        status: "completed",
+        title: null,
+        ordinal: 1,
+        messageId: MessageId.make("message:mcp-read-ack-report"),
+        text: "Review complete: no blocking issues.",
+        updatedAt: at,
+      };
+      const error = {
+        id: "item:mcp-read-ack-error",
+        runId: childRunId,
+        type: "error",
+        status: "failed",
+        title: null,
+        ordinal: 2,
+        failure: { class: "unknown", message: "Connection failed", code: null, retryable: false },
+        updatedAt: at,
+      };
+      const childProjectionModel = liveThreadShell(childThreadId).modelSelection;
+      const childProjection = {
+        thread: {
+          ...liveThreadShell(childThreadId),
+          lineage: {
+            parentThreadId,
+            relationshipToParent: "subagent",
+            rootThreadId: parentThreadId,
+          },
+          forkedFrom: { type: "node", nodeId: taskId },
+        },
+        runs: [
+          {
+            id: childRunId,
+            ordinal: 1,
+            status: "failed",
+            delegatedTaskId: taskId,
+            modelSelection: childProjectionModel,
+            requestedAt: at,
+            startedAt: at,
+            completedAt: at,
+          },
+        ],
+        messages: [
+          {
+            id: report.messageId,
+            runId: childRunId,
+            role: "assistant",
+            text: report.text,
+            createdAt: at,
+            updatedAt: at,
+          },
+        ],
+        turnItems: [report, error],
+        contextTransfers: [],
+        subagents: [],
+        providerThreads: [],
+        runtimeRequests: [],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const row = (item: typeof report | typeof error, position: number) => ({
+        position,
+        visibility: "visible",
+        sourceThreadId: childThreadId,
+        sourceItemId: item.id,
+        item,
+      });
+      let page = [row(error, 2)];
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadShell: (threadId) =>
+            Effect.succeed(
+              (threadId === parentThreadId ? parentProjection : childProjection)
+                .thread as unknown as OrchestrationV2ThreadShell,
+            ),
+          getProjectThreadRecords: () => Effect.succeed(childProjection),
+          getThreadRecords: (threadId) =>
+            Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
+          getTimelinePage: () =>
+            Effect.succeed({ items: page, totalItems: page.length, hasMore: false } as never),
+          dispatch: (command) =>
+            command.type === "delegated_task.completion-delivery.acknowledge"
+              ? Ref.update(acknowledgements, (count) => count + 1).pipe(Effect.as({} as never))
+              : Effect.die(`unexpected command ${command.type}`),
+        }),
+        ServerSettings.layerTest(),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const scope: McpInvocationScope = {
+        environmentId: EnvironmentId.make("environment:mcp-read-ack"),
+        requestNamespace: "provider-session:mcp-read-ack",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-read-ack",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        yield* service.readThread(scope, { threadId: childThreadId });
+        assert.equal(yield* Ref.get(acknowledgements), 0);
+        page = [row(report, 1), row(error, 2)];
+        yield* service.readThread(scope, { threadId: childThreadId });
+        assert.equal(yield* Ref.get(acknowledgements), 1);
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
   it.effect("reports a restart-cut child as working until its continuation settles", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-restart-parent");

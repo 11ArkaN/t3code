@@ -206,19 +206,26 @@ export function subagentResultForRun(
           .toSorted((left, right) => right.ordinal - left.ordinal)[0]
       : undefined;
   const output = message?.text ?? turnItem?.text;
-  const text =
-    failure?.type !== "error"
-      ? (output ??
-        (run.status === "completed"
-          ? "Child task completed without an assistant result."
-          : `Child task ended with status ${run.status}.`))
-      : output === undefined
-        ? failure.failure.message
-        : `${failure.failure.message}\n\nOutput from the failed run:\n${output}`;
+  const outputMessageId = message?.id ?? turnItem?.messageId ?? null;
+  if (failure?.type === "error") {
+    // Claude records an SDK error frame both as the run's output and as its failure.
+    const keepsOutput = output !== undefined && output.trim() !== failure.failure.message.trim();
+    return {
+      text: keepsOutput
+        ? `${failure.failure.message}\n\nOutput from the failed run:\n${output}`
+        : failure.failure.message,
+      messageId: keepsOutput ? outputMessageId : null,
+      turnItemId: failure.id,
+    };
+  }
   return {
-    text,
-    messageId: failure === undefined ? (message?.id ?? turnItem?.messageId ?? null) : null,
-    turnItemId: failure?.id ?? turnItem?.id ?? null,
+    text:
+      output ??
+      (run.status === "completed"
+        ? "Child task completed without an assistant result."
+        : `Child task ended with status ${run.status}.`),
+    messageId: outputMessageId,
+    turnItemId: turnItem?.id ?? null,
   };
 }
 

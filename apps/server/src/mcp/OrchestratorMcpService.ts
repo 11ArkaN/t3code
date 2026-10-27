@@ -618,18 +618,20 @@ function pageIncludesTerminalTaskResult(input: {
   const result = subagentResultForRun(input.target, run);
   if (result.messageId === null && result.turnItemId === null) return false;
 
-  return input.page.some((row) => {
-    if (row.sourceThreadId !== input.target.thread.id) return false;
-    const matchesResult =
-      (result.turnItemId !== null && row.sourceItemId === result.turnItemId) ||
-      (result.messageId !== null &&
-        row.item.type === "assistant_message" &&
-        row.item.messageId === result.messageId);
-    if (!matchesResult) return false;
-
-    const text = turnItemText(row.item);
-    return text !== null && text.length <= input.maxChars;
-  });
+  // A failed result anchors its error and its report on separate rows; the reader must see both.
+  const shows = (matches: (row: (typeof input.page)[number]) => boolean) =>
+    input.page.some((row) => {
+      if (row.sourceThreadId !== input.target.thread.id || !matches(row)) return false;
+      const text = turnItemText(row.item);
+      return text !== null && text.length <= input.maxChars;
+    });
+  return (
+    (result.turnItemId === null || shows((row) => row.sourceItemId === result.turnItemId)) &&
+    (result.messageId === null ||
+      shows(
+        (row) => row.item.type === "assistant_message" && row.item.messageId === result.messageId,
+      ))
+  );
 }
 
 function latestTerminalResultRun(

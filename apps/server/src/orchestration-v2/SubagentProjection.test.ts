@@ -263,7 +263,7 @@ it("waits for nested work and retains the report across monitor acknowledgements
   assert.equal(progress.resultRun?.id, report.id);
 });
 
-it("exposes the provider failure rather than a progress message from the failed run", () => {
+it("leads with the provider failure, then the labelled output of the failed run", () => {
   const { projection, run } = taskFixture();
   const failedRun = { ...run, status: "failed" as const };
   const artifacts = makeSubagentConversationArtifacts({
@@ -294,8 +294,57 @@ it("exposes the provider failure rather than a progress message from the failed 
     },
     failedRun,
   );
-  assert.isTrue(result.text.startsWith(failure.message));
+  assert.equal(
+    result.text,
+    `${failure.message}\n\nOutput from the failed run:\n${artifacts.message.text}`,
+  );
   assert.equal(result.turnItemId, artifacts.turnItem.id);
+  assert.equal(result.messageId, artifacts.message.id);
+});
+
+it("does not repeat a failure the provider also recorded as the run's output", () => {
+  const { projection, run } = taskFixture();
+  const failedRun = { ...run, status: "failed" as const };
+  const failure = {
+    class: "unknown" as const,
+    message: "API Error: 500 Internal server error",
+    code: null,
+    retryable: false,
+  };
+  const artifacts = makeSubagentConversationArtifacts({
+    messageId: MessageId.make("api-error"),
+    turnItemId: TurnItemId.make("api-error"),
+    threadId: parentThreadId,
+    rootNodeId: NodeId.make("root"),
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    role: "assistant",
+    text: `${failure.message}\n`,
+    ordinal: 1,
+    now: childCreatedAt,
+  });
+  if (artifacts.turnItem.type !== "assistant_message") throw new Error("Expected assistant item");
+  const result = subagentResultForRun(
+    {
+      ...projection,
+      messages: [{ ...artifacts.message, runId: run.id }],
+      turnItems: [
+        { ...artifacts.turnItem, runId: run.id },
+        {
+          ...artifacts.turnItem,
+          id: TurnItemId.make("error"),
+          type: "error",
+          runId: run.id,
+          ordinal: 2,
+          failure,
+        },
+      ],
+    },
+    failedRun,
+  );
+  assert.equal(result.text, failure.message);
+  assert.equal(result.turnItemId, TurnItemId.make("error"));
   assert.isNull(result.messageId);
 });
 
