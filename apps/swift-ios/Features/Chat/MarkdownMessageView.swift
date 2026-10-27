@@ -299,21 +299,48 @@ private struct MarkdownBlocksView: View {
     var spacing: CGFloat = 12
     var textColor: MarkdownTextColor = .primary
 
+    @SwiftUI.Environment(\.markdownTextSelectable) private var isSelectable
+
     var body: some View {
         VStack(alignment: .leading, spacing: spacing) {
-            ForEach(blocks.indices, id: \.self) { index in
-                // Unchanged blocks share inline runs by reference across
-                // streaming revisions, so equatable comparison skips their
-                // body and layout entirely; only the changed tail re-renders.
-                MarkdownBlockView(
-                    block: blocks[index],
-                    selectionContext: selectionContext,
-                    imageContext: imageContext,
-                    textColor: textColor
-                )
-                    .equatable()
+            if isSelectable {
+                ForEach(blocks.indices, id: \.self) { index in
+                    blockView(blocks[index])
+                }
+            } else {
+                // Runs of text draw as one canvas (`MarkdownTextRun`); other
+                // blocks keep their own views.
+                let segments = MarkdownTextRun.segments(blocks, spacing: spacing)
+                ForEach(segments.indices, id: \.self) { index in
+                    switch segments[index] {
+                    case let .text(run):
+                        MarkdownTextRunView(
+                            run: run,
+                            textColor: textColor.uiColor,
+                            skills: selectionContext.skills,
+                            copyActionTitle: selectionContext.copyActionTitle,
+                            copyMessage: { [source = selectionContext.source] in source.copyMessage() }
+                        )
+                            .equatable()
+                    case let .block(block):
+                        blockView(block)
+                    }
+                }
             }
         }
+    }
+
+    /// Unchanged blocks share inline runs by reference across streaming
+    /// revisions, so equatable comparison skips their body and layout entirely;
+    /// only the changed tail re-renders.
+    private func blockView(_ block: MarkdownRenderedBlock) -> some View {
+        MarkdownBlockView(
+            block: block,
+            selectionContext: selectionContext,
+            imageContext: imageContext,
+            textColor: textColor
+        )
+            .equatable()
     }
 }
 
@@ -881,7 +908,93 @@ enum MarkdownCodeBlockWrapping {
     }
 }
 
-private struct MarkdownInlineText: UIViewRepresentable {
+/// One block of Markdown text. Drawn by `MarkdownTextCanvas` while
+/// scrolling; the message the reader is selecting in uses a text view.
+private struct MarkdownInlineText: View {
+    @SwiftUI.Environment(\.markdownTextSelectable) private var isSelectable
+
+    let rendered: MarkdownRenderedInline
+    let selectionContext: MarkdownSelectionContext
+    let lineSpacing: CGFloat
+    let textColor: MarkdownTextColor
+    let wrapsLines: Bool
+
+    init(
+        _ rendered: MarkdownRenderedInline,
+        selectionContext: MarkdownSelectionContext,
+        lineSpacing: CGFloat = 0,
+        textColor: MarkdownTextColor = .primary,
+        wrapsLines: Bool = true
+    ) {
+        self.rendered = rendered
+        self.selectionContext = selectionContext
+        self.lineSpacing = lineSpacing
+        self.textColor = textColor
+        self.wrapsLines = wrapsLines
+    }
+
+    var body: some View {
+        if isSelectable {
+            MarkdownSelectableText(
+                rendered, selectionContext: selectionContext,
+                lineSpacing: lineSpacing, textColor: textColor, wrapsLines: wrapsLines
+            )
+        } else {
+            MarkdownCanvasText(
+                rendered: rendered, selectionContext: selectionContext,
+                lineSpacing: lineSpacing, textColor: textColor, wrapsLines: wrapsLines
+            )
+        }
+    }
+}
+
+private struct MarkdownCanvasText: UIViewRepresentable {
+    @SwiftUI.Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @SwiftUI.Environment(\.openURL) private var openURL
+
+    let rendered: MarkdownRenderedInline
+    let selectionContext: MarkdownSelectionContext
+    let lineSpacing: CGFloat
+    let textColor: MarkdownTextColor
+    let wrapsLines: Bool
+
+    func makeCoordinator() -> MarkdownSelectableText.Coordinator {
+        MarkdownSelectableText.Coordinator()
+    }
+
+    func makeUIView(context: Context) -> MarkdownTextCanvas {
+        let canvas = MarkdownTextCanvas()
+        canvas.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        canvas.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        return canvas
+    }
+
+    func updateUIView(_ canvas: MarkdownTextCanvas, context: Context) {
+        context.coordinator.selectionContext = selectionContext
+        canvas.attributedText = context.coordinator.attributedText(
+            from: rendered,
+            lineSpacing: lineSpacing,
+            textColor: textColor,
+            dynamicTypeSize: dynamicTypeSize,
+            wrapsLines: wrapsLines,
+            skills: selectionContext.skills,
+            traits: canvas.traitCollection
+        )
+        canvas.onOpenURL = { openURL($0) }
+        canvas.accessibilityCustomActions = context.coordinator.accessibilityActions(
+            title: selectionContext.copyActionTitle
+        )
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: MarkdownTextCanvas, context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0 else {
+            return wrapsLines ? nil : uiView.size(fitting: nil)
+        }
+        return uiView.size(fitting: wrapsLines ? width : nil)
+    }
+}
+
+private struct MarkdownSelectableText: UIViewRepresentable {
     @SwiftUI.Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @SwiftUI.Environment(\.openURL) private var openURL
 

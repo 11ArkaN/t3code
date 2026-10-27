@@ -3122,6 +3122,7 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
         let timelineCache = FeatureTimelineMessagesCache()
         var applyContent: (() -> Void)?
         private var observation: (model: FeatureRootModel, threadID: String, token: UUID)?
+        private var selectingMessageID: String?
         private var isContentRefreshScheduled = false
 
         func observe(_ model: FeatureRootModel, threadID: String) {
@@ -3160,11 +3161,25 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
             contextMenuConfigurationForItemAt indexPath: IndexPath,
             point: CGPoint
         ) -> UIContextMenuConfiguration? {
+            // The message being selected belongs to its text views' own long press.
             guard let messageID = dataSource?.itemIdentifier(for: indexPath),
-                  messagesByID[messageID]?.role == .user,
-                  canEditMessage?(messageID) == true || canEditPendingMessage?(messageID) == true else { return nil }
+                  messageID != selectingMessageID,
+                  let message = messagesByID[messageID],
+                  message.role == .user || message.role == .assistant else { return nil }
+            let hasText = !message.text.isEmpty && message.workflowScript != true
+            let canEdit = message.role == .user
+                && (canEditMessage?(messageID) == true || canEditPendingMessage?(messageID) == true)
+            guard hasText || canEdit else { return nil }
             return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
                 var actions: [UIAction] = []
+                if hasText {
+                    actions.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                        self?.copy(message)
+                    })
+                    actions.append(UIAction(title: "Select Text", image: UIImage(systemName: "character.cursor.ibeam")) { [weak self] _ in
+                        self?.beginSelecting(messageID)
+                    })
+                }
                 if self?.canEditPendingMessage?(messageID) == true {
                     actions.append(UIAction(title: "Edit pending message", image: UIImage(systemName: "pencil")) { [weak self] _ in
                         guard self?.canEditPendingMessage?(messageID) == true else { return }
@@ -3178,6 +3193,31 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
                 }
                 return UIMenu(children: actions)
             }
+        }
+
+        private func copy(_ message: FeatureMessage) {
+            let source = currentAttachmentContext?.environmentID.map {
+                ComposerContextClipboardFragment.Source(
+                    environmentId: $0,
+                    threadId: message.v2Timeline?.sourceThreadID ?? currentAttachmentContext?.wireThreadID,
+                    messageId: message.v2Timeline?.messageID ?? message.id
+                )
+            }
+            if (try? FeatureContextClipboard.write(text: message.text, source: source, context: message.context)) != true {
+                UIPasteboard.general.string = message.text
+            }
+        }
+
+        /// Text draws without text views while scrolling. One message at a time
+        /// switches to selectable text views when the reader asks for it.
+        private func beginSelecting(_ messageID: String) {
+            guard let dataSource else { return }
+            let previous = selectingMessageID
+            selectingMessageID = messageID
+            var snapshot = dataSource.snapshot()
+            let ids = [previous, messageID].compactMap { $0 }.filter { snapshot.indexOfItem($0) != nil }
+            snapshot.reconfigureItems(ids)
+            dataSource.apply(snapshot, animatingDifferences: false)
         }
 
         func connect(to collectionView: UICollectionView) {
@@ -3239,6 +3279,10 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
                             self?.currentPresentationDismissal ?? FeatureThreadPresentationDismissal()
                         )
                         .environment(\.t3CodeSizeSteps, self?.currentCodeSizeSteps ?? 0)
+                        .environment(
+                            \.markdownTextSelectable,
+                            self?.selectingMessageID == messageID || TranscriptDebug.forcesSelectableText
+                        )
                         .environment(
                             \.openURL,
                             self?.currentOpenURL ?? OpenURLAction { _ in .systemAction }
@@ -3373,6 +3417,7 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
                 || workingDetailChanged || loadEarlierChanged else { return }
 
             if threadChanged {
+                selectingMessageID = nil
                 cancelAllMarkdownPrefetches()
             } else {
                 // Agent progress and fork controls do not change parsed markdown.
@@ -4141,6 +4186,9 @@ final class BottomAnchoredTranscriptCollectionView: UICollectionView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        #if DEBUG
+        if window != nil { TranscriptScrollBenchmark.startIfRequested(on: self) }
+        #endif
         if window != nil {
             if needsInitialBottomPosition { maintainsBottomAnchor = true }
             if maintainsBottomAnchor { lastLaidOutGeometry = nil }

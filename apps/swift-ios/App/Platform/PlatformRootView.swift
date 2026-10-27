@@ -47,6 +47,16 @@ struct PlatformRootView: View {
         .onOpenURL { url in
             handle(url: url, letOnboardingConfirmConnection: true)
         }
+        #if DEBUG
+        // Benchmarks open a thread without UI automation, which would keep
+        // the accessibility tree busy and skew the timing.
+        .task {
+            guard let link = ProcessInfo.processInfo.environment["T3_DEBUG_OPEN_URL"],
+                  let url = URL(string: link) else { return }
+            try? await Task.sleep(for: .seconds(4))
+            handle(url: url, letOnboardingConfirmConnection: false)
+        }
+        #endif
         .task(id: subscriptionUsageKey) {
             guard subscriptionUsageKey.isActive else { return }
             await subscriptionUsage.observe(
