@@ -361,6 +361,34 @@ it.layer(layerTest)("Antigravity provider snapshots", (it) => {
     ),
   );
 
+  it.effect("keeps the sign-in method's wording after sign-out and authentication failure", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (const [auth, message] of [
+          [
+            { type: "gemini-api-key", label: "Gemini API key" },
+            "Connect to use Antigravity with the Gemini API key.",
+          ],
+          [
+            { type: "oauth-personal", label: "Google account" },
+            "Sign in with Google to use Antigravity.",
+          ],
+        ] as const) {
+          const harness = yield* makeHarness({ auth });
+          yield* harness.initialize;
+          for (const clear of [harness.provider.onSignedOut, harness.provider.onAuthRequired]) {
+            yield* harness.provider.onSessionStarted(started, "/workspace");
+            yield* clear;
+            const snapshot = yield* harness.provider.snapshot.getSnapshot;
+            expect(snapshot.auth).toMatchObject({ status: "unauthenticated", type: auth.type });
+            expect(snapshot.message).toBe(message);
+          }
+          expect((yield* harness.provider.snapshot.refresh).message).toBe(message);
+        }
+      }),
+    ),
+  );
+
   it.effect("replaces live model choices and accepts an empty catalog", () =>
     Effect.scoped(
       Effect.gen(function* () {

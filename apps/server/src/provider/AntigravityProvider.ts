@@ -36,12 +36,17 @@ import { resolveUsageLimitsAfterProbe } from "@t3tools/provider-core/server/usag
 const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: [] });
 const MAX_WORKSPACE_SNAPSHOTS = 32;
 const HEALTH_CHECK_TIMEOUT = "90 seconds";
-const SIGN_IN_MESSAGE = "Sign in with Google to use Antigravity.";
 
-function authUncheckedMessage(auth: AntigravityProviderOptions["auth"]): string {
+function authMessages(auth: AntigravityProviderOptions["auth"]) {
   return auth === undefined || antigravityAuthUsesBrowser(auth.type)
-    ? "Antigravity is installed. Google account access is not checked yet."
-    : `Antigravity is installed. Connect to check ${auth.label} access and load models.`;
+    ? {
+        unchecked: "Antigravity is installed. Google account access is not checked yet.",
+        signedOut: "Sign in with Google to use Antigravity.",
+      }
+    : {
+        unchecked: `Antigravity is installed. Connect to check ${auth.label} access and load models.`,
+        signedOut: `Connect to use Antigravity with the ${auth.label}.`,
+      };
 }
 
 type SessionSetupResult = Pick<
@@ -140,6 +145,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
   options: AntigravityProviderOptions,
 ) {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
+  const messages = authMessages(options.auth);
   const initialDraft = {
     ...buildServerProvider({
       presentation: { displayName: "Antigravity", showInteractionModeToggle: false },
@@ -207,8 +213,8 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
         (authenticated
           ? undefined
           : draft.auth.status === "unauthenticated"
-            ? SIGN_IN_MESSAGE
-            : authUncheckedMessage(options.auth));
+            ? messages.signedOut
+            : messages.unchecked);
       return {
         ...state,
         draft: {
@@ -382,9 +388,9 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
           authRevision: state.authRevision + 1,
           draft: {
             ...state.draft,
-            auth: { status: "unauthenticated" },
+            auth: { status: "unauthenticated", ...options.auth },
             status: "warning",
-            message: SIGN_IN_MESSAGE,
+            message: messages.signedOut,
             checkedAt: updatedAt,
             models: [],
             slashCommands: [],
