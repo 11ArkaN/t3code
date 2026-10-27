@@ -172,11 +172,20 @@ const command = Command.make(
       deviceName: flags.deviceName,
     });
     yield* Console.error(`Opening the dev client against ${metro}...`);
-    yield* device.run([
-      "open",
-      APP_ID,
-      `${SCHEME}://expo-development-client/?url=${encodeURIComponent(metro)}&disableOnboarding=1&disableFab=1&disableAutoLaunch=1`,
-    ]);
+    // agent-device builds the dev-client link and answers iOS's "Open in" prompt itself.
+    const metroUrl = new URL(metro);
+    yield* device.run(
+      [
+        "open",
+        APP_ID,
+        "--relaunch",
+        "--metro-host",
+        metroUrl.hostname,
+        "--metro-port",
+        metroUrl.port,
+      ],
+      240_000,
+    );
     for (let attempt = 0; ; attempt++) {
       const loaded = yield* device
         .evaluate("typeof __t3Behavior")

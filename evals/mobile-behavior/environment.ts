@@ -178,6 +178,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         HttpClientRequest.bodyJsonUnsafe({
           type: "project.create",
           commandId: yield* uuid,
+          projectId,
           title,
           workspaceRoot,
         }),
@@ -281,9 +282,11 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
     const threadId = yield* launch(title, "Summarize the module. [[eval:stream:400:0]]");
     yield* settled(threadId);
     for (let turn = 1; turn < turns; turn++) {
-      yield* send(threadId, `Next part ${turn}. [[eval:stream:${turn % 3 === 0 ? 900 : 300}:0]]`);
-      yield* until("its next run", threadId, (value) =>
-        value.runs.length > turn ? true : undefined,
+      const text = `Next part ${turn}. [[eval:stream:${turn % 3 === 0 ? 900 : 300}:0]]`;
+      yield* send(threadId, text);
+      // The message and its run land in one command, so once it shows, `settled` sees the run.
+      yield* until("its next message", threadId, (value) =>
+        value.messages.some((message) => message.text === text) ? true : undefined,
       );
       yield* settled(threadId);
     }
@@ -330,9 +333,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         value.subagents.length >= 2 ? value.subagents : undefined,
       ),
     origin,
-    baseDir: input.baseDir,
     environmentId,
-    projectId,
     client,
     command,
     projection,

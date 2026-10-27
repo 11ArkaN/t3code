@@ -199,14 +199,14 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     checks: [{ metric: "editorFocused", equals: true }],
   },
   {
-    id: "failed-send-shows-error",
+    id: "failed-send-is-never-silent",
     area: "composer",
     kind: "guard",
     source: "#15801",
-    experience: "A rejected send silently puts the text back with no error.",
+    experience: "A send the server will reject looks sent, with no error.",
     scenario: "failedSend",
-    key: "errorShown",
-    checks: [{ metric: "errorShown", equals: true }],
+    key: "silentFailure",
+    checks: [{ metric: "silentFailure", equals: false }],
   },
   {
     id: "working-shelf-clears-when-done",

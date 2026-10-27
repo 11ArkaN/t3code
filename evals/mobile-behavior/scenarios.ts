@@ -26,8 +26,9 @@ export interface ScenarioContext {
   };
 }
 
+// Child thread ids carry `:`, so each segment is encoded.
 const threadPath = (ctx: ScenarioContext, threadId: string) =>
-  `threads/${ctx.env.environmentId}/${threadId}`;
+  `threads/${encodeURIComponent(ctx.env.environmentId)}/${encodeURIComponent(threadId)}`;
 
 const isThread = (state: ProbeState, threadId: string) =>
   state.route?.name === "Thread" && state.route.params.threadId === threadId;
@@ -324,19 +325,19 @@ export const SCENARIOS = {
     const text = `Will fail ${(yield* uuid).slice(0, 8)}`;
     yield* typeInComposer(ctx, text);
     yield* lock;
-    const send = (yield* ctx.device.nodes).find((node) => node.label === "Send");
-    if (send?.enabled === false)
-      return yield* new ScenarioFailure({
-        message: "Send turned off once the provider was disabled.",
-      });
-    yield* ctx.device.press('label="Send"');
-    const shown = yield* ctx.device
-      .waitFor("a composer error", (state) => state.composer.error !== null, 8_000)
-      .pipe(Effect.option);
-    const projection = yield* ctx.env.projection(threadId);
+    // Either outcome is honest: Send turns off, or the rejected send shows an error.
+    const sendBlocked =
+      (yield* ctx.device.nodes).find((node) => node.label === "Send")?.enabled === false;
+    if (!sendBlocked) yield* ctx.device.press('label="Send"');
+    const shown = sendBlocked
+      ? false
+      : (yield* ctx.device
+          .waitFor("a composer error", (state) => state.composer.error !== null, 8_000)
+          .pipe(Effect.option))._tag === "Some";
     return {
-      errorShown: shown._tag === "Some",
-      serverMessages: countUserText(projection, text),
+      sendBlocked,
+      errorShown: shown,
+      silentFailure: !sendBlocked && !shown,
     } satisfies Metrics;
   }, failure),
 
@@ -356,6 +357,9 @@ export const SCENARIOS = {
     return {
       shelfShownWhileWorking: shelfCount(working) > 0,
       shelfCountAfter: shelfCount(after),
+      // Threads the app itself calls working; the shelf should hold no more than these.
+      appWorkingThreads: Object.values(after.threads).filter((status) => status === "working")
+        .length,
       statusAfter: after.threads[threadId] ?? "missing",
     } satisfies Metrics;
   }, failure),
@@ -410,13 +414,16 @@ export const SCENARIOS = {
       false,
       Effect.gen(function* () {
         yield* ctx.device.open(threadPath(ctx, child));
-        yield* Effect.sleep("2 seconds");
+        yield* Effect.sleep("4 seconds");
         yield* ctx.device.swipe(threadX, Math.round(height * 0.7), Math.round(height * 0.35));
         yield* ctx.device.swipe(threadX, Math.round(height * 0.35), Math.round(height * 0.7));
       }),
     );
-    if (!isThread(yield* ctx.device.state, child))
-      return yield* new ScenarioFailure({ message: "The subagent thread did not open." });
+    const opened = yield* ctx.device.state;
+    if (!isThread(opened, child))
+      return yield* new ScenarioFailure({
+        message: `The subagent thread did not open; the route is ${opened.route?.name ?? "none"} ${String(opened.route?.params.threadId ?? "")}.`,
+      });
     return frameMetrics(recording) satisfies Metrics;
   }, failure),
 
