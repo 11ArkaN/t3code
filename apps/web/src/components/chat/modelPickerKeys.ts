@@ -45,3 +45,10 @@ export function parseModelPickerLegacySectionKey(key: string): ProviderInstanceI
     ? (key.slice(LEGACY_SECTION_KEY_PREFIX.length) as ProviderInstanceId)
     : null;
 }
+
+export function modelPickerRowShowsProvider(input: {
+  readonly searching: boolean;
+  readonly subProvider: string | undefined;
+}): boolean {
+  return input.searching || Boolean(input.subProvider);
+}

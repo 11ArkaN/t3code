@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
+  modelPickerRowShowsProvider,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
@@ -27,5 +28,17 @@ describe("model picker item keys", () => {
     const key = modelPickerModelKey(instanceId, slug);
 
     expect(parseModelPickerModelKey(key)).toEqual({ instanceId, slug });
+  });
+});
+
+describe("modelPickerRowShowsProvider", () => {
+  it("keeps provider tabs and favorites on one line unless the model names a sub-provider", () => {
+    expect(modelPickerRowShowsProvider({ searching: false, subProvider: undefined })).toBe(false);
+    expect(modelPickerRowShowsProvider({ searching: false, subProvider: "" })).toBe(false);
+    expect(modelPickerRowShowsProvider({ searching: false, subProvider: "Zen" })).toBe(true);
+  });
+
+  it("names the provider while searching, including on the favorites tab", () => {
+    expect(modelPickerRowShowsProvider({ searching: true, subProvider: undefined })).toBe(true);
   });
 });

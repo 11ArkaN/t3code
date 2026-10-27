@@ -28,6 +28,7 @@ import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBann
 import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
+  modelPickerRowShowsProvider,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
@@ -575,8 +576,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const isLocked = lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
-  // Inside one provider's tab the provider line repeats the selected rail icon on every row.
-  const rowsMixProviders = isSearching || selectedInstanceId === "favorites";
+  // Favorites uses the same row as a provider tab. Search names the provider because the rail is hidden.
+  const rowShowsProvider = (subProvider: string | undefined) =>
+    modelPickerRowShowsProvider({ searching: isSearching, subProvider });
   // Fit the tallest tab so switching tabs never resizes the popup and moves the rail under the cursor.
   const tallestTabUnits = (() => {
     const unitsByTab = new Map<ProviderInstanceId | "favorites", number>();
@@ -592,11 +594,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     for (const model of flatModels) {
       if (!matchesLockedProvider(model)) continue;
       const isFavorite = favoritesSet.has(providerModelKey(model.instanceId, model.slug));
-      if (isFavorite) addRow("favorites", true);
+      const twoLine = modelPickerRowShowsProvider({
+        searching: false,
+        subProvider: model.subProvider,
+      });
+      if (isFavorite) addRow("favorites", twoLine);
       if (model.isLegacy && !isFavorite) {
         tabsWithLegacyRow.add(model.instanceId);
       } else {
-        addRow(model.instanceId, Boolean(model.subProvider));
+        addRow(model.instanceId, twoLine);
       }
     }
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId, true);
@@ -1012,7 +1018,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         ? selectedModelKeySet.has(modelKey)
                         : modelKey === activeModelKey
                     }
-                    showProvider={rowsMixProviders || Boolean(model.subProvider)}
+                    showProvider={rowShowsProvider(model.subProvider)}
                     showNewBadge={model.badge === "new"}
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
