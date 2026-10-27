@@ -32,7 +32,11 @@ import { SshCommandError } from "@t3tools/ssh/errors";
 import * as FileSystem from "effect/FileSystem";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Path from "effect/Path";
-import { ensureAgentDevice, ensureDeviceHub } from "./DeviceToolchain.ts";
+import {
+  ensureAgentDevice,
+  ensureDeviceHub,
+  installedAgentDeviceEntry,
+} from "./DeviceToolchain.ts";
 import * as ServerConfig from "../config.ts";
 import {
   agentDeviceConfigPath,
@@ -42,6 +46,7 @@ import {
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -183,6 +188,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       }),
     ),
   installTool?: (tool: "hub" | "agent") => Effect.Effect<unknown, DeviceError>,
+  endAgentSession: (target: {
+    readonly hostId: DeviceHostId;
+    /** Set for hosts with a daemon per device. */
+    readonly deviceId?: DeviceId;
+    readonly session: string;
+  }) => Effect.Effect<void> = () => Effect.void,
 ) {
   const settings = yield* ServerSettings.ServerSettingsService;
   const crypto = yield* Crypto.Crypto;
@@ -691,12 +702,51 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     },
   );
 
+  /**
+   * agent-device releases the device claim its daemon holds for a session only
+   * when that session closes. Best effort, and never starts a host or daemon.
+   */
+  const releaseAgentSession = Effect.fn("DeviceService.releaseAgentSession")(
+    function* (session: DeviceSession) {
+      const deviceSettings = yield* readDeviceSettings;
+      if (!deviceSettings.enabled || !deviceSettings.agentAccessEnabled) return;
+      const ready = yield* hosts.get(session.hostId)?.current ?? Effect.succeed(null);
+      if (!ready) return;
+      // A device with its own daemon has nothing to release once it stops running.
+      if (ready.devices.agentEndpoint) yield* ready.devices.agentEndpoint(session.deviceId);
+      yield* endAgentSession({
+        hostId: session.hostId,
+        ...(ready.devices.agentEndpoint ? { deviceId: session.deviceId } : {}),
+        session: yield* agentDeviceSession(session.threadId, session.hostId, session.deviceId).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+        ),
+      });
+    },
+    (effect, session) =>
+      effect.pipe(
+        Effect.catch((cause) =>
+          Effect.logDebug("Could not end the agent-device session for a closed device", {
+            hostId: session.hostId,
+            deviceId: session.deviceId,
+            cause,
+          }),
+        ),
+      ),
+  );
+
   const shutdownDevice = Effect.fn("DeviceService.shutdownDevice")(function* (
     hostId: DeviceHostId,
     deviceId: DeviceId,
     platform: DevicePlatform,
   ) {
     const ready = yield* readiness(hostId);
+    yield* Effect.forEach(
+      (yield* SynchronizedRef.get(stateRef)).state.sessions.filter(
+        (session) => session.hostId === ready.hostId && session.deviceId === deviceId,
+      ),
+      releaseAgentSession,
+      { discard: true },
+    );
     yield* ready.devices.shutdown({ id: deviceId, platform });
     yield* publish((state) => ({
       ...state,
@@ -731,6 +781,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         ...current,
         sessions: current.sessions.filter((session) => !closing.includes(session)),
       }));
+      yield* Effect.forEach(closing, releaseAgentSession, { discard: true });
       if (input.shutdown) {
         yield* Effect.forEach(
           closing,
@@ -991,6 +1042,35 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
+    Effect.fn("DeviceService.endAgentSession")(
+      function* ({ hostId, deviceId, session }) {
+        const file = yield* configPath(hostId, deviceId);
+        // No config means no agent was ever given this host or device.
+        if (!(yield* fs.exists(file))) return;
+        const entryPath = yield* installedAgentDeviceEntry(config.baseDir);
+        if (entryPath === null) return;
+        const result = yield* runner.run({
+          command: yield* resolveNodeExecutable("Device automation"),
+          args: [entryPath, "close", "--config", file, "--session", session],
+          env: {
+            ELECTRON_RUN_AS_NODE: "1",
+            AGENT_DEVICE_DAEMON_BASE_URL: undefined,
+            AGENT_DEVICE_DAEMON_AUTH_TOKEN: undefined,
+            AGENT_DEVICE_CONFIG: undefined,
+          },
+          timeout: Duration.seconds(15),
+        });
+        // A session its agent never used is not on the daemon, so close fails.
+        if (result.code !== 0)
+          yield* Effect.logDebug("agent-device close exited unsuccessfully", {
+            hostId,
+            code: result.code,
+          });
+      },
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.catch((cause) => Effect.logDebug("agent-device close did not run", { cause })),
+    ),
   );
   const hostContext =
     yield* Effect.context<Effect.Services<ReturnType<typeof SshDeviceHost.make>>>();
