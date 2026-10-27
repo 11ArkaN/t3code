@@ -455,12 +455,18 @@ const make = Effect.gen(function* () {
     // Linked worktrees can sit deeper inside a plain folder, like <repository>/replay/<n>. Ask
     // the projects' Git for them rather than walking folders that may hold large non-git trees.
     let registered: ReadonlyArray<string> | undefined;
-    const nestedWorktrees = Effect.fnUntraced(function* (folder: string) {
+    const nestedWorktrees = Effect.fnUntraced(function* (folder: string, managedRoot: string) {
       if (yield* fs.exists(path.join(folder, ".git"))) return [];
       registered ??= (yield* Effect.forEach(new Set(projectRoots), (root) =>
         git.listWorktreePaths(root).pipe(Effect.orElseSucceed((): string[] => [])),
       )).flat();
-      return registered.filter((worktree) => inside(folder, worktree));
+      // Locked registrations outlive their directory, so only replace the folder with real ones.
+      return yield* Effect.filter(
+        registered.filter(
+          (worktree) => inside(folder, worktree) && !inProject(worktree, managedRoot),
+        ),
+        (worktree) => fs.exists(worktree).pipe(Effect.orElseSucceed(() => false)),
+      );
     });
     for (const root of roots) {
       // Worktrees can be <root>/<repository>/<branch> or explicitly <root>/<name>.
@@ -473,7 +479,7 @@ const make = Effect.gen(function* () {
             return;
           }
           for (const worktreePath of yield* directories(projectDirectory, root)) {
-            const nested = yield* nestedWorktrees(worktreePath);
+            const nested = yield* nestedWorktrees(worktreePath, root);
             for (const target of nested.length > 0 ? nested : [worktreePath]) yield* report(target);
           }
         }).pipe(Effect.orElseSucceed(() => undefined));
