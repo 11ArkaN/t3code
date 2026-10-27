@@ -5109,6 +5109,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 nativeThreadId,
               ).keys(),
             ].some((taskId) => !listed.has(taskId) && wakeEligible.has(taskId));
+            // Judge before the drop adds evidence, or a new wake inherits an older wake's deadline.
+            const wakeWasPending =
+              droppedWakeEligible && (yield* hasPendingWakeOnNativeThread(nativeThreadId));
             yield* Ref.update(pendingBackgroundTasksByNativeThread, (current) => {
               const updated = new Map(current);
               if (tasks.length === 0) {
@@ -5138,8 +5141,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               else updated.set(nativeThreadId, kept);
               return updated;
             });
-            if (droppedWakeEligible) {
-              yield* noteWakeExpected(nativeThreadId);
+            if (droppedWakeEligible && !wakeWasPending) {
+              wakeExpectedSinceMsByNativeThread.set(nativeThreadId, yield* Clock.currentTimeMillis);
             }
           });
 

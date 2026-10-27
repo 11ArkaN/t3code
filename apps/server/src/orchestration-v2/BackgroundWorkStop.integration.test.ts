@@ -1021,7 +1021,8 @@ it.effect.each([
   { case: "waits for a pending wake turn", wakePending: true, devServer: false },
   { case: "waits for a pending wake turn beside a dev server", wakePending: true, devServer: true },
   { case: "settles a thread running only a dev server", wakePending: false, devServer: true },
-])("Auto-settle $case", ({ wakePending, devServer }) =>
+  { case: "settles when the wake probe fails", wakePending: "probe-fails", devServer: false },
+] as const)("Auto-settle $case", ({ wakePending, devServer }) =>
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("background-work-auto-settle");
@@ -1053,7 +1054,10 @@ it.effect.each([
               },
               events: Stream.fromQueue(events),
               hasPendingBackgroundWorkForThread: () => Effect.succeed(true),
-              hasPendingWakeForThread: () => Effect.succeed(wakePending),
+              hasPendingWakeForThread: () =>
+                wakePending === "probe-fails"
+                  ? Effect.die(new Error("probe failed"))
+                  : Effect.succeed(wakePending),
               ensureThread: ({ threadId }) =>
                 Effect.succeed({
                   id: ProviderThreadId.make(`provider-thread:codex:${threadId}`),
@@ -1203,7 +1207,7 @@ it.effect.each([
         yield* worker.drain();
 
         const after = yield* orchestrator.getThreadProjection(threadId);
-        if (!wakePending) {
+        if (wakePending !== true) {
           assert.equal(after.thread.settledOverride, "settled");
           return;
         }
