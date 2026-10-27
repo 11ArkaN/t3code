@@ -170,17 +170,17 @@ function displayMatching(
   return match;
 }
 
-// Normal bounds of a maximized window can sit on another display than the window itself.
+// Normal bounds of a maximized window can sit on, or straddle into, another display than the window.
 function normalBoundsOnWindowDisplay(
   normalBounds: DisplayBounds,
   windowBounds: DisplayBounds,
   displays: readonly DisplayBounds[],
 ): DisplayBounds {
   const target = displayMatching(windowBounds, displays);
-  const source = displayMatching(normalBounds, displays);
-  if (target === undefined || source === undefined || source === target) {
+  if (target === undefined || windowFitsWithinDisplay(normalBounds, target)) {
     return normalBounds;
   }
+  const source = displayMatching(normalBounds, displays) ?? target;
   const width = Math.min(normalBounds.width, target.width);
   const height = Math.min(normalBounds.height, target.height);
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
