@@ -241,6 +241,7 @@ it.effect.skipIf(windowsHost)(
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+      yield* fileSystem.writeFileString(path.join(binDir, "explorer.EXE"), "");
       const systemRoot = path.join(binDir, "Windows");
       const powershellPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
       yield* fileSystem.writeFileString(powershellPath, "");
