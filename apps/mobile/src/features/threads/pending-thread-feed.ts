@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { DateTime } from "effect";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
+import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { QueuedThreadMessage } from "../../state/thread-outbox-model";
 
 /**
@@ -26,6 +27,24 @@ export type PendingThreadFeedEntry = ThreadFeedEntry & {
   /** The server accepted it; its run has not started, so no turn item shows it yet. */
   readonly queued?: true;
 };
+
+// An acknowledged row stops being pending once the projection holds its message,
+// even when the feed hides that message (a rolled-back or cancelled run).
+export function selectPendingAcknowledgedMessages(
+  acknowledged: ReadonlyArray<QueuedThreadMessage>,
+  thread: {
+    readonly threadKey: string | null;
+    readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
+    readonly projectedMessages: ReadonlyArray<{ readonly id: string }> | undefined;
+  },
+): ReadonlyArray<QueuedThreadMessage> {
+  return acknowledged.filter(
+    (message) =>
+      scopedThreadKey(message.environmentId, message.threadId) === thread.threadKey &&
+      !thread.queuedMessages.some((queued) => queued.messageId === message.messageId) &&
+      !thread.projectedMessages?.some((projected) => projected.id === message.messageId),
+  );
+}
 
 /** A row of the thread feed's list. */
 export type ThreadFeedRow = PendingThreadFeedEntry | GuestPendingFeedEntry;
