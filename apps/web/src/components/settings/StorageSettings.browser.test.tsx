@@ -255,3 +255,18 @@ it("keeps a newer pending age open when an older first save fails", async () => 
   await expect.element(daysInput(screen)).toHaveValue("30");
   await expect.element(ruleSwitch(screen)).toBeChecked();
 });
+
+it("switching off during a pending first save does not save an edited age", async () => {
+  setup();
+  state.update.mockReturnValue(new Promise(() => {}));
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.keyboard("{Enter}");
+  await userEvent.fill(daysInput(screen), "1");
+  await userEvent.click(ruleSwitch(screen));
+  expect(state.update.mock.calls).toEqual([
+    [{ storageCleanup: { browserArtifactsAfterDays: 30 } }],
+    [{ storageCleanup: { browserArtifactsAfterDays: null } }],
+  ]);
+});

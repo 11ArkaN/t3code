@@ -200,10 +200,8 @@ function RetentionControl({
       <Switch
         aria-label={label}
         checked={value !== null || enabling !== null}
-        // Keeps focus in a draft, so switching it off discards it instead of committing on blur.
-        onMouseDown={(event) => {
-          if (typeof enabling === "string") event.preventDefault();
-        }}
+        // Keeps focus in the age field, so switching off never commits an edited age first.
+        onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
           if (enabled) {
             setDraft(8);
