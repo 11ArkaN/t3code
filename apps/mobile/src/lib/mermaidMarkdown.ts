@@ -22,11 +22,11 @@ function escapeDestination(text: string, special: RegExp): string {
 }
 
 // A definition's source may span blockquote lines, so rebuild it as one standalone line.
+// `identifier` is the normalized raw label (`label` is decoded), so it re-parses to itself.
 function standaloneDefinition(node: Definition): string {
-  const label = (node.label ?? node.identifier).replace(/[\t\n\r ]+/g, " ");
   const url = escapeDestination(node.url, /[\\<>&]/g);
   const title = node.title == null ? "" : ` "${escapeDestination(node.title, /[\\"&]/g)}"`;
-  return `[${label}]: <${url}>${title}`;
+  return `[${node.identifier}]: <${url}>${title}`;
 }
 
 /**

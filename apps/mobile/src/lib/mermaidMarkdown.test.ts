@@ -167,6 +167,23 @@ describe("splitMermaidMarkdown", () => {
     });
   });
 
+  it.each(["a\\[b", "x\\]y", "a\\\\b", "AT&amp;T", "> q"])(
+    "keeps the %j reference label resolvable after a diagram",
+    (label) => {
+      const markdown = `[${label}]: https://example.com\n\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\`\n\n[Guide][${label}]`;
+      const last = splitMermaidMarkdown(markdown).at(-1);
+      const tree = unified()
+        .use(remarkParse)
+        .parse(last?.markdown ?? "");
+      const [definition, paragraph] = tree.children;
+      expect(definition).toMatchObject({ type: "definition", url: "https://example.com" });
+      expect(paragraph?.type === "paragraph" && paragraph.children[0]).toMatchObject({
+        type: "linkReference",
+        identifier: definition?.type === "definition" ? definition.identifier : undefined,
+      });
+    },
+  );
+
   it("splits a fence whose info string spells mermaid with a character reference", () => {
     expect(splitMermaidMarkdown("```&#109;ermaid\ngraph TD\n```")[0]?.kind).toBe("mermaid");
   });
