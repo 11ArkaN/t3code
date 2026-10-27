@@ -5,6 +5,7 @@
   "scripts": {
     "mcp-tool-use": "node --env-file-if-exists=../.env mcp-tool-use/run.ts",
     "mcp-tool-use:trim-capture": "node mcp-tool-use/trim-capture.ts",
+    "mobile-behavior": "node mobile-behavior/run.ts",
     "thread-titles": "node --env-file-if-exists=../.env thread-titles/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "vp test run --config ../vite.config.ts --dir ."

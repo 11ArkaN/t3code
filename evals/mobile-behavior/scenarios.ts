@@ -1,0 +1,548 @@
+// @effect-diagnostics globalDate:off - scenario windows are wall-clock by nature.
+/**
+ * Scenarios drive one flow on the device and return metrics. Cases in `cases.ts` name a
+ * scenario and check its metrics, so one flow can serve several issues.
+ */
+import type { ThreadId } from "@t3tools/contracts";
+import type * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+
+import type { Device, FeedSample, ProbeState } from "./device.ts";
+import { uuid, type EvalEnvironment } from "./environment.ts";
+import { feedMotion, frameStats, type Metrics } from "./grade.ts";
+
+/** A sample that cannot run here, such as a Duo-only flow on an iPad. */
+export class NotApplicable extends Schema.TaggedError<NotApplicable>()("NotApplicable", {
+  message: Schema.String,
+}) {}
+
+export type Pose = "phone" | "duo-closed" | "duo-open" | "ipad";
+
+export interface ScenarioContext {
+  readonly env: EvalEnvironment;
+  readonly device: Device;
+  readonly pose: Pose;
+  readonly fixtures: {
+    readonly longThread: ThreadId;
+    readonly second: ThreadId;
+    /** Per-run titles, so rows from earlier runs' environments never match. */
+    readonly titles: { readonly long: string; readonly second: string };
+  };
+}
+
+const threadPath = (ctx: ScenarioContext, threadId: string) =>
+  `threads/${ctx.env.environmentId}/${threadId}`;
+
+const isThread = (state: ProbeState, threadId: string) =>
+  state.route?.name === "Thread" && state.route.params.threadId === threadId;
+
+const openThread = Effect.fn("scenario.openThread")(function* (
+  ctx: ScenarioContext,
+  threadId: string,
+) {
+  yield* ctx.device.open(threadPath(ctx, threadId));
+  return yield* ctx.device.waitFor(
+    `thread ${threadId} with a ready feed`,
+    (state) => isThread(state, threadId) && state.feed?.threadId === threadId && state.feed.ready,
+    20_000,
+  );
+});
+
+/** Screen size in points, and the x of the thread column (the right column in split view). */
+const geometry = Effect.fn("scenario.geometry")(function* (ctx: ScenarioContext) {
+  const nodes = yield* ctx.device.nodes;
+  const rect = nodes[0]?.rect ?? { x: 0, y: 0, width: 400, height: 870 };
+  const state = yield* ctx.device.state;
+  return {
+    width: rect.width,
+    height: rect.height,
+    threadX: Math.round(rect.width * (state.route?.columns ? 0.72 : 0.5)),
+  };
+});
+
+const findNode = Effect.fn("scenario.findNode")(function* (
+  ctx: ScenarioContext,
+  description: string,
+  match: (node: { label?: string; kind?: string; editable?: boolean }) => boolean,
+) {
+  const node = (yield* ctx.device.nodes).find(match);
+  if (!node?.rect) return yield* new NotApplicable({ message: `No ${description} on screen.` });
+  return node;
+});
+
+const composerNode = (ctx: ScenarioContext) =>
+  findNode(
+    ctx,
+    "composer text view",
+    (node) => node.kind === "text-view" && node.editable === true,
+  );
+
+const typeInComposer = Effect.fn("scenario.typeInComposer")(function* (
+  ctx: ScenarioContext,
+  text: string,
+) {
+  const node = yield* composerNode(ctx);
+  const { x, y } = ctx.device.center(node);
+  yield* ctx.device.pressAt(x, y);
+  yield* ctx.device.type(text);
+});
+
+const projectionHasUserText = (
+  projection: { messages: ReadonlyArray<{ role?: string; text?: string }> },
+  text: string,
+) => projection.messages.filter((message) => message.text === text).length;
+
+/** Starts a scripted reply in `threadId` and waits until the app shows it streaming. */
+const startStream = Effect.fn("scenario.startStream")(function* (
+  ctx: ScenarioContext,
+  threadId: ThreadId,
+  script: string,
+) {
+  const before = (yield* ctx.device.state).feed?.content ?? 0;
+  yield* ctx.env.send(threadId, `Write the long report. ${script}`);
+  yield* ctx.device.waitFor(
+    "the reply to start streaming in the feed",
+    (state) => (state.feed?.content ?? 0) > before + 200,
+    20_000,
+  );
+});
+
+const interruptActive = Effect.fn("scenario.interruptActive")(
+  function* (ctx: ScenarioContext, threadId: ThreadId) {
+    const projection = yield* ctx.env.projection(threadId);
+    for (const run of projection.runs) {
+      if (["completed", "failed", "interrupted", "cancelled"].includes(run.status)) continue;
+      yield* ctx.env.client["orchestration.dispatchCommand"]({
+        type: "run.interrupt",
+        commandId: yield* ctx.env.command,
+        threadId,
+        runId: run.id,
+      });
+    }
+    yield* ctx.env.settled(threadId);
+  },
+  (effect) => Effect.ignore(effect),
+);
+
+/** Records frames (and the visible feed) while `action` runs; the action's failure is not the metric. */
+const recordFor = <E, R>(
+  ctx: ScenarioContext,
+  withFeed: boolean,
+  action: Effect.Effect<unknown, E, R>,
+) =>
+  ctx.device
+    .recordStart(withFeed)
+    .pipe(Effect.andThen(Effect.ignore(action)), Effect.andThen(ctx.device.recordStop));
+
+const frameMetrics = (recording: { js: ReadonlyArray<number>; ui: ReadonlyArray<number> }) => ({
+  ...frameStats(recording.js, "js"),
+  ...frameStats(recording.ui, "ui"),
+});
+
+/** Every scenario fails with this one error, so the table has a single function type. */
+export class ScenarioFailure extends Schema.TaggedError<ScenarioFailure>()("ScenarioFailure", {
+  message: Schema.String,
+  notApplicable: Schema.Boolean,
+}) {}
+
+const failure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.mapError(
+    effect,
+    (error) =>
+      new ScenarioFailure({
+        message: error instanceof Error ? error.message : String(error),
+        notApplicable: Schema.is(NotApplicable)(error),
+      }),
+  );
+
+type Scenario = (ctx: ScenarioContext) => Effect.Effect<Metrics, ScenarioFailure, Crypto.Crypto>;
+
+export const SCENARIOS = {
+  /** Six upward flings in the long settled thread. */
+  scrollUpLongThread: Effect.fn("scenario.scrollUpLongThread")(function* (ctx: ScenarioContext) {
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    const { height, threadX } = yield* geometry(ctx);
+    const recording = yield* recordFor(
+      ctx,
+      true,
+      Effect.gen(function* () {
+        for (let fling = 0; fling < 6; fling++)
+          yield* ctx.device.swipe(threadX, Math.round(height * 0.35), Math.round(height * 0.8));
+        yield* Effect.sleep("1 second");
+      }),
+    );
+    return { ...feedMotion(recording.feed, 1), ...frameMetrics(recording) } satisfies Metrics;
+  }, failure),
+
+  /** A long reply streams into the open thread for eight seconds. */
+  streamInView: Effect.fn("scenario.streamInView")(function* (ctx: ScenarioContext) {
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    yield* startStream(ctx, ctx.fixtures.longThread, "[[eval:stream:4000:25]]");
+    const recording = yield* recordFor(ctx, true, Effect.sleep("8 seconds"));
+    const after = yield* ctx.device.state;
+    yield* interruptActive(ctx, ctx.fixtures.longThread);
+    const motion = feedMotion(recording.feed, 0);
+    return {
+      ...motion,
+      ...frameMetrics(recording),
+      settledFromEndPx: settledFromEnd(recording.feed),
+      contentGrewPx: (recording.feed.at(-1)?.content ?? 0) - (recording.feed[0]?.content ?? 0),
+      followingAtEnd: after.feed?.following === true,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Types and sends a message from the composer at the end of the long thread. */
+  sendInLongThread: Effect.fn("scenario.sendInLongThread")(function* (ctx: ScenarioContext) {
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    const text = `Follow-up ${(yield* uuid).slice(0, 8)} [[eval:reply]]`;
+    yield* typeInComposer(ctx, text);
+    const recording = yield* recordFor(
+      ctx,
+      true,
+      Effect.gen(function* () {
+        yield* ctx.device.press('label="Send"');
+        yield* Effect.sleep("4 seconds");
+      }),
+    );
+    const after = yield* ctx.device.state;
+    const projection = yield* ctx.env.settled(ctx.fixtures.longThread);
+    const motion = feedMotion(recording.feed, 0);
+    return {
+      maxFromEndPx: motion.maxFromEndPx ?? null,
+      finalFromEndPx: motion.finalFromEndPx ?? null,
+      serverMessages: projectionHasUserText(projection, text),
+      draftCleared: after.composer.draft === "",
+      editorCleared: after.composer.editors.every((editor) => editor.value === ""),
+    } satisfies Metrics;
+  }, failure),
+
+  /** A thread in the background finishes while the long thread sits mid-scroll. */
+  backgroundFinish: Effect.fn("scenario.backgroundFinish")(function* (ctx: ScenarioContext) {
+    const key = `bg-${(yield* uuid).slice(0, 8)}`;
+    const other = yield* ctx.env.launch("Background work", `Run the job. [[eval:hold:${key}]]`);
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    const { height, threadX } = yield* geometry(ctx);
+    for (let fling = 0; fling < 2; fling++)
+      yield* ctx.device.swipe(threadX, Math.round(height * 0.4), Math.round(height * 0.7));
+    yield* Effect.sleep("1500 millis");
+    const recording = yield* recordFor(
+      ctx,
+      true,
+      Effect.gen(function* () {
+        yield* ctx.env.release(key);
+        yield* ctx.env.settled(other);
+        yield* Effect.sleep("2 seconds");
+      }),
+    );
+    return { ...feedMotion(recording.feed, 0) } satisfies Metrics;
+  }, failure),
+
+  /** Types in a streaming thread, switches to another thread, and comes back. */
+  draftThreadSwitch: Effect.fn("scenario.draftThreadSwitch")(function* (ctx: ScenarioContext) {
+    const text = `Draft ${(yield* uuid).slice(0, 8)}`;
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    yield* startStream(ctx, ctx.fixtures.longThread, "[[eval:stream:4000:25]]");
+    yield* typeInComposer(ctx, text);
+    yield* openThread(ctx, ctx.fixtures.second);
+    yield* Effect.sleep("1 second");
+    const onOther = yield* ctx.device.state;
+    yield* openThread(ctx, ctx.fixtures.longThread);
+    yield* Effect.sleep("1 second");
+    const back = yield* ctx.device.state;
+    yield* interruptActive(ctx, ctx.fixtures.longThread);
+    const otherKey = `${ctx.env.environmentId}:${ctx.fixtures.second}`;
+    return {
+      draftKept: back.composer.draft === text,
+      editorShowsDraft: back.composer.editors.some((editor) => editor.value === text),
+      leakedIntoOtherDraft: (onOther.composer.drafts[otherKey] ?? "") !== "",
+      leakedIntoOtherEditor: onOther.composer.editors.some((editor) => editor.value.includes(text)),
+    } satisfies Metrics;
+  }, failure),
+
+  /** Types a draft, sends the app to the background, and brings it back. */
+  draftBackground: Effect.fn("scenario.draftBackground")(function* (ctx: ScenarioContext) {
+    const text = `Draft ${(yield* uuid).slice(0, 8)}`;
+    yield* openThread(ctx, ctx.fixtures.second);
+    yield* typeInComposer(ctx, text);
+    yield* ctx.device.home;
+    yield* Effect.sleep("3 seconds");
+    yield* ctx.device.foreground;
+    const back = yield* ctx.device.waitFor("the thread after foreground", (state) =>
+      isThread(state, ctx.fixtures.second),
+    );
+    return {
+      draftKept: back.composer.draft === text,
+      editorShowsDraft: back.composer.editors.some((editor) => editor.value === text),
+    } satisfies Metrics;
+  }, failure),
+
+  /** Taps the middle of the composer's text area. */
+  tapComposer: Effect.fn("scenario.tapComposer")(function* (ctx: ScenarioContext) {
+    yield* openThread(ctx, ctx.fixtures.second);
+    const node = yield* composerNode(ctx);
+    const { x, y } = ctx.device.center(node);
+    yield* ctx.device.pressAt(x, y);
+    yield* Effect.sleep("1500 millis");
+    const after = yield* ctx.device.state;
+    return {
+      stayedOnThread: isThread(after, ctx.fixtures.second),
+      editorFocused:
+        after.composer.editors.some((editor) => editor.expanded) && after.composer.keyboard,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Types `/`, picks the first suggestion, and checks the editor keeps focus. */
+  skillPick: Effect.fn("scenario.skillPick")(function* (ctx: ScenarioContext) {
+    yield* openThread(ctx, ctx.fixtures.second);
+    yield* typeInComposer(ctx, "/");
+    yield* Effect.sleep("1500 millis");
+    const composer = yield* composerNode(ctx);
+    // Menu rows read "<icon>, /<command>, <description>"; /model opens a sheet, so pick another.
+    const item = (yield* ctx.device.nodes).find(
+      (node) =>
+        node.rect !== undefined &&
+        node.rect.y + node.rect.height <= composer.rect!.y &&
+        /, (\/|skill:)/.test(node.label ?? "") &&
+        node.label?.includes("/model") !== true,
+    );
+    if (!item?.rect) return yield* new NotApplicable({ message: "The / menu listed no commands." });
+    const { x, y } = ctx.device.center(item);
+    yield* ctx.device.pressAt(x, y);
+    yield* Effect.sleep("1500 millis");
+    const after = yield* ctx.device.state;
+    return {
+      editorFocused:
+        after.composer.editors.some((editor) => editor.expanded) && after.composer.keyboard,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Sends from a thread whose provider instance the server no longer has. */
+  failedSend: Effect.fn("scenario.failedSend")(function* (ctx: ScenarioContext) {
+    const threadId = yield* ctx.env.launchRejecting("Locked thread");
+    yield* openThread(ctx, threadId);
+    const text = `Will fail ${(yield* uuid).slice(0, 8)}`;
+    yield* typeInComposer(ctx, text);
+    yield* ctx.device.press('label="Send"');
+    const shown = yield* ctx.device
+      .waitFor("a composer error", (state) => state.composer.error !== null, 8_000)
+      .pipe(Effect.option);
+    const after = yield* ctx.device.state;
+    const projection = yield* ctx.env.projection(threadId);
+    return {
+      errorShown: shown._tag === "Some",
+      draftRestored: after.composer.draft === text,
+      serverMessages: projectionHasUserText(projection, text),
+    } satisfies Metrics;
+  }, failure),
+
+  /** A working thread finishes while Home is open. */
+  workingShelfFinish: Effect.fn("scenario.workingShelfFinish")(function* (ctx: ScenarioContext) {
+    const key = `shelf-${(yield* uuid).slice(0, 8)}`;
+    const threadId = yield* ctx.env.launch("Shelf work", `Run the job. [[eval:hold:${key}]]`);
+    const working = yield* ctx.device.waitFor(
+      "the thread to show as working",
+      (state) => state.threads[threadId] === "working",
+    );
+    yield* ctx.env.release(key);
+    yield* ctx.env.settled(threadId);
+    // The shelf keeps a finished row for WORKING_EXIT_GRACE_MS (2 s) on purpose.
+    yield* Effect.sleep("5 seconds");
+    const after = yield* ctx.device.state;
+    return {
+      shelfShownWhileWorking: shelfCount(working) > 0,
+      shelfCountAfter: shelfCount(after),
+      statusAfter: after.threads[threadId] ?? "missing",
+    } satisfies Metrics;
+  }, failure),
+
+  /** A thread asks a question while Home is open. */
+  pendingQuestion: Effect.fn("scenario.pendingQuestion")(function* (ctx: ScenarioContext) {
+    const threadId = yield* ctx.env.launch("Question", `Ask me first. [[eval:question]]`);
+    yield* ctx.env.waitForPendingInput(threadId);
+    yield* Effect.sleep("2 seconds");
+    const after = yield* ctx.device.state;
+    yield* interruptActive(ctx, threadId);
+    return {
+      status: after.threads[threadId] ?? "missing",
+      shelfCount: shelfCount(after),
+    } satisfies Metrics;
+  }, failure),
+
+  /** A thread runs two subagents; Home and the thread must not look idle. */
+  subagentsRunning: Effect.fn("scenario.subagentsRunning")(function* (ctx: ScenarioContext) {
+    const key = `sub-${(yield* uuid).slice(0, 8)}`;
+    const threadId = yield* ctx.env.launch("Subagents", `Fan out. [[eval:subagents:${key}]]`);
+    yield* ctx.env.waitForSubagents(threadId);
+    yield* Effect.sleep("2 seconds");
+    const home = yield* ctx.device.state;
+    yield* openThread(ctx, threadId);
+    yield* Effect.sleep("1500 millis");
+    const thread = yield* ctx.device.state;
+    yield* ctx.env.release(key);
+    yield* ctx.env.settled(threadId);
+    return {
+      status: home.threads[threadId] ?? "missing",
+      threadShowsStatus: thread.floatingStatus !== null,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Opens a finished subagent's child thread and scrolls it. */
+  openSubagentThread: Effect.fn("scenario.openSubagentThread")(function* (ctx: ScenarioContext) {
+    const key = `child-${(yield* uuid).slice(0, 8)}`;
+    const threadId = yield* ctx.env.launch("Parent", `Fan out. [[eval:subagents:${key}]]`);
+    yield* ctx.env.waitForSubagents(threadId);
+    yield* ctx.env.release(key);
+    const projection = yield* ctx.env.settled(threadId);
+    const child = projection.subagents.find(
+      (subagent) => subagent.childThreadId !== null,
+    )?.childThreadId;
+    if (!child) return yield* new NotApplicable({ message: "The subagent made no child thread." });
+    const { height, threadX } = yield* geometry(ctx);
+    const recording = yield* recordFor(
+      ctx,
+      false,
+      Effect.gen(function* () {
+        yield* openThread(ctx, child);
+        yield* ctx.device.swipe(threadX, Math.round(height * 0.7), Math.round(height * 0.35));
+        yield* ctx.device.swipe(threadX, Math.round(height * 0.35), Math.round(height * 0.7));
+      }),
+    );
+    return frameMetrics(recording) satisfies Metrics;
+  }, failure),
+
+  /** Settled work with no local sends must not leave a Live Activity. */
+  liveActivityIdle: Effect.fn("scenario.liveActivityIdle")(function* (ctx: ScenarioContext) {
+    yield* Effect.sleep("4 seconds");
+    const state = yield* ctx.device.state;
+    return {
+      liveActivities: state.liveActivities.count,
+      starts: state.liveActivities.log.filter((entry) => entry.event === "start").length,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Long-presses a row on Home and picks Pin. */
+  pinFromLongPress: Effect.fn("scenario.pinFromLongPress")(function* (ctx: ScenarioContext) {
+    const title = `Pin target ${(yield* uuid).slice(0, 6)}`;
+    const target = yield* ctx.env.launch(title, "Hi. [[eval:reply]]");
+    yield* ctx.env.settled(target);
+    yield* waitForRow(ctx, title);
+    // A just-inserted row can swallow the first long-press while it animates in.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      yield* ctx.device.longPress(rowSelector(title));
+      yield* Effect.sleep("1 second");
+      if ((yield* ctx.device.nodes).some((node) => node.label === "Pin")) break;
+    }
+    yield* ctx.device.press('label="Pin"');
+    yield* Effect.sleep("2 seconds");
+    const shell = yield* ctx.env.shell();
+    const pinned = shell.threads
+      .filter((thread) => thread.pinnedAt != null)
+      .map((thread) => thread.id);
+    for (const id of pinned)
+      yield* ctx.env.client["orchestration.dispatchCommand"]({
+        type: "thread.unpin",
+        commandId: yield* ctx.env.command,
+        threadId: id,
+      });
+    return {
+      targetPinned: pinned.includes(target),
+      otherPinned: pinned.filter((id) => id !== target).length,
+    } satisfies Metrics;
+  }, failure),
+
+  /** Opens a link to a thread created after the app loaded its list. */
+  linkToNewThread: Effect.fn("scenario.linkToNewThread")(function* (ctx: ScenarioContext) {
+    const threadId = yield* ctx.env.launch("Linked thread", "Hi. [[eval:reply]]");
+    yield* ctx.device.open(threadPath(ctx, threadId));
+    yield* Effect.sleep("4 seconds");
+    const after = yield* ctx.device.state;
+    return { opensTarget: isThread(after, threadId) } satisfies Metrics;
+  }, failure),
+
+  /** Opens a link to an archived thread. */
+  linkToArchivedThread: Effect.fn("scenario.linkToArchivedThread")(function* (
+    ctx: ScenarioContext,
+  ) {
+    const threadId = yield* ctx.env.launch("Archived thread", "Hi. [[eval:reply]]");
+    yield* ctx.env.settled(threadId);
+    yield* ctx.env.client["orchestration.dispatchCommand"]({
+      type: "thread.archive",
+      commandId: yield* ctx.env.command,
+      threadId,
+    });
+    yield* Effect.sleep("1 second");
+    yield* ctx.device.open(threadPath(ctx, threadId));
+    yield* Effect.sleep("4 seconds");
+    const after = yield* ctx.device.state;
+    return { opensTarget: isThread(after, threadId) } satisfies Metrics;
+  }, failure),
+
+  /** Taps a row on Home. */
+  openFromList: Effect.fn("scenario.openFromList")(function* (ctx: ScenarioContext) {
+    const title = `Open me ${(yield* uuid).slice(0, 6)}`;
+    const target = yield* ctx.env.launch(title, "Hi. [[eval:reply]]");
+    yield* ctx.env.settled(target);
+    yield* waitForRow(ctx, title);
+    yield* ctx.device.press(rowSelector(title));
+    const after = yield* ctx.device
+      .waitFor("the tapped thread", (state) => isThread(state, target))
+      .pipe(Effect.option);
+    return { opensTarget: after._tag === "Some" } satisfies Metrics;
+  }, failure),
+
+  /** On a folded Duo: open a thread from the list, go back, and open another. */
+  duoBackThenOpen: Effect.fn("scenario.duoBackThenOpen")(function* (ctx: ScenarioContext) {
+    if (ctx.pose !== "duo-closed")
+      return yield* new NotApplicable({ message: "Only the folded iPhone Duo has this flow." });
+    const tag = (yield* uuid).slice(0, 6);
+    const first = yield* ctx.env.launch(`Duo first ${tag}`, "Hi. [[eval:reply]]");
+    const next = yield* ctx.env.launch(`Duo next ${tag}`, "Hi. [[eval:reply]]");
+    yield* ctx.env.settled(first);
+    yield* ctx.env.settled(next);
+    yield* waitForRow(ctx, `Duo first ${tag}`);
+    yield* ctx.device.press(rowSelector(`Duo first ${tag}`));
+    yield* ctx.device.waitFor("the first thread", (state) => isThread(state, first));
+    yield* ctx.device.back;
+    yield* ctx.device.waitFor("Home", (state) => state.route?.name === "Home");
+    yield* ctx.device.press(rowSelector(`Duo next ${tag}`));
+    yield* Effect.sleep("2 seconds");
+    const after = yield* ctx.device.state;
+    return {
+      opensTarget: isThread(after, next),
+      feedShown: after.feed?.threadId === next && after.feed.ready,
+    } satisfies Metrics;
+  }, failure),
+} satisfies Record<string, Scenario>;
+
+export type ScenarioName = keyof typeof SCENARIOS;
+
+/** Row rects are relative to their list, so rows are tapped by label, not by point. */
+function rowSelector(title: string) {
+  return `label="${title}"`;
+}
+
+/** Largest distance from the end on frames where the content did not just grow. */
+function settledFromEnd(samples: ReadonlyArray<FeedSample>) {
+  let worst = 0;
+  for (let index = 1; index < samples.length; index++)
+    if (samples[index]!.content === samples[index - 1]!.content)
+      worst = Math.max(worst, samples[index]!.fromEnd ?? 0);
+  return worst;
+}
+
+/** Waits until a row with this title is on screen. */
+const waitForRow = Effect.fn("scenario.waitForRow")(function* (
+  ctx: ScenarioContext,
+  title: string,
+) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if ((yield* ctx.device.nodes).some((node) => node.label?.includes(title))) return;
+    yield* Effect.sleep("500 millis");
+  }
+  return yield* new NotApplicable({ message: `Row "${title}" never appeared on Home.` });
+});
+
+function shelfCount(state: ProbeState) {
+  return state.homeList?.find((entry) => entry.type === "v2-working-shelf")?.count ?? 0;
+}
