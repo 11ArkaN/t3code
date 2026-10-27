@@ -1238,6 +1238,7 @@ describe("orphan worktree reports", () => {
         yield* fixture.command(fixture.repo, ["worktree", "add", "-b", "locked", worktree]);
         yield* fixture.command(fixture.repo, ["worktree", "lock", worktree]);
         yield* fixture.fs.rename(worktree, `${replay}/moved`);
+        yield* fixture.fs.makeDirectory(worktree);
         yield* fixture.fs.utimes(replay, 1, 1);
         expect((yield* fixture.service.runNow).entries.map((entry) => entry.path)).toEqual([
           replay,

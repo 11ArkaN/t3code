@@ -460,12 +460,16 @@ const make = Effect.gen(function* () {
       registered ??= (yield* Effect.forEach(new Set(projectRoots), (root) =>
         git.listWorktreePaths(root).pipe(Effect.orElseSucceed((): string[] => [])),
       )).flat();
-      // Locked registrations outlive their directory, so only replace the folder with real ones.
+      // Locked registrations outlive their directory, whose path may since hold something else.
       return yield* Effect.filter(
         registered.filter(
           (worktree) => inside(folder, worktree) && !inProject(worktree, managedRoot),
         ),
-        (worktree) => fs.exists(worktree).pipe(Effect.orElseSucceed(() => false)),
+        (worktree) =>
+          Effect.gen(function* () {
+            if (pathKey(yield* fs.realPath(worktree)) !== pathKey(worktree)) return false;
+            return (yield* fs.stat(path.join(worktree, ".git"))).type === "File";
+          }).pipe(Effect.orElseSucceed(() => false)),
       );
     });
     for (const root of roots) {
