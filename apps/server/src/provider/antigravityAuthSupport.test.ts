@@ -686,6 +686,54 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
     }),
   );
 
+  it.effect("posts the sign-in URL to the listener directly when an environment proxy is set", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      let helper: ChildProcess.StandardCommand | undefined;
+      yield* prepareAntigravityProfile({
+        profileDirectory: yield* fs.makeTempDirectoryScoped(),
+      }).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) => {
+            if (ChildProcess.isStandardCommand(command)) helper = command;
+            return spawner.spawn(command);
+          }),
+        ),
+      );
+      if (!helper) return yield* Effect.die("The browser helper preflight did not run.");
+      const received: string[] = [];
+      const sink = yield* serveAntigravityAuthorizationUrlSink((url) =>
+        Effect.sync(() => {
+          received.push(url);
+        }),
+      );
+      const unreachableProxy = new URL(
+        yield* serveAntigravityAuthorizationUrlSink(() => Effect.void).pipe(Effect.scoped),
+      ).origin;
+      const child = yield* spawner.spawn(
+        ChildProcess.make(helper.command, [...helper.args.slice(0, -1), authorizationUrl], {
+          env: {
+            ...helper.options.env,
+            T3_ANTIGRAVITY_AUTH_SINK: sink,
+            NODE_USE_ENV_PROXY: "1",
+            HTTP_PROXY: unreachableProxy,
+            http_proxy: unreachableProxy,
+          },
+          extendEnv: false,
+        }),
+      );
+      const [stderr, exitCode] = yield* Effect.all(
+        [child.stderr.pipe(Stream.decodeText(), Stream.mkString), child.exitCode],
+        { concurrency: "unbounded" },
+      );
+      expect(Number(exitCode)).toBe(0);
+      expect(stderr).toBe("");
+      expect(received).toEqual([authorizationUrl]);
+    }),
+  );
+
   it.effect("rejects Python BROWSER delimiter collisions before starting a helper", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

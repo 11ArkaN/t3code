@@ -64,12 +64,15 @@ const isAcpTransportError = Schema.is(AcpErrors.AcpTransportError);
 const authorizationUrlSinkEnvironmentKey = "T3_ANTIGRAVITY_AUTH_SINK";
 // Python splits BROWSER on path separators before parsing quotes, so the source has no `:` or `;`.
 // Windows starts BROWSER without the agent's stdio: post to the sign-in listener, else use stderr.
+// `agent: false` keeps the loopback request off NODE_USE_ENV_PROXY proxies, which fetch would use.
 // Exit 0 on EPIPE to prevent browser fallback after cancellation.
 const browserHelperSource =
-  `Promise.resolve(process.env.${authorizationUrlSinkEnvironmentKey})` +
-  `.then(sink=>sink&&fetch(sink,Object.fromEntries([["method","POST"],["body",process.argv[1]],` +
-  `["signal",AbortSignal.timeout(5000)]])))` +
-  `.then(response=>response&&response.ok&&process.exit(0))` +
+  `new Promise((delivered,failed)=>(process.env.${authorizationUrlSinkEnvironmentKey}||failed())&&` +
+  `require("http").request(process.env.${authorizationUrlSinkEnvironmentKey},` +
+  `Object.fromEntries([["method","POST"],["agent",false],["signal",AbortSignal.timeout(5000)]]),` +
+  `response=>response.resume().on("error",failed).on("end",()=>delivered(response.statusCode===204)))` +
+  `.on("error",failed).end(process.argv[1]))` +
+  `.then(ok=>ok&&process.exit(0))` +
   `.catch(()=>0)` +
   `.then(()=>process.stderr.on("error",()=>process.exit(0)).write(` +
   `"${ANTIGRAVITY_AUTH_BROWSER_MARKER}"+JSON.stringify(process.argv[1])+"\\n",` +
@@ -94,7 +97,7 @@ const removedEnvironmentKeys = new Set([
   "BROWSER",
   "PYTHONUNBUFFERED",
   "ELECTRON_RUN_AS_NODE",
-  authorizationUrlSinkEnvironmentKey.toUpperCase(),
+  authorizationUrlSinkEnvironmentKey,
 ]);
 
 export interface AntigravityProfile {
