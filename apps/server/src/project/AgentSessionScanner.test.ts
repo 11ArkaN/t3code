@@ -2377,6 +2377,38 @@ describe("parseAgentSessionTranscript", () => {
       ].join("\n"),
       expected: "Please fix this parser",
     },
+    {
+      name: "takes the request after referenced Codex chats",
+      prompt: [
+        "## Referenced chats with Codex:",
+        "These are live references to Codex tasks, not task contents.",
+        '[{"threadId":"thread-1"}]',
+        "## My request for Codex:",
+        "Compare it with this one",
+      ].join("\n"),
+      expected: "Compare it with this one",
+    },
+    {
+      name: "keeps an attachment sent without a request",
+      prompt: [
+        "# Files mentioned by the user:",
+        "",
+        "## shot.png: /tmp/shot.png",
+        "Image attachment: true",
+        "",
+        "## My request for Codex:",
+        "",
+      ].join("\n"),
+      expected: [
+        "# Files mentioned by the user:",
+        "",
+        "## shot.png: /tmp/shot.png",
+        "Image attachment: true",
+        "",
+        "## My request for Codex:",
+        "",
+      ].join("\n"),
+    },
   ])("$name", ({ prompt, expected }) => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: [

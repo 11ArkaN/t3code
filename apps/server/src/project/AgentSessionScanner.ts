@@ -287,6 +287,7 @@ const CODEX_CONTEXT_OPENERS = [
   "# Context from my IDE setup:",
   "# Files mentioned by the user:",
   "<in-app-browser-context",
+  "## Referenced chats with Codex:",
 ];
 const CODEX_REQUEST_MARKER = /\n## My request for Codex:(?=\n|$)/g;
 
@@ -294,7 +295,9 @@ function codexRequestText(text: string): string {
   const opening = text.trimStart();
   if (!CODEX_CONTEXT_OPENERS.some((opener) => opening.startsWith(opener))) return text;
   const marker = Array.from(text.matchAll(CODEX_REQUEST_MARKER)).at(-1);
-  return marker === undefined ? text : text.slice(marker.index + marker[0].length).trim();
+  const request = marker === undefined ? "" : text.slice(marker.index + marker[0].length).trim();
+  // An attachment sent without text has an empty request; keep the turn as recorded.
+  return request || text;
 }
 
 const CODEX_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>";
