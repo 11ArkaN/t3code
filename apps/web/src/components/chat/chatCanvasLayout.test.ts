@@ -48,6 +48,33 @@ describe("chat canvas layout", () => {
     expect(previous!.overlapsChat).toBe(true);
     expect(previous!.frame!.width).toBe(1100);
   });
+  it("narrows a lifted preview when its right edge is dragged inward", () => {
+    const source = { width: 1280, height: 800 };
+    const player: ChatCanvasPreview = {
+      ...preview,
+      position: { x: 200, y: 12 },
+      source,
+      lastInteraction: "resize",
+    };
+    const rendered = resolve(1200, player, 300).frame!;
+    const resized = resizePreviewMiniPlayer({
+      start: rendered,
+      direction: "east",
+      delta: { x: -10, y: 0 },
+      source,
+      container: { width: 1200, height: 300 },
+    });
+    const stored = { ...player, width: resized.width, position: resized };
+    expect({
+      dragged: resized.width,
+      inPlace: resolve(1200, stored, 300).frame!.width,
+      roomToGrow: resolve(1200, stored, 900).frame!.width,
+    }).toEqual({
+      dragged: rendered.width - 10,
+      inPlace: rendered.width - 10,
+      roomToGrow: rendered.width - 10,
+    });
+  });
   it.each([900, 1000, 1004])("allows dragging across a %spx chat canvas", (width) => {
     const start = resolve(width, { ...preview, position: { x: width - 332, y: 200 } }).frame!;
     const moved = resolve(width, {
