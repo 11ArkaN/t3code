@@ -2634,10 +2634,14 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly freshQueueOnReopen?: boolean;
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
+    readonly settingsErrors?: ReadonlyArray<ClaudeSdk.SDKSettingsParseError>;
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      // Mirrors the CLI's get_settings control response, which lists skipped settings files.
+      const getSettings = () =>
+        Effect.succeed({ effective: {}, sources: [], errors: options?.settingsErrors ?? [] });
       const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-claude-v2-wake-",
       });
@@ -2750,6 +2754,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     ),
                   backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
                   stopTask: options?.stopTask ?? (() => Effect.void),
+                  getSettings,
                   interrupt: Effect.void,
                   close: Queue.shutdown(processMessages),
                 };
@@ -2775,6 +2780,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   }).pipe(Effect.andThen(() => options?.setPermissionMode?.(mode) ?? Effect.void)),
                 backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
                 stopTask: options?.stopTask ?? (() => Effect.void),
+                getSettings,
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
               };
@@ -3325,6 +3331,47 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* fileSystem.remove(remoteFile);
         yield* fileSystem.makeDirectory(remoteFile);
         assert.equal((yield* open).permissionMode, "auto");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+
+    it.effect("shows a notice naming a settings file Claude skipped as malformed", () =>
+      Effect.gen(function* () {
+        const settingsFile = "/home/user/.claude/settings.json";
+        const harness = yield* makeWakeHarnessWithOptions({
+          settingsErrors: [{ file: settingsFile, path: "", message: "Invalid or malformed JSON" }],
+        });
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-settings-error"),
+            text: "Add a commit.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "settings-error-result", result: "Done." }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+
+        const notices = harness.events.flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+            ? [event.turnItem.message]
+            : [],
+        );
+        assert.isTrue(
+          notices.some(
+            (message) =>
+              message.includes(settingsFile) && message.includes("Invalid or malformed JSON"),
+          ),
+          `Claude skipped ${settingsFile} as malformed JSON, but the thread showed no notice; notices: ${JSON.stringify(notices)}`,
+        );
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
