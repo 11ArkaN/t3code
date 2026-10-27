@@ -65,6 +65,26 @@ it.each([
   ).toBe(program);
 });
 
+// regression: #11055 launchd's default soft maxfiles (256) makes FileSystem.watch fail with EMFILE
+it("raises the launch agent's open file limit above launchd's default", () => {
+  const plist = BootService.renderBootServicePlist(
+    {
+      program: ["/Users/theo/.t3/runtime/versions/1.2.3/t3", "__service-launcher"],
+      baseDir: "/Users/theo/.t3",
+      logPath: "/Users/theo/.t3/userdata/logs/boot-service.log",
+      unitPath: "",
+    },
+    { homeDir: "/Users/theo", environmentPath: "/usr/bin" },
+  );
+  const softLimits = /<key>SoftResourceLimits<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(plist)?.[1];
+  const numberOfFiles = softLimits?.match(
+    /<key>NumberOfFiles<\/key>\s*<integer>(\d+)<\/integer>/,
+  )?.[1];
+
+  expect(softLimits, "plist has no SoftResourceLimits dict").toBeDefined();
+  expect(Number(numberOfFiles)).toBeGreaterThanOrEqual(4096);
+});
+
 const macInstallerPath =
   "/opt/homebrew/bin:/Users/theo/.npm-global/bin:/Users/theo/.nvm/versions/node/v22.16.0/bin:/usr/bin:/bin";
 
