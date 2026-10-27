@@ -648,37 +648,7 @@ export default function ChatView(props: ChatViewProps) {
   const [restingComposerControlsHost, setRestingComposerControlsHost] =
     useState<HTMLDivElement | null>(null);
   const [restingComposerControlsVisible, setRestingComposerControlsVisible] = useState(false);
-  const acquireComposer = () => {
-    flushSync(() => {
-      const focus = useSideChatFocusStore.getState();
-      if (sideChat !== undefined) {
-        focus.focus(scopedThreadKey(sideChat.parentRef), threadId);
-      } else {
-        const threadRef = scopeThreadRef(environmentId, threadId);
-        if (activeRightPanelSurface?.kind === "aside") {
-          useRightPanelStore.getState().setMaximized(threadRef, false);
-          if (shouldUsePlanSidebarSheet) useRightPanelStore.getState().close(threadRef);
-        }
-        focus.release(scopedThreadKey(threadRef));
-      }
-    });
-  };
-  const citeAssistantText = (
-    citation: AssistantCitation,
-    sourceAnchor: AssistantCitationSourceAnchor,
-  ) => {
-    acquireComposer();
-    const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
-    if (!inserted) {
-      toastManager.add({
-        type: "warning",
-        title: "The composer is not ready",
-        description: "Try citing the selection after the connection or pending input is resolved.",
-      });
-    }
-    return inserted;
-  };
-  const citeAssistantTextStable = useStableCallback(citeAssistantText);
+
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   // Draft ids survive promotion and expire on navigation, keeping the pending resend scoped correctly.
@@ -1041,6 +1011,37 @@ export default function ChatView(props: ChatViewProps) {
   );
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
+  const acquireComposer = () => {
+    flushSync(() => {
+      const focus = useSideChatFocusStore.getState();
+      if (sideChat !== undefined) {
+        focus.focus(scopedThreadKey(sideChat.parentRef), threadId);
+      } else {
+        const threadRef = scopeThreadRef(environmentId, threadId);
+        if (activeRightPanelSurface?.kind === "aside") {
+          useRightPanelStore.getState().setMaximized(threadRef, false);
+          if (shouldUsePlanSidebarSheet) useRightPanelStore.getState().close(threadRef);
+        }
+        focus.release(scopedThreadKey(threadRef));
+      }
+    });
+  };
+  const citeAssistantText = (
+    citation: AssistantCitation,
+    sourceAnchor: AssistantCitationSourceAnchor,
+  ) => {
+    acquireComposer();
+    const inserted = composerRef.current?.citeAssistantText(citation, sourceAnchor) ?? false;
+    if (!inserted) {
+      toastManager.add({
+        type: "warning",
+        title: "The composer is not ready",
+        description: "Try citing the selection after the connection or pending input is resolved.",
+      });
+    }
+    return inserted;
+  };
+  const citeAssistantTextStable = useStableCallback(citeAssistantText);
   const {
     actions: sideChats,
     available: sideChatsAvailable,
