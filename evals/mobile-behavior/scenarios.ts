@@ -563,7 +563,11 @@ const waitForRow = Effect.fn("scenario.waitForRow")(function* (
   title: string,
 ) {
   for (let attempt = 0; attempt < 20; attempt++) {
-    if ((yield* ctx.device.nodes).some((node) => node.label?.includes(title))) return;
+    const nodes = yield* ctx.device.nodes;
+    if (nodes.some((node) => node.label?.includes(title))) return;
+    // A finished row can stay folded in the Working shelf (#24901); open the shelf once.
+    const shelf = nodes.find((node) => /^\d+ working threads?$/.test(node.label ?? ""));
+    if (attempt === 10 && shelf?.label) yield* ctx.device.press(`label="${shelf.label}"`);
     yield* Effect.sleep("500 millis");
   }
   return yield* new ScenarioFailure({ message: `Row "${title}" never appeared on Home.` });
