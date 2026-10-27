@@ -60,7 +60,7 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
       accessible
       accessibilityRole="image"
-      accessibilityLabel="Mermaid diagram"
+      accessibilityLabel={`Mermaid diagram: ${props.source}`}
       // The feed scrolls through the diagram; it has nothing to interact with.
       pointerEvents="none"
       style={{

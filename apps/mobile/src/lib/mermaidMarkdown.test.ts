@@ -71,6 +71,28 @@ describe("splitMermaidMarkdown", () => {
     expect(last?.type === "paragraph" && last.children[0]?.type).toBe("imageReference");
   });
 
+  it("keeps an image reference nested in a link reference resolvable after a diagram", () => {
+    const markdown =
+      "[img]: https://example.com/a.png\n\n```mermaid\ngraph LR\nA --> B\n```\n\n[![alt][img]][link]\n\n[link]: https://example.com";
+    const last = splitMermaidMarkdown(markdown).at(-1);
+    const paragraph = unified()
+      .use(remarkParse)
+      .parse(last?.markdown ?? "")
+      .children.find((node) => node.type === "paragraph");
+    const link = paragraph?.type === "paragraph" ? paragraph.children[0] : undefined;
+    expect(link?.type === "linkReference" && link.children[0]?.type).toBe("imageReference");
+  });
+
+  it("does not let a fence line inside raw HTML swallow a later diagram", () => {
+    const segments = splitMermaidMarkdown(
+      "<div>\n```js\n</div>\n\n```mermaid\ngraph TD\nA-->B\n```\n",
+    );
+    expect(segments.find((segment) => segment.kind === "mermaid")).toMatchObject({
+      source: "graph TD\nA-->B\n",
+      sourceOffset: 20,
+    });
+  });
+
   it.each([
     "<!--\n```mermaid\ngraph LR\nA --- B\n```\n-->",
     "<pre>\n```mermaid\ngraph LR\nA --- B\n```\n</pre>",

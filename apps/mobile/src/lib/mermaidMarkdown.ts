@@ -13,7 +13,7 @@ export type MermaidMarkdownSegment =
       readonly sourceOffset: number;
     };
 
-const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})(.*)$/s;
+const CLOSING_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**
  * Splits closed, unindented mermaid fences out of markdown. Unclosed fences stay
@@ -23,61 +23,32 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
   if (!/mermaid/i.test(markdown)) return [{ kind: "markdown", markdown, sourceOffset: 0 }];
 
   const document = parser.parse(markdown);
-  const codeOffsets = new Set(
-    document.children
-      .filter((node) => node.type === "code" && node.lang?.toLowerCase() === "mermaid")
-      .map((node) => node.position?.start.offset),
-  );
   const segments: MermaidMarkdownSegment[] = [];
   let cursor = 0;
-  let open: { fence: string; start: number; bodyStart: number; mermaid: boolean } | null = null;
-  let lineStart = 0;
-  while (lineStart < markdown.length) {
-    const newline = markdown.indexOf("\n", lineStart);
-    const lineEnd = newline === -1 ? markdown.length : newline;
-    const next = newline === -1 ? markdown.length : newline + 1;
-    const line = markdown.slice(lineStart, lineEnd).replace(/\r$/, "");
-    const match = FENCE_PATTERN.exec(line);
-    if (match) {
-      const [, fence = "", info = ""] = match;
-      if (open === null) {
-        // Backtick fences cannot have backticks in their info string.
-        if (!(fence[0] === "`" && info.includes("`"))) {
-          open = {
-            fence,
-            start: lineStart,
-            bodyStart: next,
-            mermaid: line[0] !== " " && info.trim().split(/\s/, 1)[0]?.toLowerCase() === "mermaid",
-          };
-        }
-      } else if (
-        fence[0] === open.fence[0] &&
-        fence.length >= open.fence.length &&
-        /^[ \t]*$/.test(info)
-      ) {
-        if (open.mermaid && codeOffsets.has(open.start)) {
-          const source = markdown.slice(open.bodyStart, lineStart);
-          if (source.trim().length > 0) {
-            if (open.start > cursor) {
-              segments.push({
-                kind: "markdown",
-                markdown: markdown.slice(cursor, open.start),
-                sourceOffset: cursor,
-              });
-            }
-            segments.push({
-              kind: "mermaid",
-              source,
-              markdown: markdown.slice(open.start, lineEnd),
-              sourceOffset: open.start,
-            });
-            cursor = next;
-          }
-        }
-        open = null;
-      }
+  for (const node of document.children) {
+    if (node.type !== "code" || node.lang?.toLowerCase() !== "mermaid") continue;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) continue;
+    if (start > 0 && markdown[start - 1] !== "\n") continue;
+    const block = markdown.slice(start, end);
+    const bodyStart = block.indexOf("\n") + 1;
+    const closeStart = block.lastIndexOf("\n") + 1;
+    // An unclosed fence runs to the end of the document, so its last line is not a valid close.
+    const close = CLOSING_FENCE_PATTERN.exec(block.slice(closeStart))?.[1] ?? "";
+    const opener = /^(`+|~+)/.exec(block)?.[1] ?? "";
+    if (bodyStart === 0 || close[0] !== opener[0] || close.length < opener.length) continue;
+    const source = block.slice(bodyStart, closeStart);
+    if (source.trim().length === 0) continue;
+    if (start > cursor) {
+      segments.push({
+        kind: "markdown",
+        markdown: markdown.slice(cursor, start),
+        sourceOffset: cursor,
+      });
     }
-    lineStart = next;
+    segments.push({ kind: "mermaid", source, markdown: block, sourceOffset: start });
+    cursor = markdown.startsWith("\r\n", end) ? end + 2 : markdown[end] === "\n" ? end + 1 : end;
   }
   if (segments.length === 0) return [{ kind: "markdown", markdown, sourceOffset: 0 }];
   if (cursor < markdown.length) {
@@ -100,7 +71,8 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
       start !== undefined
     ) {
       references.push({ offset: start, identifier: node.identifier });
-    } else if ("children" in node) {
+    }
+    if ("children" in node) {
       for (let index = node.children.length - 1; index >= 0; index--) {
         const child = node.children[index];
         if (child) pending.push(child);
