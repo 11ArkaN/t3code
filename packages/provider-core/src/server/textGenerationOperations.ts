@@ -149,8 +149,16 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
         instructions: input.instructions,
       }),
     });
+    const title = sanitizeThreadTitle(generated.title);
+    // Some models echo the output schema's key instead of a title.
+    if (title.toLowerCase() === "title") {
+      return yield* new TextGenerationError({
+        operation: "generateThreadTitle",
+        detail: 'The model returned the placeholder title "title".',
+      });
+    }
     return {
-      title: sanitizeThreadTitle(generated.title),
+      title,
       ...(generated.needsRefinement ? { needsRefinement: true } : {}),
     };
   });
