@@ -614,7 +614,9 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       parent = path.dirname(parent);
     }
   });
-  const undoSnapshot = Effect.fn("ThreadLocalCheckout.undoSnapshot")(function* (snapshot: string) {
+  const snapshotPaths = Effect.fn("ThreadLocalCheckout.snapshotPaths")(function* (
+    snapshot: string,
+  ) {
     const changed = new Set<string>();
     for (const against of [snapshot, `${snapshot}^2`]) {
       const listed = yield* run("snapshotPaths", localPath, [
@@ -628,7 +630,16 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       for (const relative of listed.stdout.split("\0"))
         if (relative.length > 0) changed.add(relative);
     }
-    const paths = [...changed];
+    return [...changed];
+  });
+  // Tracked paths whose index or working copy differ from HEAD.
+  const trackedDifferences = Effect.fn("ThreadLocalCheckout.trackedDifferences")(function* (
+    operation: string,
+  ) {
+    return (yield* statusOf(operation, localPath)).filter((entry) => !isUntracked(entry));
+  });
+  const undoSnapshot = Effect.fn("ThreadLocalCheckout.undoSnapshot")(function* (snapshot: string) {
+    const paths = yield* snapshotPaths(snapshot);
     if (paths.length === 0) return;
     const [index, working, wroteIndex, wroteWorking, atHead] = [
       yield* indexEntries(localPath, paths),
@@ -1109,7 +1120,12 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
 
   // Undo steps are registered before the command they undo, and check the real state first:
   // a failing hook can exit nonzero after git already moved HEAD.
-  const rollbacks: Array<Effect.Effect<void, GitCommandError | PlatformError.PlatformError>> = [];
+  const rollbacks: Array<
+    Effect.Effect<
+      void,
+      GitCommandError | PlatformError.PlatformError | ThreadMoveToLocalCheckoutError
+    >
+  > = [];
   const rollback = Effect.fn("ThreadLocalCheckout.rollback")(function* (reason: string) {
     const failures: string[] = [];
     for (const undo of rollbacks.toReversed()) {
@@ -1186,13 +1202,70 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       const nowBranch = yield* currentBranch(localPath);
       const nowHead = yield* currentHead(localPath);
       if (nowBranch === previousLocalBranch && nowHead === previousLocalHead) return;
-      yield* run(
-        "restoreLocal",
-        localPath,
-        previousLocalBranch === null
-          ? ["switch", "--quiet", "--no-overwrite-ignore", "--detach", previousLocalHead]
-          : ["switch", "--quiet", "--no-overwrite-ignore", previousLocalBranch],
+      const target =
+        previousLocalBranch === null ? ["--detach", previousLocalHead] : [previousLocalBranch];
+      const restored = yield* probe("restoreLocal", localPath, [
+        "switch",
+        "--quiet",
+        "--no-overwrite-ignore",
+        ...target,
+      ]);
+      if (restored.exitCode === 0 && (yield* trackedDifferences("verifyRestore")).length === 0) {
+        return;
+      }
+      // A switch that couldn't replace a file (Windows, where another program holds it open)
+      // leaves the old content behind. Forcing back is safe only when every leftover difference
+      // is exactly the previous commit's own content, so nothing of anyone else's is lost.
+      const leftover = (yield* trackedDifferences("leftoverAfterSwitch")).map(
+        (entry) => entry.path,
       );
+      const atPrevious = yield* treeEntries(localPath, previousLocalHead, leftover);
+      const onDisk = yield* workingEntries(localPath, leftover);
+      const onlyStaleCopies =
+        leftover.length > 0 &&
+        leftover.every((relative) => sameWorking(onDisk.get(relative), atPrevious.get(relative)));
+      // --force also writes the previous commit's files over untracked and ignored ones.
+      const arriving = (yield* run("restoreAdds", localPath, [
+        "diff",
+        "--name-only",
+        "--no-renames",
+        "--diff-filter=A",
+        "-z",
+        "HEAD",
+        previousLocalHead,
+      ])).stdout
+        .split("\0")
+        .filter((relative) => relative.length > 0);
+      const covered: string[] = [];
+      for (const relative of arriving) {
+        if (yield* occupied(path.join(localPath, relative))) covered.push(relative);
+      }
+      const stayedOn = `so the local checkout stayed on '${nowBranch ?? nowHead}'`;
+      if (leftover.length > 0 && !onlyStaleCopies) {
+        return yield* fail(
+          "operation_failed",
+          `it has changes the move didn't make (${leftover.slice(0, 5).join(", ")}), ${stayedOn}`,
+        );
+      }
+      if (covered.length > 0) {
+        return yield* fail(
+          "operation_failed",
+          `switching back would overwrite ${covered.slice(0, 5).join(", ")}, ${stayedOn}`,
+        );
+      }
+      if (!onlyStaleCopies) {
+        return yield* fail(
+          "operation_failed",
+          `switching back failed (${restored.stderr.trim() || "git exited with an error"}), ${stayedOn}`,
+        );
+      }
+      yield* run("forceRestoreLocal", localPath, [
+        "switch",
+        "--quiet",
+        "--force",
+        "--no-overwrite-ignore",
+        ...target,
+      ]);
     }),
   );
   yield* step(
@@ -1203,6 +1276,15 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
       yield* run("switchLocal", localPath, ["switch", "--quiet", "--no-overwrite-ignore", branch]);
       if ((yield* currentBranch(localPath)) !== branch) {
         return yield* fail("operation_failed", `the checkout did not end up on '${branch}'`);
+      }
+      // Git for Windows can exit 0 after it failed to replace a file another program holds
+      // open. The checkout had no tracked changes, so after a real switch it has none either.
+      const unswitched = yield* trackedDifferences("verifySwitch");
+      if (unswitched.length > 0) {
+        return yield* fail(
+          "operation_failed",
+          `git couldn't update ${describePaths(unswitched)} in the local checkout. Another program may have ${unswitched.length === 1 ? "it" : "them"} open; close ${unswitched.length === 1 ? "it" : "them"} and move again`,
+        );
       }
     }),
   );
@@ -1241,7 +1323,28 @@ const performMove = Effect.fn("ThreadLocalCheckout.performMove")(function* (
     const snapshot = trackedSnapshot;
     yield* step(
       "Restoring the changes in the local checkout",
-      run("applySnapshot", localPath, ["stash", "apply", "--index", snapshot]),
+      Effect.gen(function* () {
+        yield* run("applySnapshot", localPath, ["stash", "apply", "--index", snapshot]);
+        // Check each carried path holds what the worktree had, rather than trusting the exit code.
+        const paths = yield* snapshotPaths(snapshot);
+        const [index, working, wantIndex, wantWorking] = [
+          yield* indexEntries(localPath, paths),
+          yield* workingEntries(localPath, paths),
+          yield* treeEntries(localPath, `${snapshot}^2`, paths),
+          yield* treeEntries(localPath, snapshot, paths),
+        ];
+        const missed = paths.filter(
+          (relative) =>
+            index.get(relative) !== wantIndex.get(relative) ||
+            !sameWorking(working.get(relative), wantWorking.get(relative)),
+        );
+        if (missed.length > 0) {
+          return yield* fail(
+            "operation_failed",
+            `git couldn't write ${missed.slice(0, 5).join(", ")} in the local checkout. Another program may have ${missed.length === 1 ? "it" : "them"} open`,
+          );
+        }
+      }),
     );
   }
   if (untrackedPaths.length > 0) {

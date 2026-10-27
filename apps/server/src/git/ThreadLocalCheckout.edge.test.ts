@@ -21,7 +21,9 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import { OrchestratorDispatchError } from "../orchestration-v2/Orchestrator.ts";
@@ -1750,6 +1752,136 @@ describe("worktree sharing across projects", () => {
       expectCode(exit, "worktree_shared");
       expect(failureMessage(exit)).toContain("Thread in the worktree project");
       yield* expectUntouched(f);
+    }).pipe(Effect.provide(gitLayer)),
+  );
+});
+
+// Git for Windows exits 0 when it can't replace a file another program holds open, and leaves the
+// old content behind. These reproduce that on any platform by putting the old content back.
+describe("git reporting success it didn't achieve", () => {
+  it.effect("fails and restores both checkouts when the switch left a file unreplaced", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const f = yield* makeFixture();
+      yield* fs.writeFileString(`${f.local}/lock.txt`, "base lock\n");
+      yield* f.git(f.local, ["add", "lock.txt"]);
+      yield* f.git(f.local, ["commit", "-m", "lock file"]);
+      yield* f.git(f.worktree, ["merge", "--quiet", "main"]);
+      yield* fs.writeFileString(`${f.worktree}/lock.txt`, "changed by branch\n");
+      yield* f.git(f.worktree, ["commit", "-am", "branch changes lock"]);
+      yield* fs.writeFileString(`${f.worktree}/shared.txt`, "carried\n");
+      yield* fs.writeFileString(`${f.worktree}/untracked.txt`, "new\n");
+      const driver = yield* instrument((input, execute) =>
+        execute(input).pipe(
+          Effect.tap(() =>
+            input.operation === "ThreadLocalCheckout.switchLocal"
+              ? fs.writeFileString(`${f.local}/lock.txt`, "base lock\n").pipe(Effect.orDie)
+              : Effect.void,
+          ),
+        ),
+      );
+      const h = makeHarness({ fixture: f });
+      const exit = yield* Effect.exit(
+        h.move().pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, driver)),
+      );
+      expectCode(exit, "operation_failed");
+      expect(failureMessage(exit)).toContain("lock.txt");
+      expect(failureMessage(exit)).not.toContain("also failed");
+      expect(h.dispatch).not.toHaveBeenCalled();
+      yield* expectUntouched(f);
+      expect(yield* f.git(f.local, ["status", "--porcelain=v1"])).toBe("");
+      expect(yield* fs.readFileString(`${f.local}/lock.txt`)).toBe("base lock\n");
+      expect(yield* fs.readFileString(`${f.worktree}/shared.txt`)).toBe("carried\n");
+      expect(yield* fs.exists(`${f.local}/untracked.txt`)).toBe(false);
+    }).pipe(Effect.provide(gitLayer)),
+  );
+  it.effect("won't force the checkout back over a change the move didn't make", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const f = yield* makeFixture();
+      const driver = yield* instrument((input, execute) =>
+        execute(input).pipe(
+          Effect.tap(() =>
+            input.operation === "ThreadLocalCheckout.switchLocal"
+              ? fs.writeFileString(`${f.local}/feature.txt`, "user's own edit\n").pipe(Effect.orDie)
+              : Effect.void,
+          ),
+        ),
+      );
+      const exit = yield* Effect.exit(
+        makeHarness({ fixture: f })
+          .move()
+          .pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, driver)),
+      );
+      expectCode(exit, "operation_failed");
+      expect(failureMessage(exit)).toContain("also failed");
+      expect(yield* fs.readFileString(`${f.local}/feature.txt`)).toBe("user's own edit\n");
+    }).pipe(Effect.provide(gitLayer)),
+  );
+  it.effect("fails and rolls back when applying the changes left one out", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const f = yield* makeFixture();
+      yield* fs.writeFileString(`${f.worktree}/shared.txt`, "carried\n");
+      const driver = yield* instrument((input, execute) =>
+        execute(input).pipe(
+          Effect.tap(() =>
+            input.operation === "ThreadLocalCheckout.applySnapshot"
+              ? fs.writeFileString(`${f.local}/shared.txt`, "base\n").pipe(Effect.orDie)
+              : Effect.void,
+          ),
+        ),
+      );
+      const h = makeHarness({ fixture: f });
+      const exit = yield* Effect.exit(
+        h.move().pipe(Effect.provideService(GitVcsDriver.GitVcsDriver, driver)),
+      );
+      expectCode(exit, "operation_failed");
+      expect(failureMessage(exit)).toContain("shared.txt");
+      expect(h.dispatch).not.toHaveBeenCalled();
+      yield* expectUntouched(f);
+      expect(yield* f.git(f.local, ["status", "--porcelain=v1"])).toBe("");
+      expect(yield* fs.readFileString(`${f.worktree}/shared.txt`)).toBe("carried\n");
+    }).pipe(Effect.provide(gitLayer)),
+  );
+});
+
+describe("a file another program holds open", () => {
+  it.effect.skipIf(!windows)("fails and restores the checkout instead of moving halfway", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const f = yield* makeFixture();
+      yield* fs.writeFileString(`${f.local}/lock.txt`, "base lock\n");
+      yield* f.git(f.local, ["add", "lock.txt"]);
+      yield* f.git(f.local, ["commit", "-m", "lock file"]);
+      yield* f.git(f.worktree, ["merge", "--quiet", "main"]);
+      yield* fs.writeFileString(`${f.worktree}/lock.txt`, "changed by branch\n");
+      yield* f.git(f.worktree, ["commit", "-am", "branch changes lock"]);
+      yield* fs.writeFileString(`${f.worktree}/shared.txt`, "carried\n");
+      const lockPath = `${f.local}/lock.txt`.replaceAll("/", "\\");
+      const exit = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+          // Holds the file with no sharing until the scope ends, like an editor or a running build.
+          const holder = yield* spawner.spawn(
+            ChildProcess.make("powershell.exe", [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `$f = [System.IO.File]::Open('${lockPath}', 'Open', 'ReadWrite', 'None'); 'locked'; Start-Sleep -Seconds 120`,
+            ]),
+          );
+          yield* holder.stdout.pipe(Stream.decodeText(), Stream.take(1), Stream.runDrain);
+          return yield* Effect.exit(makeHarness({ fixture: f }).move());
+        }),
+      );
+      expectCode(exit, "operation_failed");
+      expect(failureMessage(exit)).toContain("lock.txt");
+      expect(yield* currentBranch(f, f.local)).toBe("main");
+      expect(yield* currentBranch(f, f.worktree)).toBe("feature");
+      expect(yield* f.git(f.local, ["status", "--porcelain=v1"])).toBe("");
+      expect(yield* fs.readFileString(`${f.local}/lock.txt`)).toBe("base lock\n");
+      expect(yield* fs.readFileString(`${f.worktree}/shared.txt`)).toBe("carried\n");
     }).pipe(Effect.provide(gitLayer)),
   );
 });
