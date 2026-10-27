@@ -3,6 +3,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { providerConnectsWithStoredCredentials } from "@t3tools/client-runtime/provider-clients";
 import type {
   EnvironmentId,
   ProviderAuthRespondInput,
@@ -73,6 +74,7 @@ export function ProviderAuthenticationSection({
     !signedIn &&
     (provider.setup?.canAuthenticate === false ||
       (provider.driver === "acpRegistry" && auth?.methods?.length === 0));
+  const connectOnly = providerConnectsWithStoredCredentials(provider);
   const accountDescription = active
     ? auth?.phase === "starting"
       ? (auth.message ?? "Starting sign-in…")
@@ -89,7 +91,7 @@ export function ProviderAuthenticationSection({
         ? "Discovering sign-in methods…"
         : needsExternalSetup
           ? "No in-app sign-in advertised. Follow the provider's docs to finish setup."
-          : `Sign in on ${environmentLabel}.`;
+          : `${connectOnly ? "Connect" : "Sign in"} on ${environmentLabel}.`;
   const statusMessage = auth?.phase === "failed" ? auth.message : null;
   const disabled = readOnly || pending || query.error !== null || isDiscovering;
   const draftId = `${auth?.flowId ?? ""}:${interaction?.id ?? ""}`;
@@ -291,8 +293,12 @@ export function ProviderAuthenticationSection({
                 {signedIn
                   ? "Change account"
                   : auth?.phase === "failed" || auth?.phase === "cancelled"
-                    ? "Retry sign-in"
-                    : "Sign in"}
+                    ? connectOnly
+                      ? "Retry"
+                      : "Retry sign-in"
+                    : connectOnly
+                      ? "Connect"
+                      : "Sign in"}
               </Button>
             ) : null}
             {!active && signedIn && (provider.auth.canLogout ?? provider.setup?.canAuthenticate) ? (

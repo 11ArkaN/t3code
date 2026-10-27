@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { providerConnectsWithStoredCredentials } from "@t3tools/client-runtime/provider-clients";
 import {
   AuthProvidersManageScope,
   type ProviderAuthResponse,
@@ -336,7 +337,13 @@ function ProviderAccount({
       ) : !active && !needsExternalSetup && provider.setup?.canAuthenticate !== false ? (
         <SettingsActionRow
           icon="person.crop.circle"
-          label={signedIn ? "Change account" : "Sign in"}
+          label={
+            signedIn
+              ? "Change account"
+              : providerConnectsWithStoredCredentials(provider)
+                ? "Connect"
+                : "Sign in"
+          }
           disabled={disabled || !provider.enabled || !provider.installed || state === null}
           loading={pending}
           onPress={chooseMethod}

@@ -1,5 +1,6 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  antigravityAuthUsesBrowser,
   ProviderDriverKind,
   type AntigravitySettings,
   type ProviderSetupError,
@@ -36,8 +37,12 @@ const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({ optionDescriptors: []
 const MAX_WORKSPACE_SNAPSHOTS = 32;
 const HEALTH_CHECK_TIMEOUT = "90 seconds";
 const SIGN_IN_MESSAGE = "Sign in with Google to use Antigravity.";
-const AUTH_UNCHECKED_MESSAGE =
-  "Antigravity is installed. Google account access is not checked yet.";
+
+function authUncheckedMessage(auth: AntigravityProviderOptions["auth"]): string {
+  return auth === undefined || antigravityAuthUsesBrowser(auth.type)
+    ? "Antigravity is installed. Google account access is not checked yet."
+    : `Antigravity is installed. Connect to check ${auth.label} access and load models.`;
+}
 
 type SessionSetupResult = Pick<
   AcpSessionRuntime.AcpSessionRuntimeStartResult["sessionSetupResult"],
@@ -203,7 +208,7 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
           ? undefined
           : draft.auth.status === "unauthenticated"
             ? SIGN_IN_MESSAGE
-            : AUTH_UNCHECKED_MESSAGE);
+            : authUncheckedMessage(options.auth));
       return {
         ...state,
         draft: {

@@ -1,9 +1,11 @@
 import {
+  antigravityAuthUsesBrowser,
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   isProviderDriverKind,
   ProviderDriverKind,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
 import { makeProviderClientRegistry } from "@t3tools/provider-core/client";
@@ -40,6 +42,7 @@ export const providerClients = makeProviderClientRegistry([
     modelFamilies: ["Gemini "],
     acpRegistryAgentIds: ["antigravity-acp"],
     settingsSchema: AntigravitySettings,
+    connectsWithStoredCredentials: (authType) => !antigravityAuthUsesBrowser(authType),
   },
   museClient,
   piClient,
@@ -48,6 +51,15 @@ export const providerClients = makeProviderClientRegistry([
 
 export function getProviderClient(driver: string | null | undefined) {
   return isProviderDriverKind(driver) ? providerClients.get(driver) : undefined;
+}
+
+export function providerConnectsWithStoredCredentials(
+  provider: Pick<ServerProvider, "driver" | "auth">,
+): boolean {
+  return (
+    providerClients.get(provider.driver)?.connectsWithStoredCredentials?.(provider.auth.type) ??
+    false
+  );
 }
 
 export function resolveModelShortName(

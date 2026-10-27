@@ -736,6 +736,12 @@ export const AntigravityAuthMethod = Schema.Literals(
 );
 export type AntigravityAuthMethod = typeof AntigravityAuthMethod.Type;
 
+export function antigravityAuthUsesBrowser(authMethod: string | undefined): boolean {
+  return (
+    authMethod === undefined || authMethod === "oauth-personal" || authMethod === "oauth-business"
+  );
+}
+
 export const AntigravitySettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(

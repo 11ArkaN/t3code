@@ -1,7 +1,8 @@
-import type {
-  ServerProvider,
-  ServerProviderVersionAdvisory,
-  ServerProviderCompatibilityAdvisory,
+import {
+  antigravityAuthUsesBrowser,
+  type ServerProvider,
+  type ServerProviderVersionAdvisory,
+  type ServerProviderCompatibilityAdvisory,
 } from "@t3tools/contracts";
 
 export const PROVIDER_STATUS_STYLES = {
@@ -32,9 +33,7 @@ function isAntigravitySignInUnchecked(provider: ServerProvider): boolean {
     provider.installed &&
     provider.status === "warning" &&
     provider.auth.status === "unknown" &&
-    (provider.auth.type === undefined ||
-      provider.auth.type === "oauth-personal" ||
-      provider.auth.type === "oauth-business")
+    antigravityAuthUsesBrowser(provider.auth.type)
   );
 }
 

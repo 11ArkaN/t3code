@@ -102,10 +102,6 @@ const ANTIGRAVITY_PERSONAL_AUTH: AntigravityAuthConfig = {
   gcpLocation: "",
 };
 
-export function antigravityAuthUsesBrowser(authMethod: AntigravityAuthMethod): boolean {
-  return authMethod === "oauth-personal" || authMethod === "oauth-business";
-}
-
 export function antigravityAuthLabel(authMethod: AntigravityAuthMethod): string {
   switch (authMethod) {
     case "oauth-personal":

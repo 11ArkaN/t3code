@@ -46,6 +46,8 @@ export interface ProviderClientDefinition {
   readonly featured?: boolean;
   /** ACP Registry entries for this same agent, left out of Add provider's Registry list. */
   readonly acpRegistryAgentIds?: ReadonlyArray<string>;
+  /** True for sign-in methods that only start the runtime with credentials saved in settings. */
+  readonly connectsWithStoredCredentials?: (authType: string | undefined) => boolean;
 }
 
 export function defineProviderClient<const Definition extends ProviderClientDefinition>(
