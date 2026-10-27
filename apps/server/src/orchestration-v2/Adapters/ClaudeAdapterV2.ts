@@ -3897,7 +3897,6 @@ interface ClaudeLiveQueryContext {
   receivedInit: boolean;
   permissionMode: PermissionMode;
   stopping: boolean;
-  settingsErrorsUnanswered: boolean;
   readonly subagentsFromEarlierProcesses: ReadonlySet<ActiveClaudeSubagent>;
 }
 
@@ -9867,7 +9866,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             receivedInit: false,
             permissionMode: queryOptions.permissionMode,
             stopping: false,
-            settingsErrorsUnanswered: false,
             subagentsFromEarlierProcesses: new Set(
               [...(yield* Ref.get(sessionSubagentsByTaskId)).values()].filter(
                 (subagent) => subagent.task.status === "running",
@@ -10109,17 +10107,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               });
             });
             // Asked every user turn after the prompt is queued, because the CLI reloads edited settings
-            // mid-query; a CLI that never answers is not asked again by this query.
+            // mid-query. A notice missed because the turn already ended is shown on the next turn.
             const announceSettingsErrors = Effect.gen(function* () {
               const readSettingsErrors = querySession.query.settingsErrors;
-              if (readSettingsErrors === undefined || querySession.settingsErrorsUnanswered) return;
+              if (readSettingsErrors === undefined) return;
               yield* readSettingsErrors.pipe(
                 Effect.timeout("2 seconds"),
-                Effect.tapErrorTag("TimeoutError", () =>
-                  Effect.sync(() => {
-                    querySession.settingsErrorsUnanswered = true;
-                  }),
-                ),
                 Effect.flatMap((errors) =>
                   sdkMessageLock.withPermits(1)(
                     Effect.gen(function* () {
