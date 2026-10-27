@@ -1132,7 +1132,8 @@ describe("ClaudeAdapterV2 turn environment", () => {
 
   it.effect("does not leak a parent Claude Code session into the spawned claude", () =>
     Effect.gen(function* () {
-      const env = yield* captureTurnEnvironment([
+      const env = yield* captureTurnEnvironment([]);
+      const userEnv = yield* captureTurnEnvironment([
         { name: "CLAUDE_CODE_ENTRYPOINT", value: "user-entrypoint", sensitive: false },
       ]);
 
@@ -1145,15 +1146,17 @@ describe("ClaudeAdapterV2 turn environment", () => {
           CLAUDE_CODE_SESSION_ID: env.CLAUDE_CODE_SESSION_ID,
           CLAUDE_CODE_MESSAGING_SOCKET: env.CLAUDE_CODE_MESSAGING_SOCKET,
           CLAUDE_EFFORT: env.CLAUDE_EFFORT,
+          userEntrypoint: userEnv.CLAUDE_CODE_ENTRYPOINT,
         },
         {
           PATH: "/usr/bin",
           ANTHROPIC_BASE_URL: "https://proxy.example",
           CLAUDECODE: undefined,
-          CLAUDE_CODE_ENTRYPOINT: "user-entrypoint",
+          CLAUDE_CODE_ENTRYPOINT: undefined,
           CLAUDE_CODE_SESSION_ID: undefined,
           CLAUDE_CODE_MESSAGING_SOCKET: undefined,
           CLAUDE_EFFORT: undefined,
+          userEntrypoint: "user-entrypoint",
         },
       );
     }),
