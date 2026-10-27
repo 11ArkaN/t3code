@@ -122,7 +122,7 @@ describe("resolveBoundEndpoints", () => {
     ]);
   });
 
-  it("skips the Windows Mobile hotspot adapter, which only this machine's own clients reach", () => {
+  it("skips the Windows Mobile hotspot adapter, which only devices on this machine's hotspot reach", () => {
     const interfaces = {
       ...INTERFACES,
       "Local Area Connection* 2": virtualInterface("192.168.137.1"),
