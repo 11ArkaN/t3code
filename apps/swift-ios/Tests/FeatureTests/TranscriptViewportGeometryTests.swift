@@ -173,6 +173,46 @@ struct TranscriptViewportGeometryTests {
         #expect(!view.maintainsBottomAnchor)
     }
 
+    @Test @MainActor
+    func readingAnchorSkipsUnmeasuredAndLoadEarlierRows() throws {
+        // Scrolling up, a row first appears at its estimated height and grows
+        // when measured; "Load earlier" is not a reading position. The anchor
+        // must be the first measured message row so loading and measuring do
+        // not move what the reader sees.
+        let heights: [CGFloat] = [44, BottomAnchoredTranscriptCollectionView.estimatedRowHeight, 300, 300]
+        let ids = ["__t3-load-earlier__", "unmeasured", "message-a", "message-b"]
+        let layout = StackedTranscriptLayout(heights: heights)
+        let view = BottomAnchoredTranscriptCollectionView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 600), collectionViewLayout: layout
+        )
+        let dataSource = FixedTranscriptDataSource(count: heights.count)
+        defer { withExtendedLifetime(dataSource) {} }
+        view.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "message")
+        view.dataSource = dataSource
+        view.contentInsetAdjustmentBehavior = .never
+        view.readerItemID = { ids[$0.item] }
+        view.readerIndexPath = { ids.firstIndex(of: $0).map { IndexPath(item: $0, section: 0) } }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        window.addSubview(view)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        view.maintainsBottomAnchor = false
+        view.layoutIfNeeded()
+        view.contentOffset.y = 0
+        view.layoutIfNeeded()
+
+        let anchor = try #require(view.firstVisibleItem())
+        #expect(anchor.itemID == "message-a")
+
+        // The unmeasured row grows when measured: message-a stays put.
+        layout.heights = [44, 520, 300, 300]
+        layout.invalidateLayout()
+        view.layoutIfNeeded()
+        view.keepOnScreen(anchor)
+        let attributes = try #require(view.collectionViewLayout.layoutAttributesForItem(at: IndexPath(item: 2, section: 0)))
+        #expect(abs(attributes.frame.minY - view.contentOffset.y - anchor.minYInViewport) < 0.5)
+    }
+
     @Test
     func glideReachesNewOutputAtTheSameSpeedOnAnyDisplay() {
         func glide(fps: Double, duration: Double, velocity: CGFloat = 0) -> (offset: CGFloat, velocity: CGFloat) {
@@ -448,6 +488,34 @@ private final class FixedTranscriptDataSource: NSObject, UICollectionViewDataSou
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { count }
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         collectionView.dequeueReusableCell(withReuseIdentifier: "message", for: indexPath)
+    }
+}
+
+@MainActor
+private final class StackedTranscriptLayout: UICollectionViewLayout {
+    var heights: [CGFloat]
+    init(heights: [CGFloat]) {
+        self.heights = heights
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var collectionViewContentSize: CGSize {
+        CGSize(width: 390, height: heights.reduce(0, +))
+    }
+
+    override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
+        guard heights.indices.contains(indexPath.item) else { return nil }
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: indexPath)
+        let y = heights.prefix(indexPath.item).reduce(0, +)
+        attributes.frame = CGRect(x: 0, y: y, width: 390, height: heights[indexPath.item])
+        return attributes
+    }
+
+    override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
+        heights.indices.compactMap { layoutAttributesForItem(at: IndexPath(item: $0, section: 0)) }
+            .filter { $0.frame.intersects(rect) }
     }
 }
 

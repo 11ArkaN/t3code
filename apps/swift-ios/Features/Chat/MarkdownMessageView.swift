@@ -39,7 +39,6 @@ struct MarkdownMessageView: View {
     private let clipboardSource: ComposerContextClipboardFragment.Source?
     private let messageContext: OrchestrationMessageContext?
     private let copyText: String?
-    @State private var copyError: String?
     /// Private, so the @State macro creates this once per view identity rather
     /// than on every parent update; `selectionContext` refreshes its fields.
     @State private var selectionSource = MarkdownSelectionSource("")
@@ -97,11 +96,6 @@ struct MarkdownMessageView: View {
         .accessibilityAction(named: copyActionTitle) {
             selectionSource.copyMessage()
         }
-        .alert("Could not copy context", isPresented: Binding(
-            get: { copyError != nil }, set: { if !$0 { copyError = nil } }
-        )) {
-            Button("OK") { copyError = nil }
-        } message: { Text(copyError ?? "") }
         .task(id: RenderRequest(revision: revision, isStreaming: isStreaming)) {
             if !isStreaming {
                 streamingRenderer.cancel()
@@ -173,7 +167,7 @@ struct MarkdownMessageView: View {
         selectionSource.originalText = copyText ?? source
         selectionSource.clipboardSource = clipboardSource
         selectionSource.messageContext = messageContext
-        selectionSource.onCopyError = { copyError = $0 }
+        selectionSource.onCopyError = { MarkdownCopyErrorAlert.show($0) }
         return MarkdownSelectionContext(
             source: selectionSource,
             copyActionTitle: copyActionTitle,
@@ -1417,5 +1411,22 @@ enum MarkdownInlineFormatter {
                 )
             )
         ) ?? AttributedString(source)
+    }
+}
+
+/// A failed context copy is rare, so it is shown through UIKit instead of an
+/// `.alert` on every message, which would be graph work on each cell
+/// configuration while scrolling.
+@MainActor
+private enum MarkdownCopyErrorAlert {
+    static func show(_ message: String) {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        guard var top = scene?.keyWindow?.rootViewController else { return }
+        while let presented = top.presentedViewController { top = presented }
+        let alert = UIAlertController(title: "Could not copy context", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        top.present(alert, animated: true)
     }
 }

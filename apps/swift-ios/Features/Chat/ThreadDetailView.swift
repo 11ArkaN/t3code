@@ -3057,7 +3057,7 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
             let sideInset = max(18, (width - T3Metrics.readingWidth) / 2)
             let itemSize = NSCollectionLayoutSize(
                 widthDimension: .fractionalWidth(1),
-                heightDimension: .estimated(120)
+                heightDimension: .estimated(BottomAnchoredTranscriptCollectionView.estimatedRowHeight)
             )
             let item = NSCollectionLayoutItem(layoutSize: itemSize)
             let group = NSCollectionLayoutGroup.vertical(
@@ -3123,6 +3123,62 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
         var applyContent: (() -> Void)?
         private var observation: (model: FeatureRootModel, threadID: String, token: UUID)?
         private var selectingMessageID: String?
+        /// Rows last dequeued as `TranscriptTextMessageCell`. A row that switches
+        /// between that and a SwiftUI cell must be reloaded, not reconfigured.
+        private var nativeTextIDs: Set<String> = []
+
+        func nativeTextContent(for messageID: String) -> TranscriptTextMessageCell.Content? {
+            guard let message = messagesByID[messageID],
+                  message.role == .assistant,
+                  message.state != .streaming,
+                  message.attachments.isEmpty,
+                  message.context == nil,
+                  !message.text.isEmpty,
+                  messageID != selectingMessageID,
+                  !TranscriptDebug.forcesSelectableText,
+                  !message.text.contains("t3-context://"),
+                  let document = MarkdownRenderCache.shared.documentImmediately(for: MarkdownContentRevision(message.text))
+            else { return nil }
+            let segments = MarkdownTextRun.segments(document.blocks, spacing: 12)
+            let runs = segments.compactMap { segment -> MarkdownTextRun? in
+                if case let .text(run) = segment { run } else { nil }
+            }
+            guard !runs.isEmpty, runs.count == segments.count else { return nil }
+            var timestamp: String?
+            if let source = message.v2Timeline, source.itemType == "assistant_message", source.status == "completed" {
+                timestamp = (NativeTimestampParser.parse(source.updatedAt) ?? message.createdAt)
+                    .formatted(.dateTime.hour().minute())
+            }
+            var fork: TranscriptTextMessageCell.Content.Fork?
+            if message.v2FoldID == nil, let source = message.v2Timeline?.workflowSource, currentWorkflows.canFork(source) {
+                fork = .init(itemID: source.itemID, isBusy: currentIsWorkflowBusy) { [weak self] in self?.onFork?(source) }
+            }
+            return TranscriptTextMessageCell.Content(
+                runs: runs,
+                skills: currentSkills,
+                dynamicTypeSize: currentDynamicTypeSize ?? .large,
+                timestamp: timestamp,
+                fork: fork,
+                messageID: messageID,
+                onOpenURL: { [weak self] url in _ = self?.currentOpenURL?(url) },
+                onCopy: { [weak self] in self?.copy(message) }
+            )
+        }
+
+        /// Reconfigures rows in place, reloading the ones whose cell class changes.
+        private func refresh(_ ids: [String], in snapshot: inout NSDiffableDataSourceSnapshot<Section, String>) {
+            var reconfigure: [String] = []
+            var reload: [String] = []
+            for id in ids {
+                if nativeTextIDs.contains(id) == (nativeTextContent(for: id) != nil) {
+                    reconfigure.append(id)
+                } else {
+                    reload.append(id)
+                }
+            }
+            if !reconfigure.isEmpty { snapshot.reconfigureItems(reconfigure) }
+            if !reload.isEmpty { snapshot.reloadItems(reload) }
+        }
         private var isContentRefreshScheduled = false
 
         func observe(_ model: FeatureRootModel, threadID: String) {
@@ -3216,12 +3272,15 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
             selectingMessageID = messageID
             var snapshot = dataSource.snapshot()
             let ids = [previous, messageID].compactMap { $0 }.filter { snapshot.indexOfItem($0) != nil }
-            snapshot.reconfigureItems(ids)
+            refresh(ids, in: &snapshot)
             dataSource.apply(snapshot, animatingDifferences: false)
         }
 
         func connect(to collectionView: UICollectionView) {
-            let registration = UICollectionView.CellRegistration<UICollectionViewCell, String> {
+            // One registration per row kind, so a recycled cell usually shows the
+            // same kind of row and SwiftUI updates its tree instead of rebuilding
+            // it (LegendList's item types). Each registration has its own reuse pool.
+            let makeRegistration = { UICollectionView.CellRegistration<UICollectionViewCell, String> {
                 [weak self] cell, _, messageID in
                 if messageID == FeatureTranscriptCollectionView.loadEarlierID {
                     cell.contentConfiguration = UIHostingConfiguration {
@@ -3291,12 +3350,32 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
                 .margins(.all, 0)
                 cell.backgroundConfiguration = UIBackgroundConfiguration.clear()
                 cell.accessibilityIdentifier = "message-cell-\(messageID)"
+            } }
+            let registrations = (
+                user: makeRegistration(), assistant: makeRegistration(),
+                tool: makeRegistration(), other: makeRegistration()
+            )
+            let nativeText = UICollectionView.CellRegistration<TranscriptTextMessageCell, String> {
+                [weak self] cell, _, messageID in
+                guard let content = self?.nativeTextContent(for: messageID) else { return }
+                cell.configure(content)
             }
 
             dataSource = UICollectionViewDiffableDataSource<Section, String>(
                 collectionView: collectionView
-            ) { collectionView, indexPath, messageID in
-                collectionView.dequeueConfiguredReusableCell(
+            ) { [weak self] collectionView, indexPath, messageID in
+                if self?.nativeTextContent(for: messageID) != nil {
+                    self?.nativeTextIDs.insert(messageID)
+                    return collectionView.dequeueConfiguredReusableCell(using: nativeText, for: indexPath, item: messageID)
+                }
+                self?.nativeTextIDs.remove(messageID)
+                let registration = switch self?.messagesByID[messageID]?.role {
+                case .user: registrations.user
+                case .assistant: registrations.assistant
+                case .tool: registrations.tool
+                default: registrations.other
+                }
+                return collectionView.dequeueConfiguredReusableCell(
                     using: registration,
                     for: indexPath,
                     item: messageID
@@ -3501,7 +3580,7 @@ private struct FeatureTranscriptCollectionView: UIViewRepresentable {
                 reconfiguredIDs.append(FeatureTranscriptCollectionView.workingIndicatorID)
             }
             if !reconfiguredIDs.isEmpty {
-                snapshot.reconfigureItems(reconfiguredIDs)
+                refresh(reconfiguredIDs, in: &snapshot)
             }
 
             let transcript = collectionView as? BottomAnchoredTranscriptCollectionView
@@ -4397,12 +4476,24 @@ final class BottomAnchoredTranscriptCollectionView: UICollectionView {
         let contentOffsetY: CGFloat
     }
 
-    /// Uses the cells' last frames; asking the layout here would apply pending
-    /// size changes before they can be measured against.
+    static let estimatedRowHeight: CGFloat = 120
+
+    /// The first visible row the reader has actually seen measured. Uses the
+    /// cells' last frames; asking the layout here would apply pending size
+    /// changes before they can be measured against.
+    ///
+    /// A row still at its estimated height is skipped: scrolling up, it grows
+    /// as it is first measured, and the rows below it are what the reader is
+    /// looking at. Anchoring it would push those rows down by the difference.
     func firstVisibleItem() -> VisibleItem? {
         var first: (IndexPath, CGRect)?
-        for cell in visibleCells where cell.frame.intersects(bounds) {
-            guard let indexPath = indexPath(for: cell) else { continue }
+        for cell in visibleCells where cell.frame.intersects(bounds)
+            && abs(cell.frame.height - Self.estimatedRowHeight) > 0.5 {
+            // The "Load earlier" and working rows are not reading positions:
+            // anchoring "Load earlier" would show the loaded turns instead of
+            // keeping the reader's message in place.
+            guard let indexPath = indexPath(for: cell),
+                  readerItemID?(indexPath)?.hasPrefix("__t3-") != true else { continue }
             if first.map({ indexPath < $0.0 }) ?? true { first = (indexPath, cell.frame) }
         }
         guard let (indexPath, frame) = first else { return nil }
@@ -4636,89 +4727,17 @@ struct FeatureMessageView: View {
     var environmentID: String? = nil
     var agents: [FeatureThreadAgent] = []
     var onOpenThread: ((String) -> Void)? = nil
-    @SwiftUI.Environment(\.openURL) private var openURL
-    @SwiftUI.Environment(\.featureThreadPresentationDismissal) private var presentationDismissal
-    @State private var presentationID = UUID()
-    @State private var previewedContext: ComposerContextRecord?
-    @State private var contextAttachmentPresented = false
-    @State private var contextUnavailable = false
     @State private var showsWorkflowScript = false
 
+    /// Context-link handling (an `openURL` override, a preview sheet, and two
+    /// alerts) is SwiftUI graph work on every cell configuration while
+    /// scrolling, so only messages that can contain context links carry it.
     var body: some View {
-        messageBody
-            .environment(\.openURL, OpenURLAction { url in
-                guard let reference = ComposerContextReferences.parseHref(url.absoluteString) else {
-                    openURL(url)
-                    return .handled
-                }
-                guard let record = message.context?.records.first(where: { $0.contextId == reference.contextId }) else {
-                    contextUnavailable = true
-                    return .handled
-                }
-                if case let .mention(value) = record.payload, let path = FeatureComposerFileLinkSerializer.url(for: value.path) {
-                    openURL(path)
-                } else {
-                    previewedContext = record
-                }
-                return .handled
-            })
-            .onChange(of: previewedContext != nil) { _, presented in
-                if presented { presentationDismissal.onPresentationChange(presentationID, true) }
-            }
-            .onChange(of: presentationDismissal.requestID) { _, id in
-                if id != nil {
-                    if !contextAttachmentPresented { previewedContext = nil }
-                    contextUnavailable = false
-                }
-            }
-            .sheet(item: $previewedContext, onDismiss: {
-                presentationDismissal.onPresentationChange(presentationID, false)
-            }) { record in
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            if let binding = record.attachment,
-                               let attachment = message.attachments.first(where: { $0.id == binding.attachmentId }) {
-                                FeatureMessageAttachmentsView(attachments: [attachment], context: attachmentContext)
-                                    .environment(\.featureThreadPresentationDismissal,
-                                        FeatureThreadPresentationDismissal(requestID: presentationDismissal.requestID) { id, presented in
-                                            contextAttachmentPresented = presented
-                                            presentationDismissal.onPresentationChange(id, presented)
-                                            if !presented, presentationDismissal.requestID != nil {
-                                                previewedContext = nil
-                                            }
-                                        })
-                            } else {
-                                Text(ComposerContextReferences.providerPayload(record))
-                                    .font(T3Typography.tool)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            if case let .reviewComment(value) = record.payload,
-                               let request = value.pullRequest,
-                               let url = URL(string: request.url), ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
-                                Link("Open pull request #\(request.number)", destination: url)
-                            }
-                        }
-                        .padding()
-                    }
-                    .background(T3Colors.background)
-                    .navigationTitle(record.label)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Close", systemImage: "xmark") { previewedContext = nil }.labelStyle(.iconOnly)
-                        }
-                    }
-                    .t3NavigationChrome()
-                }
-                .preferredColorScheme(.dark)
-            }
-            .alert("Context unavailable", isPresented: $contextUnavailable) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("This message has a context link without its saved record.")
-            }
+        if message.context != nil || message.text.contains("t3-context://") {
+            messageBody.modifier(FeatureMessageContextLinks(message: message, attachmentContext: attachmentContext))
+        } else {
+            messageBody
+        }
     }
 
     private var renderedText: String {
@@ -4895,6 +4914,94 @@ struct FeatureMessageView: View {
         return [message.text, attachmentSummary]
             .filter { !$0.isEmpty }
             .joined(separator: ", ")
+    }
+}
+
+private struct FeatureMessageContextLinks: ViewModifier {
+    let message: FeatureMessage
+    let attachmentContext: FeatureAttachmentContext?
+    @SwiftUI.Environment(\.openURL) private var openURL
+    @SwiftUI.Environment(\.featureThreadPresentationDismissal) private var presentationDismissal
+    @State private var presentationID = UUID()
+    @State private var previewedContext: ComposerContextRecord?
+    @State private var contextAttachmentPresented = false
+    @State private var contextUnavailable = false
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.openURL, OpenURLAction { url in
+                guard let reference = ComposerContextReferences.parseHref(url.absoluteString) else {
+                    openURL(url)
+                    return .handled
+                }
+                guard let record = message.context?.records.first(where: { $0.contextId == reference.contextId }) else {
+                    contextUnavailable = true
+                    return .handled
+                }
+                if case let .mention(value) = record.payload, let path = FeatureComposerFileLinkSerializer.url(for: value.path) {
+                    openURL(path)
+                } else {
+                    previewedContext = record
+                }
+                return .handled
+            })
+            .onChange(of: previewedContext != nil) { _, presented in
+                if presented { presentationDismissal.onPresentationChange(presentationID, true) }
+            }
+            .onChange(of: presentationDismissal.requestID) { _, id in
+                if id != nil {
+                    if !contextAttachmentPresented { previewedContext = nil }
+                    contextUnavailable = false
+                }
+            }
+            .sheet(item: $previewedContext, onDismiss: {
+                presentationDismissal.onPresentationChange(presentationID, false)
+            }) { record in
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let binding = record.attachment,
+                               let attachment = message.attachments.first(where: { $0.id == binding.attachmentId }) {
+                                FeatureMessageAttachmentsView(attachments: [attachment], context: attachmentContext)
+                                    .environment(\.featureThreadPresentationDismissal,
+                                        FeatureThreadPresentationDismissal(requestID: presentationDismissal.requestID) { id, presented in
+                                            contextAttachmentPresented = presented
+                                            presentationDismissal.onPresentationChange(id, presented)
+                                            if !presented, presentationDismissal.requestID != nil {
+                                                previewedContext = nil
+                                            }
+                                        })
+                            } else {
+                                Text(ComposerContextReferences.providerPayload(record))
+                                    .font(T3Typography.tool)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if case let .reviewComment(value) = record.payload,
+                               let request = value.pullRequest,
+                               let url = URL(string: request.url), ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                                Link("Open pull request #\(request.number)", destination: url)
+                            }
+                        }
+                        .padding()
+                    }
+                    .background(T3Colors.background)
+                    .navigationTitle(record.label)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Close", systemImage: "xmark") { previewedContext = nil }.labelStyle(.iconOnly)
+                        }
+                    }
+                    .t3NavigationChrome()
+                }
+                .preferredColorScheme(.dark)
+            }
+            .alert("Context unavailable", isPresented: $contextUnavailable) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("This message has a context link without its saved record.")
+            }
     }
 }
 
