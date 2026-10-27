@@ -285,6 +285,7 @@ export class VoiceInputController {
     } finally {
       if (sessionToken && this.sessionToken === sessionToken) {
         if (this.isCurrent(operationToken) && this.state.phase === "error") {
+          this.invalidateOperation();
           await this.releaseResources();
         } else if (!this.isCurrent(operationToken) && !this.finishing) {
           await this.releaseResources();
