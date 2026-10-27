@@ -145,7 +145,8 @@ export const make = Effect.gen(function* () {
 
   // WSL mounts Windows drives under a configurable automount root, so only wslpath knows where.
   const toWslDrivePath = Effect.fnUntraced(function* (requestedPath: string) {
-    if (!isWindowsDrivePath(requestedPath)) return requestedPath;
+    // spawn throws on a NUL byte instead of failing.
+    if (!isWindowsDrivePath(requestedPath) || requestedPath.includes("\0")) return requestedPath;
     const env = yield* HostProcess.Environment;
     if (
       (yield* HostProcess.Platform) !== "linux" ||

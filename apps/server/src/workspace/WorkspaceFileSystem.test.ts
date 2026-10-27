@@ -206,13 +206,18 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
 
           const { entries } = yield* underWsl(
             service.getMetadata({
-              paths: ["C:\\Users\\me\\Documents\\notes.md", "C:/Users/me/Documents/notes.md"],
+              paths: [
+                "C:\\Users\\me\\Documents\\notes.md",
+                "C:/Users/me/Documents/notes.md",
+                "C:/Users/me/Documents/notes\u0000.md",
+              ],
             }),
           );
 
           expect(entries).toEqual([
             { kind: "file", byteLength: 8 },
             { kind: "file", byteLength: 8 },
+            null,
           ]);
         }),
     );
