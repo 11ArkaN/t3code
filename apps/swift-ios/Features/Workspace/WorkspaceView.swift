@@ -49,7 +49,7 @@ public struct WorkspaceView: View {
     @State private var paletteQuery = ""
     @State private var keyboardDispatcher = FeatureKeyboardDispatcher()
     @State private var columnVisibility = NavigationSplitViewVisibility.automatic
-    @State private var sidebarTiles = false
+    @State private var sidebarLayout = WorkspaceSidebarLayout()
     @State private var allowsInspector = false
     @State private var hasWorkspaceGeometry = false
     @State private var workspaceTool: FeatureThreadToolSurface?
@@ -159,10 +159,9 @@ public struct WorkspaceView: View {
         }
         .onGeometryChange(for: Bool.self) { geometry in
             geometry.size.width >= 720 && geometry.size.width > geometry.size.height
-        } action: { tilesSidebar in
-            sidebarTiles = tilesSidebar
-            if workspaceTool != nil { sidebarBeforeInspector = .all }
-            columnVisibility = (tilesSidebar && workspaceTool == nil) || selectedThreadID == nil ? .all : .detailOnly
+        } action: {
+            sidebarLayout.isWideWindow = $0
+            applySidebarLayout()
         }
         .onGeometryChange(for: Bool.self) { $0.size.width >= 820 && hasRegularWidth } action: {
             allowsInspector = $0
@@ -520,6 +519,10 @@ public struct WorkspaceView: View {
                     threadDetail(id)
                 }
         }
+        .background(WorkspaceSplitBehaviorObserver {
+            sidebarLayout.splitTiles = $0
+            applySidebarLayout()
+        })
         .sheet(item: Binding(
             get: { sheetTool },
             // A handoff can write nil before the new geometry is published.
@@ -540,6 +543,16 @@ public struct WorkspaceView: View {
                     workspacePresentationIsVisible = true
                 }
         }
+    }
+
+    private var sidebarTiles: Bool { sidebarLayout.tilesSidebar }
+
+    private func applySidebarLayout() {
+        if workspaceTool != nil { sidebarBeforeInspector = .all }
+        columnVisibility = sidebarLayout.visibility(
+            hasThread: selectedThreadID != nil,
+            hasTool: workspaceTool != nil
+        )
     }
 
     /// The panel and sidebar move in one update. Its path stays with the
