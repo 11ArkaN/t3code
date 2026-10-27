@@ -4600,6 +4600,29 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           }
         }, turnTerminalizationPermit.withPermits(1));
 
+        // Codex can report cleaned commands before it answers the clean, and those
+        // completions must not wake the agent; the returned effect reopens them.
+        const closeThreadCommands = Effect.fn("CodexAdapterV2.closeThreadCommands")(function* (
+          nativeThreadId: string,
+        ) {
+          const running = yield* Ref.get(runningCommandItemsByTurn);
+          const reopen: Array<readonly [ActiveCodexTurnContext, ReadonlySet<string> | undefined]> =
+            [];
+          for (const context of (yield* Ref.get(settledTurns)).values()) {
+            if (context.providerThread.nativeThreadRef?.nativeId !== nativeThreadId) continue;
+            const commands = running.get(context.nativeTurnId);
+            if (commands === undefined) continue;
+            reopen.push([context, context.closedCommandItemIds]);
+            context.closedCommandItemIds = new Set(commands.keys());
+          }
+          return Effect.sync(() => {
+            for (const [context, closed] of reopen) {
+              if (closed === undefined) delete context.closedCommandItemIds;
+              else context.closedCommandItemIds = closed;
+            }
+          });
+        }, turnTerminalizationPermit.withPermits(1));
+
         yield* client.handleServerNotification("thread/closed", (payload) =>
           terminalizeClosedThreadCommands(payload.threadId).pipe(Effect.orDie),
         );
@@ -6807,16 +6830,21 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             function* (unloadInput) {
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               sessionApprovals.delete(nativeThreadId);
+              const reopenCommands = yield* closeThreadCommands(nativeThreadId);
               yield* client.raw
                 .request("thread/backgroundTerminals/clean", { threadId: nativeThreadId })
                 .pipe(
                   Effect.timeout("5 seconds"),
                   Effect.andThen(terminalizeClosedThreadCommands(nativeThreadId)),
                   Effect.catch((cause) =>
-                    Effect.logWarning("orchestration-v2.codex-background-terminal-clean-failed", {
-                      providerThreadId: unloadInput.providerThread.id,
-                      cause,
-                    }),
+                    reopenCommands.pipe(
+                      Effect.andThen(
+                        Effect.logWarning(
+                          "orchestration-v2.codex-background-terminal-clean-failed",
+                          { providerThreadId: unloadInput.providerThread.id, cause },
+                        ),
+                      ),
+                    ),
                   ),
                 );
               yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });

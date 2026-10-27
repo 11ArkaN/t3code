@@ -2905,78 +2905,88 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
   // Codex never closes an unsubscribed thread on its own, so its background
   // terminals outlive the settle unless unloading cleans them.
-  it.effect("cleans the thread's background terminals when unloading it", () =>
-    Effect.gen(function* () {
-      const transcript = makeCodexReplayTranscript({
-        scenario: "codex-background-unload-clean",
-        entries: [
-          ...backgroundExecTranscript.entries.slice(0, -1),
-          {
-            type: "expect_outbound",
-            label: "clean-background-terminals",
-            frame: {
-              id: 4,
-              method: "thread/backgroundTerminals/clean",
-              params: { threadId: BG_NATIVE_THREAD },
+  // Codex may report the killed command before or after it answers the clean.
+  it.effect.each(["before-clean-result", "after-unsubscribe"] as const)(
+    "cleans the thread's background terminals when unloading it (completion %s)",
+    (completionAt) =>
+      Effect.gen(function* () {
+        const cleanedCompletion = {
+          type: "emit_inbound" as const,
+          label: "item/completed/command-cleaned",
+          frame: {
+            method: "item/completed",
+            params: {
+              item: backgroundCommandItem("completed"),
+              threadId: BG_NATIVE_THREAD,
+              turnId: BG_NATIVE_TURN,
             },
           },
-          {
-            type: "emit_inbound",
-            label: "clean-background-terminals-result",
-            frame: { id: 4, result: {} },
-          },
-          {
-            type: "expect_outbound",
-            label: "unsubscribe",
-            frame: { id: 5, method: "thread/unsubscribe", params: { threadId: BG_NATIVE_THREAD } },
-          },
-          {
-            type: "emit_inbound",
-            label: "item/completed/command-cleaned",
-            frame: {
-              method: "item/completed",
-              params: {
-                item: backgroundCommandItem("completed"),
-                threadId: BG_NATIVE_THREAD,
-                turnId: BG_NATIVE_TURN,
+        };
+        const transcript = makeCodexReplayTranscript({
+          scenario: `codex-background-unload-clean-${completionAt}`,
+          entries: [
+            ...backgroundExecTranscript.entries.slice(0, -1),
+            {
+              type: "expect_outbound",
+              label: "clean-background-terminals",
+              frame: {
+                id: 4,
+                method: "thread/backgroundTerminals/clean",
+                params: { threadId: BG_NATIVE_THREAD },
               },
             },
-          },
-          {
-            type: "emit_inbound",
-            label: "unsubscribe-result",
-            frame: { id: 5, result: { status: "unsubscribed" } },
-          },
-        ],
-      });
-      const harness = yield* makeCodexReplayHarness(transcript);
-      yield* harness.runtime.startTurn(
-        makeCodexTestTurnInput({
-          threadId: harness.threadId,
-          providerThread: harness.providerThread,
-          now: yield* DateTime.now,
-          attemptId: RunAttemptId.make("attempt-codex-unload-clean"),
-          text: BG_PROMPT,
-        }),
-      );
-      yield* harness.firstTerminal;
-      yield* harness.runtime.unloadThread!({ providerThread: harness.providerThread });
-      assert.deepEqual(
-        harness.events.flatMap((event) =>
-          event.type === "turn_item.updated" &&
-          event.turnItem.nativeItemRef?.nativeId === BG_COMMAND_ITEM
-            ? [event.turnItem.status]
-            : [],
+            ...(completionAt === "before-clean-result" ? [cleanedCompletion] : []),
+            {
+              type: "emit_inbound",
+              label: "clean-background-terminals-result",
+              frame: { id: 4, result: {} },
+            },
+            {
+              type: "expect_outbound",
+              label: "unsubscribe",
+              frame: {
+                id: 5,
+                method: "thread/unsubscribe",
+                params: { threadId: BG_NATIVE_THREAD },
+              },
+            },
+            ...(completionAt === "after-unsubscribe" ? [cleanedCompletion] : []),
+            {
+              type: "emit_inbound",
+              label: "unsubscribe-result",
+              frame: { id: 5, result: { status: "unsubscribed" } },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript);
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-codex-unload-clean"),
+            text: BG_PROMPT,
+          }),
+        );
+        yield* harness.firstTerminal;
+        yield* harness.runtime.unloadThread!({ providerThread: harness.providerThread });
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.nativeItemRef?.nativeId === BG_COMMAND_ITEM
+              ? [event.turnItem.status]
+              : [],
+          ),
+          ["running", "interrupted"],
+        );
+        assert.isFalse(yield* harness.hasPendingBackgroundWork);
+        assert.equal(harness.continuationRequests.length, 0);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
         ),
-        ["running", "interrupted"],
-      );
-      assert.isFalse(yield* harness.hasPendingBackgroundWork);
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
       ),
-    ),
   );
 
   const backgroundStopCases = [true, false, "still_running", "thread_unloaded"] as const;
