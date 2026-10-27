@@ -4,7 +4,7 @@ import type {
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -108,74 +108,39 @@ function RetentionControl({
 }: {
   label: string;
   value: number | null;
-  onChange: (value: number | null) => Promise<boolean> | void;
+  onChange: (value: number | null) => Promise<boolean>;
   minimum?: number;
 }) {
   const [draft, setDraft] = useState(value);
   const [savedValue, setSavedValue] = useState(value);
-  // Turning a rule on only opens an age draft: saving any age can start a cleanup sweep,
-  // so nothing is published until that age is committed. The ref lets a blur see a
-  // commit made earlier in the same event.
-  const [enabling, setEnablingState] = useState<"draft" | "saving" | null>(null);
-  const enablingRef = useRef(enabling);
-  const setEnabling = (next: typeof enabling) => {
-    enablingRef.current = next;
-    setEnablingState(next);
-  };
-  const pressing = useRef<"switch" | "row" | null>(null);
-  // The latest age sent while enabling, so a repeated commit of it is not resent and an
-  // older save that fails cannot close the rule over a newer one.
-  const submitted = useRef<{ days: number } | null>(null);
+  // Saving an age can start a cleanup sweep, so turning a rule on only opens a draft.
+  const [enabling, setEnabling] = useState<"draft" | "saving" | null>(null);
   if (savedValue !== value) {
     setSavedValue(value);
     setDraft(value);
-    setEnablingState(null);
+    setEnabling(null);
   }
-  useLayoutEffect(() => {
-    enablingRef.current = enabling;
-  }, [enabling]);
 
-  const commit = (next: number) => {
+  const commit = async (next: number) => {
     const days = Math.min(3650, Math.max(minimum, Math.round(next)));
     setDraft(days);
-    if (value === null && enablingRef.current === "saving" && submitted.current?.days === days) {
+    if (days === value) return;
+    if (value !== null) {
+      void onChange(days);
       return;
     }
-    const save = onChange(days);
-    if (value !== null) return;
-    const submission = { days };
-    submitted.current = submission;
     setEnabling("saving");
-    void save?.then((saved) => {
-      if (!saved && submitted.current === submission && enablingRef.current === "saving") {
-        setEnabling(null);
-      }
-    });
+    if (!(await onChange(days))) {
+      setEnabling((current) => (current === "saving" ? null : current));
+    }
   };
-  const releasePointer = () => (pressing.current = null);
 
   return (
     <div
       className="flex items-center gap-3"
-      onPointerDown={() => {
-        if (pressing.current === null) pressing.current = "row";
-      }}
-      onPointerUp={releasePointer}
-      onPointerLeave={releasePointer}
-      onPointerCancel={releasePointer}
-      // A press on the row's text or gaps would otherwise blur the draft while the blur
-      // handler treats it as a press inside the row, leaving the draft open after it.
-      onMouseDown={(event) => {
-        const target = event.target;
-        if (enablingRef.current === "draft" && target instanceof Element) {
-          if (!target.closest("button, input")) event.preventDefault();
-        }
-      }}
       onBlur={(event) => {
-        if (enablingRef.current !== "draft" || pressing.current) return;
-        const next = event.relatedTarget;
-        if (next instanceof Node && event.currentTarget.contains(next)) return;
-        setEnabling(null);
+        if (event.currentTarget.contains(event.relatedTarget)) return;
+        setEnabling((current) => (current === "draft" ? null : current));
       }}
     >
       {value !== null || enabling !== null ? (
@@ -187,15 +152,9 @@ function RetentionControl({
           size="sm"
           className="w-auto"
           onValueChange={setDraft}
-          onValueCommitted={(next, details) => {
-            // Moving from a draft to its switch is on the way to turning the rule off.
-            const target = details.event instanceof FocusEvent ? details.event.relatedTarget : null;
-            const toSwitch =
-              pressing.current === "switch" ||
-              (target instanceof Element && target.getAttribute("role") === "switch");
-            if (enablingRef.current === "draft" && toSwitch) return;
-            if (next === null) setDraft(value ?? Math.max(minimum, 8));
-            else commit(next);
+          onValueCommitted={(next) => {
+            if (next === null) setDraft(value);
+            else void commit(next);
           }}
         >
           <NumberFieldGroup>
@@ -205,18 +164,14 @@ function RetentionControl({
               autoFocus={value === null}
               size={new Intl.NumberFormat().format(draft ?? value ?? 8).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
-              // The field reports a value only for text it can parse, and does so right after
-              // this runs, so text like "+" leaves no hidden age for Enter to commit.
-              onChange={() => setDraft(null)}
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing || enablingRef.current !== "draft") return;
-                if (event.key === "Escape") {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === "Enter" && draft !== null) void commit(draft);
+                else if (event.key === "Escape" && enabling === "draft") {
+                  // An unhandled Escape closes the settings page.
                   event.preventDefault();
                   event.stopPropagation();
                   setEnabling(null);
-                } else if (event.key === "Enter" && draft !== null) {
-                  event.preventDefault();
-                  commit(draft);
                 }
               }}
             />
@@ -232,16 +187,18 @@ function RetentionControl({
       <Switch
         aria-label={label}
         checked={value !== null || enabling !== null}
-        onPointerDown={() => (pressing.current = "switch")}
+        // Keeps focus in a draft, so switching it off discards it instead of committing on blur.
+        onMouseDown={(event) => {
+          if (enabling === "draft") event.preventDefault();
+        }}
         onCheckedChange={(enabled) => {
           if (enabled) {
-            setDraft(Math.max(minimum, 8));
+            setDraft(8);
             setEnabling("draft");
             return;
           }
-          const publish = value !== null || enablingRef.current === "saving";
+          if (value !== null || enabling === "saving") void onChange(null);
           setEnabling(null);
-          if (publish) onChange(null);
         }}
       />
     </div>

@@ -99,8 +99,7 @@ function useRunScopedPlan() {
 export function useUpdateScopedSettings() {
   const { scope, environments } = useSettingsScope();
   const run = useRunScopedPlan();
-  return (patch: ScopedSettingsPatch): Promise<boolean> | void =>
-    run(planScopedSettingsPatch(scope, environments, patch));
+  return (patch: ScopedSettingsPatch) => run(planScopedSettingsPatch(scope, environments, patch));
 }
 
 export function useClearScopedSettings() {
@@ -108,7 +107,7 @@ export function useClearScopedSettings() {
   const run = useRunScopedPlan();
   return (keys: readonly ProjectScopedServerSettingKey[]) => {
     if (context === null) return;
-    void run(planScopedSettingsClear(context.scope, context.environments, keys));
+    run(planScopedSettingsClear(context.scope, context.environments, keys));
   };
 }
 

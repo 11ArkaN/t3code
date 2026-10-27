@@ -164,6 +164,17 @@ it("discards a retention draft on Escape or when switched back off", async () =>
   expect(state.update).not.toHaveBeenCalled();
 });
 
+it("discards an untouched retention draft when focus leaves it", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await expect.element(daysInput(screen)).toHaveFocus();
+  await userEvent.click(screen.getByRole("heading", { name: rule }));
+  await expect.element(daysInput(screen)).not.toBeInTheDocument();
+  await expect.element(ruleSwitch(screen)).not.toBeChecked();
+  expect(state.update).not.toHaveBeenCalled();
+});
+
 it("turns a saved retention rule off immediately", async () => {
   setup();
   state.settings = {
