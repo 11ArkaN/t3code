@@ -122,4 +122,52 @@ describe("splitMermaidMarkdown", () => {
       },
     ]);
   });
+
+  it("keeps offsets aligned after a leading byte order mark", () => {
+    const markdown = "﻿```mermaid\ngraph TD\nA-->B\n```\nafter";
+    expect(splitMermaidMarkdown(markdown)).toEqual([
+      {
+        kind: "mermaid",
+        source: "graph TD\nA-->B\n",
+        markdown: "```mermaid\ngraph TD\nA-->B\n```",
+        sourceOffset: 1,
+      },
+      { kind: "markdown", markdown: "after", sourceOffset: 31 },
+    ]);
+  });
+
+  it("keeps an unclosed fence after a byte order mark as markdown", () => {
+    const markdown = "﻿```mermaid\ngraph TD\nA-->B\nB-->C\n";
+    expect(splitMermaidMarkdown(markdown)).toEqual([
+      { kind: "markdown", markdown, sourceOffset: 0 },
+    ]);
+  });
+
+  it.each([
+    ["> [r]:\n>   https://example.com\n", "https://example.com", null],
+    [
+      '> [r]: https://example.com\n> "A \\"quoted\\" title"\n',
+      "https://example.com",
+      'A "quoted" title',
+    ],
+    ["[r]: <a\\<b\\>c\\\\d&#10;e&amp;amp;f>\n", "a<b>c\\d\ne&amp;f", null],
+    ['[r]: /u "x&#10;&#10;y\\\\"\n', "/u", "x\n\ny\\"],
+  ])("carries a %j definition as a standalone definition", (definition, url, title) => {
+    const markdown = `${definition}\n\`\`\`mermaid\ngraph TD\nA-->B\n\`\`\`\n\n[Guide][r]`;
+    const last = splitMermaidMarkdown(markdown).at(-1);
+    const tree = unified()
+      .use(remarkParse)
+      .parse(last?.markdown ?? "");
+    expect(tree.children.map((node) => node.type)).toEqual(["definition", "paragraph"]);
+    expect(tree.children[0]).toMatchObject({ identifier: "r", url, title });
+    const paragraph = tree.children[1];
+    expect(paragraph?.type === "paragraph" && paragraph.children[0]).toMatchObject({
+      type: "linkReference",
+      identifier: "r",
+    });
+  });
+
+  it("splits a fence whose info string spells mermaid with a character reference", () => {
+    expect(splitMermaidMarkdown("```&#109;ermaid\ngraph TD\n```")[0]?.kind).toBe("mermaid");
+  });
 });

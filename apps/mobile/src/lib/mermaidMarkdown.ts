@@ -1,4 +1,4 @@
-import type { Nodes } from "mdast";
+import type { Definition, Nodes } from "mdast";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 
@@ -14,30 +14,53 @@ export type MermaidMarkdownSegment =
     };
 
 const CLOSING_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+// Info strings decode character references, so `&` may still spell "mermaid".
+const MERMAID_FENCE_PATTERN = /^\uFEFF? {0,3}(?:`{3,}|~{3,})[ \t]*(?:mermaid|&)/im;
+
+function escapeDestination(text: string, special: RegExp): string {
+  return text.replace(special, "\\$&").replace(/\n/g, "&#10;").replace(/\r/g, "&#13;");
+}
+
+// A definition's source may span blockquote lines, so rebuild it as one standalone line.
+function standaloneDefinition(node: Definition): string {
+  const label = (node.label ?? node.identifier).replace(/[\t\n\r ]+/g, " ");
+  const url = escapeDestination(node.url, /[\\<>&]/g);
+  const title = node.title == null ? "" : ` "${escapeDestination(node.title, /[\\"&]/g)}"`;
+  return `[${label}]: <${url}>${title}`;
+}
 
 /**
  * Splits closed, unindented mermaid fences out of markdown. Unclosed fences stay
  * markdown so a streaming diagram shows as code until its closing fence arrives.
  */
 export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMarkdownSegment> {
-  if (!/mermaid/i.test(markdown)) return [{ kind: "markdown", markdown, sourceOffset: 0 }];
+  if (!MERMAID_FENCE_PATTERN.test(markdown)) {
+    return [{ kind: "markdown", markdown, sourceOffset: 0 }];
+  }
 
   const document = parser.parse(markdown);
+  // remark drops a leading byte order mark, so its offsets start one character later.
+  const shift = markdown.startsWith("\uFEFF") ? 1 : 0;
+  const offset = (node: Nodes, edge: "start" | "end") => {
+    const value = node.position?.[edge].offset;
+    return value === undefined ? undefined : value + shift;
+  };
   const segments: MermaidMarkdownSegment[] = [];
-  let cursor = 0;
+  let cursor = shift;
   for (const node of document.children) {
     if (node.type !== "code" || node.lang?.toLowerCase() !== "mermaid") continue;
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
+    const start = offset(node, "start");
+    const end = offset(node, "end");
     if (start === undefined || end === undefined) continue;
-    if (start > 0 && markdown[start - 1] !== "\n") continue;
+    if (start > shift && markdown[start - 1] !== "\n") continue;
     const block = markdown.slice(start, end);
     const bodyStart = block.indexOf("\n") + 1;
     const closeStart = block.lastIndexOf("\n") + 1;
     // An unclosed fence runs to the end of the document, so its last line is not a valid close.
-    const close = CLOSING_FENCE_PATTERN.exec(block.slice(closeStart))?.[1] ?? "";
-    const opener = /^(`+|~+)/.exec(block)?.[1] ?? "";
-    if (bodyStart === 0 || close[0] !== opener[0] || close.length < opener.length) continue;
+    const close = CLOSING_FENCE_PATTERN.exec(block.slice(closeStart))?.[1];
+    const opener = /^(?:`{3,}|~{3,})/.exec(block)?.[0];
+    if (!close || !opener || bodyStart === 0) continue;
+    if (close[0] !== opener[0] || close.length < opener.length) continue;
     const source = block.slice(bodyStart, closeStart);
     if (source.trim().length === 0) continue;
     if (start > cursor) {
@@ -54,18 +77,15 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
   if (cursor < markdown.length) {
     segments.push({ kind: "markdown", markdown: markdown.slice(cursor), sourceOffset: cursor });
   }
-  const definitions = new Map<string, string>();
+  const definitions = new Map<string, Definition>();
   const references: { offset: number; identifier: string }[] = [];
   const pending: Nodes[] = [document];
   while (pending.length > 0) {
     const node = pending.pop();
     if (!node) continue;
-    const start = node.position?.start.offset;
-    const end = node.position?.end.offset;
-    if (node.type === "definition" && start !== undefined && end !== undefined) {
-      if (!definitions.has(node.identifier)) {
-        definitions.set(node.identifier, markdown.slice(start, end));
-      }
+    const start = offset(node, "start");
+    if (node.type === "definition") {
+      if (!definitions.has(node.identifier)) definitions.set(node.identifier, node);
     } else if (
       (node.type === "linkReference" || node.type === "imageReference") &&
       start !== undefined
@@ -92,8 +112,10 @@ export function splitMermaidMarkdown(markdown: string): ReadonlyArray<MermaidMar
       referenceIndex++;
     }
     const prefix = [...needed]
-      .map((identifier) => definitions.get(identifier))
-      .filter(Boolean)
+      .flatMap((identifier) => {
+        const definition = definitions.get(identifier);
+        return definition ? [standaloneDefinition(definition)] : [];
+      })
       .join("\n");
     return prefix ? { ...segment, markdown: `${prefix}\n\n${segment.markdown}` } : segment;
   });

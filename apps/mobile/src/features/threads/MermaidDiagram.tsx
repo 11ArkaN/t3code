@@ -40,6 +40,15 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
   const pele = use(loadPele());
   const theme = useUniwindTheme();
   const [width, setWidth] = useState(0);
+  const [generation, setGeneration] = useState(0);
+  const [crashed, setCrashed] = useState(false);
+  const restart = () => {
+    if (generation > 0) {
+      setCrashed(true);
+      return;
+    }
+    setGeneration(1);
+  };
   const rendered = useMemo(() => {
     if (!pele) return null;
     try {
@@ -53,7 +62,9 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
     () => (rendered ? { html: diagramHtml(rendered.svg, theme) } : null),
     [rendered, theme],
   );
-  if (!rendered || !html || rendered.width <= 0 || rendered.height <= 0) return props.fallback;
+  if (crashed || !rendered || !html || rendered.width <= 0 || rendered.height <= 0) {
+    return props.fallback;
+  }
 
   return (
     <View
@@ -72,12 +83,15 @@ function RenderedMermaidDiagram(props: { readonly source: string; readonly fallb
     >
       <View style={{ width: "100%", height: (width * rendered.height) / rendered.width }}>
         <WebView
+          key={generation}
           source={html}
           javaScriptEnabled={false}
           scrollEnabled={false}
           showsHorizontalScrollIndicator={false}
           showsVerticalScrollIndicator={false}
           overScrollMode="never"
+          onContentProcessDidTerminate={restart}
+          onRenderProcessGone={restart}
           style={{ flex: 1, backgroundColor: "transparent" }}
         />
       </View>
