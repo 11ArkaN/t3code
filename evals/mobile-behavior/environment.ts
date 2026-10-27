@@ -64,7 +64,7 @@ const waitForPort = Effect.fn("environment.waitForPort")(function* (port: number
   return yield* new EnvironmentError({ message: `The server never listened on ${port}.` });
 });
 
-/** Runs a server CLI command; some commands print their result on stderr, so both streams are returned. */
+/** Runs a server CLI command and returns both output streams. */
 const runCli = (args: ReadonlyArray<string>) =>
   Effect.try({
     try: () => {
@@ -73,7 +73,7 @@ const runCli = (args: ReadonlyArray<string>) =>
         encoding: "utf8",
       });
       if (result.status !== 0) throw new Error(result.stderr);
-      return `${result.stdout}\n${result.stderr}`;
+      return { stdout: result.stdout, stderr: result.stderr };
     },
     catch: (cause) =>
       new EnvironmentError({ message: `bin.ts ${args.join(" ")} failed: ${cause}` }),
@@ -151,17 +151,22 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
   );
   yield* waitForPort(port);
   const origin = `http://127.0.0.1:${port}`;
-  const token = (yield* runCli([
+  const issued = yield* runCli([
     "auth",
     "session",
     "issue",
     "--base-dir",
     input.baseDir,
     "--token-only",
-  ]))
-    .trim()
-    .split("\n")
-    .at(-1)!;
+  ]);
+  // The token is the last line of stdout; stderr is only a fallback.
+  const lastLine = (text: string) =>
+    text
+      .split("\n")
+      .filter((line) => line.trim())
+      .at(-1)
+      ?.trim();
+  const token = lastLine(issued.stdout) ?? lastLine(issued.stderr) ?? "";
   const http = (yield* HttpClient.HttpClient).pipe(
     HttpClient.mapRequest((request) =>
       request.pipe(
@@ -384,7 +389,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
         "mobile-behavior-eval",
       ]).pipe(
         Effect.flatMap((out) => {
-          const url = /Pair URL:\s*(\S+)/.exec(out)?.[1];
+          const url = /Pair URL:\s*(\S+)/.exec(`${out.stdout}\n${out.stderr}`)?.[1];
           return url
             ? Effect.succeed(url)
             : Effect.fail(new EnvironmentError({ message: "No pairing URL in CLI output." }));

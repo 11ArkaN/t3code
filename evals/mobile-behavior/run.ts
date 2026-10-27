@@ -130,6 +130,7 @@ const command = Command.make(
       Flag.withDescription(
         "Remove the app's other saved environments first. Only for a simulator kept for this eval.",
       ),
+      Flag.withDefault(false),
     ),
     host: Flag.String("host").pipe(
       Flag.withDescription(
@@ -150,6 +151,12 @@ const command = Command.make(
         Option.match(wanted, { onNone: () => true, onSome: (ids) => ids.has(testCase.id) }) &&
         (testCase.poses?.includes(flags.pose) ?? true),
     );
+    const unknown = Option.match(wanted, {
+      onNone: () => [],
+      onSome: (ids) => [...ids].filter((id) => !CASES.some((testCase) => testCase.id === id)),
+    });
+    if (unknown.length > 0)
+      return yield* new DeviceError({ message: `Unknown case id(s): ${unknown.join(", ")}.` });
     if (selected.length === 0) return yield* new DeviceError({ message: "No cases match." });
     const host = Option.getOrElse(flags.host, reachableHost);
     const startedAt = yield* Clock.currentTimeMillis;
