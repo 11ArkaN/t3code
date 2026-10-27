@@ -6570,7 +6570,8 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           modelSelection: CODEX_TEST_MODEL_SELECTION,
           runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
         });
-        yield* harness.until(() => harness.handledNotifications.includes("turn/started"));
+        // The replay emits turn/completed only after the pause and interrupt it expects.
+        yield* harness.until(() => harness.handledNotifications.includes("turn/completed"));
         assert.deepEqual(
           harness.events.flatMap((event) =>
             event.type === "provider_thread.updated"
@@ -6580,9 +6581,6 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ["active"],
           "the resumed thread's active goal is unknown to the adapter, so its goal turn runs unowned",
         );
-        // The replay emits turn/completed only after the pause and interrupt it expects.
-        yield* harness.until(() => harness.handledNotifications.includes("turn/completed"));
-
         assert.deepEqual(requests.slice(-2), [
           ["thread/goal/set", { threadId: nativeThreadId, status: "paused" }],
           ["turn/interrupt", { threadId: nativeThreadId, turnId: "orphan-goal-turn" }],
