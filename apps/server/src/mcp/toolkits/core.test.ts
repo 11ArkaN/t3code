@@ -572,6 +572,78 @@ it.effect("a read-only client reads threads and is refused every write before it
 );
 const dispatched: Array<string> = [];
 
+it.effect("t3_thread_configure refuses a model the provider instance does not advertise", () => {
+  const dispatchedModels: Array<string> = [];
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const configure = (model: string) =>
+      server
+        .callTool({
+          name: "t3_thread_configure",
+          arguments: {
+            threadId: "other-project-thread",
+            modelSelection: { instanceId: "codex", model },
+          },
+        })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+
+    const refused = yield* configure("not-advertised");
+    expect(declaredFailure(refused)).toMatchObject({ code: "model_unavailable" });
+    expect(dispatchedModels).toEqual([]);
+
+    const advertised = yield* configure("gpt-5.5");
+    expect(advertised.isError).toBe(false);
+    expect(dispatchedModels).toEqual(["gpt-5.5"]);
+  }).pipe(
+    Effect.provide(
+      layerThreadToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([
+              {
+                instanceId: ProviderInstanceId.make("codex"),
+                enabled: true,
+                status: "ready",
+                models: [{ slug: "gpt-5.5", name: "GPT-5.5" }],
+              } as never,
+            ]),
+          }),
+        ),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) =>
+              Effect.succeed(McpToolAccessTestkit.liveThreadShell(id, { runtimeMode: "auto" })),
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                thread: {
+                  id: ThreadId.make("other-project-thread"),
+                  projectId: "other-project",
+                  providerInstanceId: ProviderInstanceId.make("codex"),
+                  modelSelection: { instanceId: "codex", model: "gpt-5.5" },
+                  runtimeMode: "auto",
+                  interactionMode: "default",
+                  deletedAt: null,
+                },
+              } as never),
+            dispatch: (command) =>
+              Effect.sync(() => {
+                if (command.type === "thread.model-selection.set") {
+                  dispatchedModels.push(command.modelSelection.model);
+                }
+                return { sequence: 7, storedEvents: [] };
+              }),
+          }),
+        ),
+      ),
+    ),
+  );
+});
+
 it.effect("refuses act-as-caller tools to a client caller", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
