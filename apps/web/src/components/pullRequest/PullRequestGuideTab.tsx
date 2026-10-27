@@ -103,11 +103,12 @@ export function PullRequestGuideTab({
       );
     }
     return (
-      <div className="flex min-h-48 flex-col items-center justify-center gap-2 px-4 py-10 text-center">
+      <div className="flex h-full min-h-48 flex-col items-center justify-center-safe gap-2 overflow-y-auto scrollbar-gutter-both px-4 py-10 text-center [&>*]:shrink-0">
         <p className="text-sm font-medium text-foreground">
           {running ? "Writing a review guide" : "No review guide yet"}
         </p>
-        <p className="max-w-md text-xs text-muted-foreground">
+        {/* A failed run's detail can be hundreds of lines of CLI stderr. */}
+        <p className="max-h-48 max-w-md overflow-y-auto text-xs whitespace-pre-wrap wrap-break-word text-muted-foreground">
           {failure ??
             query.error ??
             (running
@@ -124,9 +125,11 @@ export function PullRequestGuideTab({
       <Alert variant={running ? "info" : "warning"}>
         {running ? <Spinner /> : <TriangleAlertIcon />}
         <AlertDescription>
-          {running
-            ? "Rewriting this guide. You will be told when the new one is ready."
-            : (failure ?? "Written before the latest push.")}
+          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap wrap-break-word">
+            {running
+              ? "Rewriting this guide. You will be told when the new one is ready."
+              : (failure ?? "Written before the latest push.")}
+          </div>
         </AlertDescription>
         {!running && canWrite ? <AlertAction>{writeButton("Rewrite", "xs")}</AlertAction> : null}
       </Alert>
