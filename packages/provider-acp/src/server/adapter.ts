@@ -7033,11 +7033,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         });
 
         /**
-         * `cancelAfterPromptStarts`: waits until the agent has started the
-         * prompt, or the flavor's bound has passed since `session/prompt` was
-         * sent (since Stop, for a turn that sent none). False when the prompt
-         * settled first, so there is nothing to cancel. The acknowledgement
-         * wait after it keeps its own timeout.
+         * `cancelAfterPromptStarts`: waits until the agent started the prompt or the
+         * bound passed since `session/prompt` (since Stop, if none was sent). False
+         * when the prompt settled first, so there is nothing to cancel.
          */
         const promptStillRunsAfterHold = Effect.fnUntraced(function* (context: ActiveAcpTurn) {
           const hold = flavor.cancelAfterPromptStarts;

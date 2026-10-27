@@ -102,20 +102,9 @@ const findKiroModelOption = (configOptions: ReadonlyArray<EffectAcpSchema.Sessio
   configOptions.find((option) => option.id === KIRO_MODEL_CONFIG_ID || option.category === "model");
 
 /**
- * Kiro V3 selects models through its `model` session config option, and
- * `session/set_model` does not exist. "default" selects Kiro's own default
- * model (`auto` unless the account's model list names another), so choosing
- * it after a named model switches back. No write goes out when the session
- * already runs the model, or for "default" on a new session.
- *
- * Kiro 2.27 leaves `model` out of the `session/new` result and advertises it
- * in a `config_option_update` a few milliseconds later, so a fresh session can
- * be configured before T3 has seen it; the write still goes to `model` then.
- * Kiro accepts any value at set time but fails the next `session/prompt` on
- * one its account cannot use (-32000 "The model '…' is not available",
- * `InvalidModelError`), so an unknown id never runs silently on another model.
- * A model Kiro does not list is still written, so a custom model from the
- * provider settings reaches Kiro, which decides.
+ * Kiro selects models only through its `model` config option; "default" is
+ * Kiro's own default. The write goes to `model` even before Kiro advertises it,
+ * and for unlisted ids: Kiro fails the next prompt on a model it can't use.
  */
 const applyKiroModel = Effect.fn("KiroAdapterV2.applyKiroModel")(function* (
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -149,20 +138,10 @@ const applyKiroModel = Effect.fn("KiroAdapterV2.applyKiroModel")(function* (
 const KIRO_MODEL_ADVERT_BOUND = "2 seconds";
 
 /**
- * Sets the thread's reasoning effort (the snapshot's `reasoningEffort`
- * select) on Kiro's `effortLevel` option. Kiro advertises that option only
- * while a model with effort runs, starting at that model's default, and
- * ignores a write sent before it does. The `model` write's result can carry
- * it (kiro-cli 2.28 per kirodotdev/KiroCrew#17551), but on 2.27.0 a write
- * sent right after `session/new` usually gets a result without `model` or
- * `effortLevel`, and both follow in a `config_option_update`. So the level is
- * written once Kiro advertises the written model; that advert is the one that
- * says whether the model has effort. A model change starts Kiro at the new
- * model's default, so the level is written again then; the runtime skips a
- * write that matches the current level. A level the model does not offer is
- * not sent: Kiro would accept it and leave the level unchanged. A rejected
- * write, or no advert within the bound, leaves Kiro's level in place rather
- * than failing the turn.
+ * Writes the thread's effort to Kiro's `effortLevel` once Kiro advertises the
+ * written model, since Kiro ignores the option before then and resets it on a
+ * model change. Levels the model doesn't offer are not sent. A rejected write
+ * or no advert within the bound keeps Kiro's level rather than failing the turn.
  */
 const applyKiroEffort = Effect.fn("KiroAdapterV2.applyKiroEffort")(function* (
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -205,13 +184,9 @@ const applyKiroEffort = Effect.fn("KiroAdapterV2.applyKiroEffort")(function* (
 });
 
 /**
- * Selects the thread's Kiro agent (the snapshot's `mode` select) and reports
- * whether a switch went out. Kiro runs an agent's own `model` setting when it
- * switches to it (kiro-cli 2.27.0), so the agent is written before the model
- * and the thread's model choice still applies. A thread with no agent choice
- * keeps the session's agent. An agent the session does not list (deleted
- * since the provider snapshot) is skipped: Kiro would accept the write and
- * stay on its current agent.
+ * Selects the thread's Kiro agent and reports whether a switch went out. It runs
+ * before the model write, because switching applies the agent's own model. An
+ * agent the session doesn't list is skipped: Kiro would accept it and not switch.
  */
 const applyKiroAgent = Effect.fn("KiroAdapterV2.applyKiroAgent")(function* (
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -252,19 +227,9 @@ function selectValues(
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
 /**
- * Evidence that Kiro has started the current prompt, after which Stop sends
- * `session/cancel`: its `session_info_update` with `_meta.kiro.kind: "turn_start"`,
- * or output only a running prompt produces (assistant text or thoughts, tool
- * calls, plans). The `user_message_id_assigned` echo and context usage do not
- * count: the echo arrives within milliseconds of `session/prompt`, and the
- * previous prompt's context usage can arrive after the next one went out.
- *
- * Kiro's ACP docs do not promise `turn_start`, so Stop also gives up waiting
- * after KIRO_CANCEL_HOLD_BOUND. Evidence: in the 2.27.0 recordings
- * (`turn_interrupt`, `message_steering`) a cancel sent right after the echo,
- * before `turn_start`, was honored. On 2.27.1 TinBane saw a cancel sent
- * 0-0.5 s after `session/prompt` dropped (the turn ran to completion) and one
- * at 1.5 s or later honored.
+ * Evidence that Kiro started the current prompt, so Stop's `session/cancel` is
+ * honored: a `turn_start` info update or output only a running prompt produces.
+ * Kiro doesn't promise `turn_start`, so Stop gives up after KIRO_CANCEL_HOLD_BOUND.
  */
 function isKiroPromptActivity(update: EffectAcpSchema.SessionUpdate): boolean {
   switch (update.sessionUpdate) {
@@ -333,13 +298,9 @@ const decodeKiroSubagentInput = Schema.decodeUnknownOption(
 );
 
 /**
- * Kiro runs a sub-agent inside the parent's session (live 2.29.1, reported by
- * @tinuva, and 2.33.1). `invoke_sub_agent` is a tool call tagged
- * `_meta.kiro.kind: "agent-subtask"`, and every frame the sub-agent then sends
- * (its text, its tool calls, its `Subagent Response`) carries the same
- * `_meta.kiro.agentSubtaskId`. Routing those frames to that id as their
- * session gives the shared adapter the child session it projects into the
- * sub-agent's thread.
+ * Kiro runs sub-agents inside the parent's session: frames from an
+ * `invoke_sub_agent` call carry `_meta.kiro.agentSubtaskId`, and routing them
+ * to that id as their session gives the shared adapter the child to project.
  */
 function normalizeKiroSessionUpdate(
   notification: EffectAcpSchema.SessionNotification,
@@ -415,11 +376,9 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
     // The generic option loop runs after the model write, and an agent write
     // there would put the agent's own model back.
     ownedModelOptionIds: ["reasoningEffort", KIRO_AGENT_CONFIG_ID],
-    // Kiro's own review step: with Autopilot off (Supervised) Kiro asks the
-    // user to accept a turn's changes before it ends; on (Full access) it does
-    // not. Its per-tool prompts come either way and T3's runtime policy
-    // answers them. A runtime-mode change reopens the session, which applies
-    // the option again.
+    // With Autopilot off (Supervised) Kiro asks the user to accept a turn's
+    // changes before it ends. T3's runtime policy answers its per-tool prompts
+    // either way, and a runtime-mode change reopens the session to reapply it.
     sessionConfigForPolicy: (policy) => [
       { id: KIRO_AUTOPILOT_CONFIG_ID, value: kiroAutopilotValue(policy) },
     ],

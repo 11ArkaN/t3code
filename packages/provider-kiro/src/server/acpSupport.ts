@@ -16,22 +16,16 @@ import {
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
 /**
- * CLI V3 runs only when asked for (`--agent-engine=v3`); the default engine is
- * the v2 server this driver does not speak. `--auth-method=cli` keeps access
- * tokens inside the Kiro process, so T3 never handles them and Kiro never sends
- * `_kiro/auth/getAccessToken` (the shared ACP client answers that, like every
- * request without a handler, with a JSON-RPC method-not-found error).
- * V3 rejects the v2 launch flags (`--agent`, `--model`, `--trust-*`); mode and
- * model are chosen per session through `session/set_config_option`.
+ * Kiro's default engine is a v2 server this driver does not speak, so V3 is
+ * requested. `--auth-method=cli` keeps access tokens inside Kiro. V3 rejects the
+ * v2 launch flags; mode and model are set per session with `session/set_config_option`.
  */
 const KIRO_ACP_ARGS = ["acp", "--agent-engine=v3", "--auth-method=cli"] as const;
 
 /**
- * Kiro's `autopilot` session option. Kiro 2.27 asks the client before a tool
- * call either way; with it "off" (Supervised) it also asks the user to review
- * a turn's file changes before it ends ("Review changes", a `turn_approval`
- * permission request). Kiro starts sessions on "on", so T3 sets it from the
- * thread's runtime mode.
+ * Kiro's `autopilot` session option. Off (Supervised), Kiro also asks the user
+ * to review a turn's file changes before it ends. Sessions start "on", so T3
+ * sets it from the thread's runtime mode.
  */
 export const KIRO_AUTOPILOT_CONFIG_ID = "autopilot";
 

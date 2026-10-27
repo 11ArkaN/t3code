@@ -954,13 +954,10 @@ describe("KiroAdapterV2 agents", () => {
 });
 
 describe("KiroAdapterV2 early Stop", () => {
-  // Kiro CLI 2.27.1 dropped a `session/cancel` sent 0-0.5 s after
-  // `session/prompt` and ran the turn to completion (reported by TinBane), so
-  // T3 holds Stop's cancel until Kiro shows it started the prompt, or for at
-  // most 2 s. Replay gates hold Kiro's frames until Stop is holding; a gate's
-  // label being reached means every frame before it was handled. The test
-  // clock moves only where a test adjusts it, so the 2 s bound releases a
-  // cancel nowhere else.
+  // Stop holds its cancel until Kiro starts the prompt, for at most 2 s.
+  // Replay gates hold Kiro's frames until Stop is holding; reaching a gate's
+  // label means every frame before it was handled. The test clock moves only
+  // where a test adjusts it, so the 2 s bound releases a cancel nowhere else.
   const kiroInfo = (label: string, kiro: Record<string, unknown>): Frame => ({
     ...update({ sessionUpdate: "session_info_update", _meta: { kiro } }),
     label,

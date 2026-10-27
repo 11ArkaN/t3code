@@ -130,11 +130,9 @@ const KiroWhoami = Schema.fromJsonString(
 const decodeKiroWhoami = Schema.decodeUnknownOption(KiroWhoami);
 
 /**
- * Reads `kiro-cli whoami --format json`. Kiro 2.27 prints
- * `{"accountType":"ApiKey","email":null}` and exits 0 when signed in (or when
- * `KIRO_API_KEY` is set), and `{"account":null}` with exit 1 when not. An IAM
- * Identity Center login follows the JSON line with a plain-text `Profile:`
- * block, so only the first line is decoded.
+ * Reads `kiro-cli whoami --format json`: `{"account":null}` with exit 1 means
+ * signed out. Only the first line is decoded, since an Identity Center login
+ * follows it with a plain-text `Profile:` block.
  */
 export function kiroAuthFromWhoami(
   output: { readonly code: number; readonly stdout: string } | undefined,
@@ -164,14 +162,9 @@ const GPT_5_6_EFFORT_LEVELS = ["none", ...CLAUDE_EFFORT_LEVELS];
 const KIMI_K3_EFFORT_LEVELS = ["low", "high", "max"];
 
 /**
- * Reasoning levels per Kiro model id, and the one Kiro runs it at by default.
- * `--list-models` names no levels, and a session advertises them (the `model`
- * option's `_meta.kiro.effortLevels` and `defaultEffortLevel`) only once it
- * runs, so the picker uses this copy of what Kiro 2.32.0 advertises
- * (fixtures/kiro_model_switch has the 2.27.0 list). Not every account gets
- * every model: Fable 5.1's entry is from an Identity Center account.
- * Models not listed take no effort. The adapter sends only a level the live
- * session offers, so a stale entry never reaches Kiro.
+ * Reasoning levels per Kiro model id and its default level, copied from what
+ * Kiro 2.32.0 advertises, since `--list-models` names none. Unlisted models take
+ * no effort; the adapter sends only a level the live session offers.
  */
 const KIRO_MODEL_EFFORT: Readonly<
   Record<string, { readonly levels: ReadonlyArray<string>; readonly defaultLevel: string }>
@@ -231,12 +224,9 @@ const KiroModelList = Schema.fromJsonString(
 const decodeKiroModelList = Schema.decodeUnknownOption(KiroModelList);
 
 /**
- * Reads `kiro-cli chat --list-models --format json`, the models the signed-in
- * account may use (Kiro 2.27 lists 20, `auto` first and marked default). The
- * default entry becomes "Kiro default" and keeps Kiro's own id as its alias,
- * which the adapter selects for it. Sessions only advertise a model choice
- * after they start, so this is where the picker learns the list. Anything
- * unparsable keeps the built-in list.
+ * Reads `kiro-cli chat --list-models --format json`, the account's models. The
+ * default entry becomes "Kiro default" with Kiro's id as its alias. Sessions
+ * advertise models only after they start; anything unparsable keeps the built-in list.
  */
 function kiroModelsFromList(
   output: { readonly code: number; readonly stdout: string } | undefined,
@@ -298,13 +288,9 @@ const KiroConfigTemplate = Schema.Struct({
 const decodeKiroConfigTemplate = Schema.decodeUnknownOption(KiroConfigTemplate);
 
 /**
- * The thread's agent picker, from Kiro's `_kiro/config/template` result: the
- * `mode` select a new session would get, without opening one. Kiro 2.27
- * offers its bundled agents (Default, Spec, Plan, ...) and the user's
- * `~/.kiro/agents`, in its own order, and marks the one a new session starts
- * on (Default, `vibe`; `kiro-cli agent set-default` changes only
- * `kiro-cli chat`). The template does not read a workspace, so a project's
- * `.kiro/agents` are not offered here.
+ * The thread's agent picker, from Kiro's `_kiro/config/template` result, without
+ * opening a session. The template reads no workspace, so a project's
+ * `.kiro/agents` are not offered.
  */
 export function kiroAgentDescriptor(template: unknown): ProviderOptionDescriptor | undefined {
   const decoded = Option.getOrUndefined(decodeKiroConfigTemplate(template));

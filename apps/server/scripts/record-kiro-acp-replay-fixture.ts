@@ -1,15 +1,7 @@
 /**
- * Records a Kiro ACP replay transcript from a live
- * `kiro-cli acp --agent-engine=v3 --auth-method=cli` process.
- *
- * The fixture's own scenario (the same commands and steps the replay test
- * dispatches) runs through the real orchestrator and the real KiroAdapterV2;
- * only the ACP runtime's protocol logger is swapped for a tee. Outbound frames
- * are therefore exactly what T3 sends, and inbound frames exactly what Kiro
- * answered. Kiro must already be signed in (`kiro-cli login`, done once by a
- * person; this script never signs in). Run from apps/server with `kiro-cli` on
- * PATH (or T3_KIRO_BIN):
- *
+ * Records a Kiro ACP replay transcript through the real orchestrator and
+ * KiroAdapterV2, teeing only the protocol logger. Run from apps/server, signed in
+ * with `kiro-cli login`, with `kiro-cli` on PATH (or T3_KIRO_BIN):
  *   node scripts/record-kiro-acp-replay-fixture.ts --scenario simple
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -408,7 +400,7 @@ function normalizeEntries(input: {
   });
 }
 
-const KIRO_RECORDING_SETTINGS = Schema.decodeUnknownSync(KiroSettings)({
+const KIRO_RECORDING_SETTINGS = Schema.decodeSync(KiroSettings)({
   enabled: true,
   binaryPath: process.env.T3_KIRO_BIN ?? "kiro-cli",
 });
