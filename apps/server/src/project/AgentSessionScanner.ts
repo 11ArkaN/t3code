@@ -93,8 +93,20 @@ const TranscriptRecord = Schema.Struct({
       model: Schema.optional(Schema.String),
       cwd: Schema.optional(Schema.String),
       content: Schema.optional(Schema.Array(TranscriptContentBlock)),
+      item: Schema.optional(
+        Schema.Struct({
+          type: Schema.optional(Schema.String),
+          content: Schema.optional(Schema.Array(TranscriptContentBlock)),
+        }),
+      ),
     }),
   ),
+});
+
+const CodexQuestionReply = Schema.Struct({
+  questionItemId: Schema.String,
+  question: Schema.String,
+  answer: Schema.String,
 });
 
 const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
@@ -102,6 +114,11 @@ const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
 const decodeTranscriptRecord = Schema.decodeUnknownOption(Schema.fromJsonString(TranscriptRecord));
 const decodeTranscriptValue = Schema.decodeUnknownOption(TranscriptRecord);
 const selectTranscriptPath = createTranscriptJsonSelector(TranscriptRecord);
+const decodeCodexQuestionReplies = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Union([CodexQuestionReply, Schema.NonEmptyArray(CodexQuestionReply)]),
+  ),
+);
 
 type DecodedTranscriptRecord = typeof TranscriptRecord.Type;
 
@@ -264,12 +281,44 @@ function foldClaudeFields(fields: ClaudeFields, record: DecodedTranscriptRecord)
 const CODEX_TITLE_PREAMBLE =
   /^(?:\s*(?:<(recommended_plugins|environment_context|user_instructions|INSTRUCTIONS|in-app-browser-context)(?:\s[^>]*)?>[\s\S]*?<\/\1>|# AGENTS\.md instructions\b[^\n]*))+/;
 
-// Codex's USER_MESSAGE_BEGIN: attachments and context precede it, the typed request follows.
-const CODEX_REQUEST_MARKER = "## My request for Codex:";
+// Codex's USER_MESSAGE_BEGIN line: attachments and context precede it, the typed request follows.
+const CODEX_REQUEST_MARKER = /(?:^|\n)## My request for Codex:(?=\n|$)/;
 
 function codexRequestText(text: string): string {
-  const index = text.indexOf(CODEX_REQUEST_MARKER);
-  return index === -1 ? text : text.slice(index + CODEX_REQUEST_MARKER.length).trim();
+  const marker = CODEX_REQUEST_MARKER.exec(text);
+  return marker === null ? text : text.slice(marker.index + marker[0].length).trim();
+}
+
+const CODEX_QUESTION_REPLY_OPEN = "<send_user_message_question_reply>";
+const CODEX_QUESTION_REPLY_CLOSE = "</send_user_message_question_reply>";
+
+// Mirrors Codex's async_question_reply display: answered questions are sent as this envelope.
+function codexUserText(text: string): string {
+  const request = codexRequestText(text);
+  const envelope = request.trim();
+  if (
+    !envelope.startsWith(CODEX_QUESTION_REPLY_OPEN) ||
+    !envelope.endsWith(CODEX_QUESTION_REPLY_CLOSE)
+  ) {
+    return request;
+  }
+  const replies = decodeCodexQuestionReplies(
+    envelope.slice(CODEX_QUESTION_REPLY_OPEN.length, -CODEX_QUESTION_REPLY_CLOSE.length),
+  );
+  if (Option.isNone(replies)) return request;
+  return (Array.isArray(replies.value) ? replies.value : [replies.value])
+    .map((reply) => `> ${reply.question}\n\n${reply.answer}`)
+    .join("\n\n");
+}
+
+// Legacy rollouts record user_message events; paginated ones record completed UserMessage items.
+function codexUserEventText(record: DecodedTranscriptRecord): string | null {
+  if (record.type !== "event_msg") return null;
+  if (record.payload?.type === "user_message") return record.payload.message ?? "";
+  if (record.payload?.type === "item_completed" && record.payload.item?.type === "UserMessage") {
+    return extractText(record.payload.item.content);
+  }
+  return null;
 }
 
 const CLAUDE_LOCAL_COMMAND_TAGS = new Set([
@@ -350,12 +399,9 @@ function parseAgentSessionRecords(
   const messages: Array<AgentSessionThreadMessage> = [];
   let firstUserMessage: AgentSessionThreadMessage | undefined;
   // Like Codex's own history, rollouts with user events show only those; their
-  // response copies add injected context. Older rollouts only have responses.
+  // response copies add injected context. Rollouts without them only have responses.
   const hasCodexUserEvents =
-    input.source === "codex" &&
-    records.some(
-      (record) => record.type === "event_msg" && record.payload?.type === "user_message",
-    );
+    input.source === "codex" && records.some((record) => codexUserEventText(record) !== null);
 
   const retainMessage = (
     role: AgentSessionThreadMessage["role"],
@@ -394,19 +440,16 @@ function parseAgentSessionRecords(
       model = record.payload.model.trim();
       continue;
     }
-    if (record.type === "event_msg" && record.payload?.type === "user_message") {
-      retainMessage("user", codexRequestText(record.payload.message ?? ""), record.timestamp);
+    const userEventText = codexUserEventText(record);
+    if (userEventText !== null) {
+      retainMessage("user", codexUserText(userEventText), record.timestamp);
       continue;
     }
     if (record.type !== "response_item" || record.payload?.type !== "message") continue;
     if (record.payload.role === "assistant") {
       retainMessage("assistant", extractText(record.payload.content), record.timestamp);
     } else if (record.payload.role === "user" && !hasCodexUserEvents) {
-      retainMessage(
-        "user",
-        codexRequestText(extractText(record.payload.content)),
-        record.timestamp,
-      );
+      retainMessage("user", codexUserText(extractText(record.payload.content)), record.timestamp);
     }
   }
 
@@ -451,7 +494,7 @@ function shouldRetainDecodedRecord(
   return (
     record.type === "session_meta" ||
     record.type === "turn_context" ||
-    (record.type === "event_msg" && record.payload?.type === "user_message") ||
+    codexUserEventText(record) !== null ||
     (record.type === "response_item" &&
       record.payload?.type === "message" &&
       (record.payload.role === "user" || record.payload.role === "assistant"))
