@@ -366,7 +366,7 @@ describe("commit link opening", () => {
       const panel = useRightPanelStore.getState().byThreadKey;
       const selection = useDiffPanelStore.getState().byThreadKey;
       const event = click();
-      const originalUrl = `${commitUrl}?diff=split#diff-1`;
+      const originalUrl = `https://github.com/pingdotgg/t3code/commit/${sha}?diff=split#diff-1`;
 
       expect(useOpenChangeRequestLink(ref)(event, originalUrl)).toBe(true);
       expect(event.defaultPrevented).toBe(true);
@@ -401,7 +401,35 @@ describe("commit link opening", () => {
     },
   );
 
+  it.each(["failure", "no commit source"])(
+    "opens an unavailable PR commit in the PR panel after %s",
+    async (outcome) => {
+      state.preview.mockResolvedValue(
+        outcome === "failure"
+          ? AsyncResult.failure(Cause.fail(new Error("Missing commit")))
+          : AsyncResult.success({ ...previewResult(), sources: [] }),
+      );
+      useRightPanelStore.getState().openFile(ref, "README.md");
+      const selection = useDiffPanelStore.getState().byThreadKey;
+
+      expect(useOpenChangeRequestLink(ref)(click(), commitUrl)).toBe(true);
+      await state.preview.mock.results[0]?.value;
+
+      expect(
+        selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref),
+      ).toMatchObject({
+        kind: "pull-request",
+        repository: "pingdotgg/t3code",
+        number: 19941,
+        url: commitUrl,
+      });
+      expect(useDiffPanelStore.getState().byThreadKey).toBe(selection);
+      expect(state.openLink).not.toHaveBeenCalled();
+    },
+  );
+
   it("opens a repeated commit link externally when the commit becomes unavailable", async () => {
+    const commitUrl = `https://github.com/pingdotgg/t3code/commit/${sha}`;
     const openCommit = useOpenChangeRequestLink(ref);
     expect(openCommit(click(), commitUrl)).toBe(true);
     await state.preview.mock.results[0]?.value;
