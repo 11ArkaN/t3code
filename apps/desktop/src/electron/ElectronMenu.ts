@@ -1,4 +1,4 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, ContextMenuSource } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -17,6 +17,7 @@ export interface ElectronMenuContextInput {
   readonly window: Electron.BrowserWindow;
   readonly items: readonly ContextMenuItem[];
   readonly position: Option.Option<ElectronMenuPosition>;
+  readonly source: Option.Option<ContextMenuSource>;
 }
 
 export interface ElectronMenuTemplateInput {
@@ -244,19 +245,15 @@ export const make = Effect.gen(function* () {
             input.position,
             input.window.webContents.getZoomFactor(),
           );
-          const popupOptions = Option.match(popupPosition, {
-            onNone: (): Electron.PopupOptions => ({
-              window: input.window,
-              callback: () => complete(Option.none()),
+          menu.popup({
+            window: input.window,
+            ...Option.getOrElse(popupPosition, () => ({})),
+            ...Option.match(input.source, {
+              onNone: () => ({}),
+              onSome: (sourceType) => ({ sourceType }),
             }),
-            onSome: (position): Electron.PopupOptions => ({
-              window: input.window,
-              x: position.x,
-              y: position.y,
-              callback: () => complete(Option.none()),
-            }),
+            callback: () => complete(Option.none()),
           });
-          menu.popup(popupOptions);
         } catch (cause) {
           if (completed) {
             return;

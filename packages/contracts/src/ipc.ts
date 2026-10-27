@@ -65,6 +65,10 @@ export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Sc
   ),
 });
 
+// Keyboard-opened native menus select their first item so screen readers move into them.
+export const ContextMenuSourceSchema = Schema.Literal("keyboard");
+export type ContextMenuSource = typeof ContextMenuSourceSchema.Type;
+
 export type DesktopUpdateStatus =
   | "disabled"
   | "idle"
@@ -1086,6 +1090,7 @@ export interface DesktopBridge {
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },
+    source?: ContextMenuSource,
   ) => Promise<T | null>;
   receiveProviderAuthCallback?: (authorizationUrl: string) => Promise<string>;
   cancelProviderAuthCallback?: (authorizationUrl: string) => Promise<void>;
@@ -1207,6 +1212,7 @@ export interface LocalApi {
     show: <T extends string>(
       items: readonly ContextMenuItem<T>[],
       position?: { x: number; y: number },
+      source?: ContextMenuSource,
     ) => Promise<T | null>;
     close: () => Promise<void>;
   };

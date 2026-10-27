@@ -145,7 +145,7 @@ import {
 } from "../markdownFileHostPath";
 import { isMarkdownFileLinkLabel } from "@t3tools/shared/markdownLinks";
 import { isElectron } from "../env";
-import { readLocalApi } from "../localApi";
+import { contextMenuSourceOf, readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { resolveRemoteOpenState, useRemoteOpenResolution } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -1198,6 +1198,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             event.stopPropagation();
             const api = readLocalApi();
             if (!api) return;
+            const source = contextMenuSourceOf(event);
             const threadLinkAction = !canOperateHost
               ? undefined
               : linkedThreadPullRequestFor(href) !== null
@@ -1210,7 +1211,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
               canOpenInPreview,
               threadLinkAction,
               position: { x: event.clientX, y: event.clientY },
-              showContextMenu: (items, position) => api.contextMenu.show(items, position),
+              showContextMenu: (items, position) => api.contextMenu.show(items, position, source),
               openInPreview: async (target) => {
                 const result = await openExternalLinkInPreview(target);
                 if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

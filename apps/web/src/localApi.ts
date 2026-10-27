@@ -1,10 +1,22 @@
-import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type {
+  ConfirmDialogOptions,
+  ContextMenuItem,
+  ContextMenuSource,
+  LocalApi,
+} from "@t3tools/contracts";
 
 import { requestConfirmDialog } from "./confirmDialog";
 import { dismissContextMenu, showContextMenuFallback } from "./contextMenuFallback";
 import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientPersistenceStorage";
 
 let cachedApi: LocalApi | undefined;
+
+// Chromium reports a keyboard-opened contextmenu (Shift+F10, Menu key) with no pressed button.
+export function contextMenuSourceOf(event: {
+  readonly button: number;
+}): ContextMenuSource | undefined {
+  return event.button === -1 ? "keyboard" : undefined;
+}
 
 function createBrowserLocalApi(): LocalApi {
   return {
@@ -43,9 +55,10 @@ function createBrowserLocalApi(): LocalApi {
       show: async <T extends string>(
         items: readonly ContextMenuItem<T>[],
         position?: { x: number; y: number },
+        source?: ContextMenuSource,
       ): Promise<T | null> => {
         if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
+          return window.desktopBridge.showContextMenu(items, position, source) as Promise<T | null>;
         }
         return showContextMenuFallback(items, position);
       },

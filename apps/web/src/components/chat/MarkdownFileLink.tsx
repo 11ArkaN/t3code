@@ -4,10 +4,10 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { ContextMenuSource, EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { memo, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
-import { readLocalApi } from "../../localApi";
+import { contextMenuSourceOf, readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
 import type { markdownFileCopyPaths } from "../../markdownFileHostPath";
@@ -241,7 +241,10 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     );
   };
 
-  const showFileContextMenu = async (position: { x: number; y: number }) => {
+  const showFileContextMenu = async (
+    position: { x: number; y: number },
+    source: ContextMenuSource | undefined,
+  ) => {
     const api = readLocalApi();
     if (!api) return;
 
@@ -258,6 +261,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
           ...copyItems.map(({ id, label }) => ({ id, label })),
         ] as const,
         position,
+        source,
       );
 
       if (clicked === "preview-media") {
@@ -303,7 +307,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             return { x: bounds.left, y: bounds.bottom };
           })()
         : { x: event.clientX, y: event.clientY };
-    void showFileContextMenu(position);
+    void showFileContextMenu(position, contextMenuSourceOf(event));
   };
 
   const canOpenInEditor = onOpen !== undefined;
