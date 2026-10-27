@@ -367,24 +367,36 @@ describe("VoiceInputController", () => {
     await next.controller.interruptRecording();
   });
 
-  it("cancels speech model preparation when the recorder fails to start", async () => {
-    const cancellablePrepare: VoiceTranscriber["prepare"] = ({ signal }) =>
-      new Promise((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(new Error("cancelled")));
+  it.each(["start", "stop"] as const)(
+    "cancels speech model preparation when the recorder fails to %s",
+    async (failure) => {
+      const cancellablePrepare: VoiceTranscriber["prepare"] = ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(new Error("cancelled")));
+        });
+      const harness = createHarness({
+        getTranscriber: () => ({ prepare: cancellablePrepare }),
       });
-    const harness = createHarness({
-      getTranscriber: () => ({ prepare: cancellablePrepare }),
-    });
-    harness.recorder.prepareToRecordAsync.mockRejectedValueOnce(new Error("recorder busy"));
+      if (failure === "start") {
+        harness.recorder.prepareToRecordAsync.mockRejectedValueOnce(new Error("recorder busy"));
+      } else {
+        harness.recorder.stop.mockRejectedValueOnce(new Error("recorder busy"));
+      }
 
-    await harness.controller.start();
-    expect(harness.controller.currentState.error).toBe("Could not start voice recording.");
+      await harness.controller.start();
+      if (failure === "stop") await harness.controller.stop();
+      expect(harness.controller.currentState.error).toBe(
+        failure === "start"
+          ? "Could not start voice recording."
+          : "Could not finish voice recording.",
+      );
 
-    const next = createHarness();
-    await next.controller.start();
-    expect(next.controller.currentState.phase).toBe("recording");
-    await next.controller.interruptRecording();
-  });
+      const next = createHarness();
+      await next.controller.start();
+      expect(next.controller.currentState.phase).toBe("recording");
+      await next.controller.interruptRecording();
+    },
+  );
 
   it("releases the microphone before transcription starts", async () => {
     const events: string[] = [];

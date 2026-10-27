@@ -285,7 +285,6 @@ export class VoiceInputController {
     } finally {
       if (sessionToken && this.sessionToken === sessionToken) {
         if (this.isCurrent(operationToken) && this.state.phase === "error") {
-          this.invalidateOperation();
           await this.releaseResources();
         } else if (!this.isCurrent(operationToken) && !this.finishing) {
           await this.releaseResources();
@@ -481,6 +480,8 @@ export class VoiceInputController {
     this.ownedRecordingUris.clear();
     await this.releaseAudioSession();
     // Preparation cancels cooperatively; the next session must not overlap it.
+    if (this.sessionToken) this.sessionToken.abandoned = true;
+    this.transcriptionAbortController?.abort();
     await this.transcription?.catch(() => {});
     releaseSession(this.sessionToken);
     this.sessionToken = null;
