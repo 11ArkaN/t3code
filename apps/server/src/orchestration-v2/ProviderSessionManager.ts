@@ -61,6 +61,17 @@ const busyTurnPrefix = (providerThreadId: ProviderThreadId) => `${providerThread
 const busyTurnKey = (providerThreadId: ProviderThreadId, runOrdinal: number) =>
   `${busyTurnPrefix(providerThreadId)}${runOrdinal}`;
 const UNLOAD_THREAD_TIMEOUT_MS = 10 * 1000;
+const HOST_SUSPEND_GRACE_MS = 60 * 1000;
+
+// Timers keep counting while Windows and macOS sleep, so an overshoot past the grace restarts the wait.
+const sleepWhileAwake = Effect.fn("ProviderSessionManager.sleepWhileAwake")(function* (
+  ms: number,
+): Effect.fn.Return<void> {
+  const startedAtMs = yield* Clock.currentTimeMillis;
+  yield* Effect.sleep(Duration.millis(ms));
+  const elapsedMs = (yield* Clock.currentTimeMillis) - startedAtMs;
+  if (elapsedMs > ms + HOST_SUSPEND_GRACE_MS) return yield* sleepWhileAwake(ms);
+});
 
 export const ProviderSessionReleaseReason = Schema.Literals([
   "idle_timeout",
@@ -1120,7 +1131,7 @@ export const layerWithOptions = (
                 pinnedForMs: now - pinnedSinceMs,
               });
               // Recheck on this fiber; scheduleIdleReleaseInternal would interrupt it and self-deadlock.
-              yield* Effect.sleep(Duration.millis(idleTimeoutMs));
+              yield* sleepWhileAwake(idleTimeoutMs);
               return yield* releaseIfStillIdle(input);
             }
             yield* Effect.logWarning("orchestration-v2.driver-session.idle-release-pin-expired", {
@@ -1177,7 +1188,7 @@ export const layerWithOptions = (
 
         yield* cancelIdleFiber(entry.idleFiber);
         const generation = entry.idleGeneration + 1;
-        const idleFiber = yield* Effect.sleep(Duration.millis(idleTimeoutMs)).pipe(
+        const idleFiber = yield* sleepWhileAwake(idleTimeoutMs).pipe(
           Effect.andThen(releaseIfStillIdle({ providerSessionId, generation })),
           Effect.forkIn(layerScope),
         );
@@ -1520,7 +1531,7 @@ export const layerWithOptions = (
           if (tracked === undefined) return;
           const [threadId, pending] = tracked;
           const generation = pending.generation + 1;
-          const fiber = yield* Effect.sleep(Duration.millis(idleTimeoutMs)).pipe(
+          const fiber = yield* sleepWhileAwake(idleTimeoutMs).pipe(
             Effect.andThen(unloadIdleThread({ providerSessionId, threadId, generation })),
             Effect.forkIn(layerScope),
           );
@@ -1605,7 +1616,7 @@ export const layerWithOptions = (
           );
           // Wait outside the lock so the next attach is not blocked.
           if (outcome === "deferred") {
-            yield* Effect.sleep(Duration.millis(idleTimeoutMs));
+            yield* sleepWhileAwake(idleTimeoutMs);
             return yield* unloadIdleThread(input);
           }
         },
