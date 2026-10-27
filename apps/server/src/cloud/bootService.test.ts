@@ -468,7 +468,17 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: "1.2.4",
         });
-        expect(yield* fs.readFileString(plan.unitPath)).toContain("versions/1.2.4/t3");
+        if (platform === "darwin") {
+          const program = BootService.bootServiceProgramOf(yield* fs.readFileString(plan.unitPath));
+          expect(program).toBe(path.join(baseDir, "runtime", "launcher", "t3"));
+          expect(
+            yield* fs.readFileString(
+              path.join(baseDir, "runtime", "launcher", ".install-complete"),
+            ),
+          ).toBe("1.2.4\n");
+        } else {
+          expect(yield* fs.readFileString(plan.unitPath)).toContain("versions/1.2.4/t3");
+        }
         expect(
           commands.filter(
             (command) =>
@@ -742,8 +752,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
   it.effect("installs, reports current state, and uninstalls on macOS", () =>
     Effect.gen(function* () {
-      const { service, fs, statePath, commands, timeouts, runtime } = yield* makeHarness("darwin");
+      const { service, fs, baseDir, statePath, commands, timeouts } = yield* makeHarness("darwin");
       const path = yield* Path.Path;
+      const launcherDir = path.join(baseDir, "runtime", "launcher");
       const plan = yield* service.install();
 
       expect(
@@ -759,13 +770,18 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         activeVersion: "1.2.3",
       });
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
-        `    <string>${runtime.entryPath}</string>\n    <string>__service-launcher</string>`,
+        `    <string>${path.join(launcherDir, "t3")}</string>\n    <string>__service-launcher</string>`,
       );
       expect(yield* service.status).toMatchObject({
         current: true,
         installedVersion: "1.2.3",
       });
+      yield* fs.writeFileString(path.join(launcherDir, ".install-complete"), "1.2.2\n");
+      expect((yield* service.status).current).toBe(false);
+      yield* service.install();
+      expect((yield* service.status).current).toBe(true);
       expect(yield* service.uninstall).toBe(true);
+      expect(yield* fs.exists(launcherDir)).toBe(false);
       expect((yield* service.status).installed).toBe(false);
       expect(commands.some((command) => command.startsWith("systemctl "))).toBe(false);
       // launchd can take 90s to bootout; the runner's 60s default could let bootstrap race it.
@@ -790,6 +806,43 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect(updatedProgram).toBe(program);
       expect(updatedProgram).not.toContain("/runtime/versions/");
       expect(yield* fs.exists(updatedProgram ?? "")).toBe(true);
+    }),
+  );
+
+  it.effect("swaps in a new launch agent runtime without writing into the running one", () =>
+    Effect.gen(function* () {
+      const { service, makeService, fs, baseDir } = yield* makeHarness("darwin");
+      const path = yield* Path.Path;
+      const launcherDir = path.join(baseDir, "runtime", "launcher");
+      const versionEntry = (version: string) =>
+        path.join(baseDir, "runtime", "versions", version, "t3");
+      yield* service.install();
+      const running = yield* fs.open(path.join(launcherDir, "t3"), { flag: "r" });
+
+      const newer = yield* makeService(undefined, "1.2.4");
+      yield* fs.writeFileString(versionEntry("1.2.4"), "#!/bin/sh\n# 1.2.4\n");
+      yield* newer.install({ start: false });
+
+      const buffer = new Uint8Array(64);
+      const read = yield* running.read(buffer);
+      expect(new TextDecoder().decode(buffer.subarray(0, Number(read)))).toBe("#!/bin/sh\n");
+      expect(yield* fs.readFileString(path.join(launcherDir, "t3"))).toBe("#!/bin/sh\n# 1.2.4\n");
+      expect((yield* fs.stat(path.join(launcherDir, "t3"))).mode & 0o111).toBe(
+        (yield* fs.stat(versionEntry("1.2.4"))).mode & 0o111,
+      );
+
+      const failingSwap = yield* makeService(undefined, "1.2.5").pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          rename: (from, to) =>
+            fs.rename(from, from === `${launcherDir}.next` ? path.join(to, "missing", "t3") : to),
+        }),
+      );
+      expect((yield* Effect.flip(failingSwap.install({ start: false })))._tag).toBe(
+        "BootServiceInstallError",
+      );
+      expect(yield* fs.readFileString(path.join(launcherDir, ".install-complete"))).toBe("1.2.4\n");
+      expect(yield* fs.readFileString(path.join(launcherDir, "t3"))).toBe("#!/bin/sh\n# 1.2.4\n");
     }),
   );
 
