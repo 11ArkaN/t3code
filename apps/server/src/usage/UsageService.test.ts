@@ -145,6 +145,7 @@ const layerService = (input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly platform?: NodeJS.Platform;
   readonly secrets?: Readonly<Record<string, string>>;
+  readonly secretsUnreadable?: () => boolean;
 }) =>
   layerCursorUsageAccounts(
     CursorAccountReader.layer.pipe(Layer.provide(CursorKeychain.layer)),
@@ -157,11 +158,15 @@ const layerService = (input: {
     Layer.provideMerge(
       Layer.mock(ServerSecretStore.ServerSecretStore)({
         get: (name) =>
-          Effect.succeed(
-            Option.map(Option.fromNullishOr(input.secrets?.[name]), (value) =>
-              new TextEncoder().encode(value),
-            ),
-          ),
+          input.secretsUnreadable?.()
+            ? Effect.fail(
+                new ServerSecretStore.SecretStoreReadError({ resource: name, cause: null }),
+              )
+            : Effect.succeed(
+                Option.map(Option.fromNullishOr(input.secrets?.[name]), (value) =>
+                  new TextEncoder().encode(value),
+                ),
+              ),
       }),
     ),
     Layer.provideMerge(
@@ -298,7 +303,8 @@ const cursorApi = (
   accounts: Readonly<Record<string, { readonly outputTokens: number }>>,
   backendUrl = "https://api2.cursor.sh",
 ) => {
-  const accessToken = (apiKey: string) => cursorToken(`auth0|user_${apiKey}`);
+  // Exchanged tokens carry a different provider prefix than CLI logins for the same user.
+  const accessToken = (apiKey: string) => cursorToken(`grok|user_${apiKey}`);
   return (request: HttpClientRequest.HttpClientRequest) =>
     Effect.sync(() => {
       const authorization = request.headers["authorization"];
@@ -1461,7 +1467,7 @@ describe("UsageService", () => {
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
       yield* TestClock.setTime(CURSOR_NOW);
-      const subject = "auth0|user_key-b";
+      const userId = "user_key-b";
       const cliEvents = (outputTokens: number) =>
         Response.json({
           totalUsageEventsCount: 1,
@@ -1494,7 +1500,7 @@ describe("UsageService", () => {
               await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
               await NodeFSP.writeFile(
                 authPath,
-                encodeUnknownJsonString({ accessToken: cursorToken(subject) }),
+                encodeUnknownJsonString({ accessToken: cursorToken(`auth0|${userId}`) }),
               );
             });
           }
@@ -1524,7 +1530,7 @@ describe("UsageService", () => {
           };
         }),
       );
-      const account = `cursor-account:${NodeCrypto.createHash("sha256").update(subject).digest("hex")}`;
+      const account = `cursor-account:${NodeCrypto.createHash("sha256").update(userId).digest("hex")}`;
       for (const result of results) {
         assert.deepStrictEqual(result, { sources: [[account, "ok"]], outputTokens: 7 });
       }
@@ -1659,6 +1665,59 @@ describe("UsageService", () => {
         ],
       );
       assert.include(cursor[1]?.message ?? "", "cursor-c");
+      assert.strictEqual(
+        totalOutputTokens({
+          buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
+        }),
+        7,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.live("keeps a Cursor sign-in's history when its credential store fails one scan", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      yield* TestClock.setTime(CURSOR_NOW);
+      const backendUrl = "https://cursor-b.example";
+      const api = cursorApi({ "key-cursor-b": { outputTokens: 7 } }, backendUrl);
+      let usageReads = 0;
+      let secretsUnreadable = false;
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(
+          layerService({
+            prefix: "usage-service-cursor-store-failure",
+            home,
+            settings: {
+              providerInstances: {
+                ...settings.providerInstances,
+                [ProviderInstanceId.make("cursor-b")]: {
+                  driver: ProviderDriverKind.make("cursor"),
+                },
+              },
+            },
+            secrets: {
+              [`provider-auth-${NodeCrypto.createHash("sha256").update("6:cursorcursor-b").digest("hex")}`]:
+                encodeUnknownJsonString({
+                  version: 1,
+                  backendUrl,
+                  apiKey: "key-cursor-b",
+                  createdAtMs: CURSOR_NOW - HOUR_MS,
+                }),
+            },
+            secretsUnreadable: () => secretsUnreadable,
+            ratesResponse: (request) => {
+              if (request.url.endsWith("/GetFilteredUsageEvents")) usageReads++;
+              return api(request);
+            },
+          }),
+        ),
+      );
+      yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      secretsUnreadable = true;
+      yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      secretsUnreadable = false;
+      const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
+      assert.strictEqual(usageReads, 1);
       assert.strictEqual(
         totalOutputTokens({
           buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),

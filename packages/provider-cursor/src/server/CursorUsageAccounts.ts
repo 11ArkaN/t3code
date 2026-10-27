@@ -333,7 +333,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  /** The account an instance's own key bills; null when it has none and bills the host login. */
+  /** The account an instance's key or stored sign-in bills; null when it has neither. */
   const instanceSource = Effect.fn("CursorUsageAccounts.instanceSource")(function* (
     instance: CursorUsageInstance,
     windowStartMs: number,
@@ -408,17 +408,20 @@ const make = Effect.gen(function* () {
         { concurrency: "unbounded" },
       );
 
-      // Drop history cached for API keys no instance bills any more, such as rotated keys.
+      // Drop history cached for API keys no instance bills any more, such as rotated keys,
+      // unless a key could not be read this scan and may still own one.
       const billedKeys = new Set(
         instanceEntries.flatMap((entry) =>
           entry !== null && "credentialKey" in entry ? [entry.credentialKey] : [],
         ),
       );
       yield* ensureLoaded;
-      for (const credentialKey of caches.keys()) {
-        if (credentialKey.startsWith(API_KEY_CACHE_PREFIX) && !billedKeys.has(credentialKey)) {
-          caches.delete(credentialKey);
-          cacheDirty = true;
+      if (!instanceEntries.some((entry) => entry !== null && !("credentialKey" in entry))) {
+        for (const credentialKey of caches.keys()) {
+          if (credentialKey.startsWith(API_KEY_CACHE_PREFIX) && !billedKeys.has(credentialKey)) {
+            caches.delete(credentialKey);
+            cacheDirty = true;
+          }
         }
       }
       if (cacheDirty) yield* schedulePersist;

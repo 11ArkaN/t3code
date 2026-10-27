@@ -217,9 +217,10 @@ export const readCursorAccountUsage = Effect.fn("readCursorAccountUsage")(functi
       ),
     ).sub;
     if (typeof subject !== "string" || !subject) return yield* invalid("Invalid authentication");
+    // CLI logins and exchanged API keys prefix the same user id with different auth providers.
     const userId = subject.split("|").at(-1);
     if (!userId) return yield* invalid("Invalid authentication");
-    accountKey = yield* accountHash(subject);
+    accountKey = yield* accountHash(userId);
     if (!Number.isFinite(sinceMs) || !Number.isFinite(endDate) || sinceMs < 0 || sinceMs > endDate)
       return yield* invalid("Invalid date window");
     const usageRequest =
