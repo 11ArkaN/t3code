@@ -1,10 +1,15 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
   AuthSessionId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   RpcClientId,
   type HostPowerSnapshot,
   type ClientActivityReportInput,
+  type ServerProvider,
 } from "@t3tools/contracts";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -13,7 +18,11 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../config.ts";
+import * as ProviderHostLive from "../provider/ProviderHostLive.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as BackgroundPolicy from "./BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./HostPowerMonitor.ts";
@@ -47,11 +56,8 @@ function makeReport(overrides: Partial<ClientActivityReportInput> = {}): ClientA
   };
 }
 
-function layerFor(
-  hostPower: HostPowerSnapshot,
-  settingsOverrides: Parameters<typeof ServerSettings.layerTest>[0] = {},
-) {
-  const layerHost = Layer.effect(
+function layerHostPowerMonitor(hostPower: HostPowerSnapshot) {
+  return Layer.effect(
     HostPowerMonitor.HostPowerMonitor,
     Effect.gen(function* () {
       const changes = yield* PubSub.sliding<HostPowerSnapshot>(1);
@@ -66,8 +72,28 @@ function layerFor(
       });
     }),
   );
+}
+
+function layerFor(
+  hostPower: HostPowerSnapshot,
+  settingsOverrides: Parameters<typeof ServerSettings.layerTest>[0] = {},
+) {
   return BackgroundPolicy.layer.pipe(
-    Layer.provide(Layer.merge(layerHost, ServerSettings.layerTest(settingsOverrides))),
+    Layer.provide(
+      Layer.merge(layerHostPowerMonitor(hostPower), ServerSettings.layerTest(settingsOverrides)),
+    ),
+  );
+}
+
+function layerProviderHostFor(hostPower: HostPowerSnapshot) {
+  return ProviderHostLive.layer.pipe(
+    Layer.provideMerge(BackgroundPolicy.layer),
+    Layer.provideMerge(Layer.merge(layerHostPowerMonitor(hostPower), ServerSettings.layerTest())),
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-background-policy-provider-" }),
+    ),
+    Layer.provideMerge(Layer.mock(ServerSecretStore.ServerSecretStore)({})),
+    Layer.provideMerge(NodeServices.layer),
   );
 }
 
@@ -305,5 +331,79 @@ describe("BackgroundPolicy", () => {
         ),
       ),
     ),
+  );
+
+  it.effect(
+    "re-checks a failed provider for a focused client while the host is in Low Power Mode",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* BackgroundPolicy.BackgroundPolicy;
+        const reportFocusedProviderStatusLease = policy.reportClientActivity(
+          AuthSessionId.make("session-1"),
+          RpcClientId.make(1),
+          makeReport({
+            clientKind: "desktop-renderer",
+            scopes: [{ type: "server-config" }, { type: "provider-status" }],
+          }),
+        );
+        const failedSnapshot: ServerProvider = {
+          instanceId: ProviderInstanceId.make("codex"),
+          driver: ProviderDriverKind.make("codex"),
+          enabled: true,
+          installed: true,
+          version: null,
+          status: "error",
+          auth: { status: "unknown" },
+          checkedAt: "2026-05-13T00:00:00.000Z",
+          message: "Timed out while checking Codex app-server provider status.",
+          models: [],
+          slashCommands: [],
+          skills: [],
+        };
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckDone = yield* Deferred.make<void>();
+
+        yield* reportFocusedProviderStatusLease;
+        yield* makeManagedServerProvider({
+          resolveMaintenance: () => Effect.die("unused"),
+          getSettings: Effect.succeed({}),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: () => false,
+          initialSnapshot: () => Effect.succeed(failedSnapshot),
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.tap((count) =>
+              count === 1 ? Deferred.succeed(initialCheckDone, undefined) : Effect.void,
+            ),
+            Effect.as(failedSnapshot),
+          ),
+        });
+        yield* Deferred.await(initialCheckDone);
+
+        // Balanced re-probes every 5 minutes; the focused client keeps renewing its 45 s lease.
+        yield* TestClock.adjust("290 seconds");
+        yield* reportFocusedProviderStatusLease;
+        const snapshot = yield* policy.snapshot;
+        assert.equal(snapshot.hostPower.lowPowerMode, "true");
+        assert.equal(snapshot.activeForegroundLeaseCount, 1);
+        assert.isTrue(yield* policy.hasDemand({ type: "provider-status" }));
+
+        yield* TestClock.adjust("10 seconds");
+
+        assert.equal(
+          yield* Ref.get(checkCalls),
+          2,
+          "provider in error was not re-checked after the balanced 5 minute interval",
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          layerProviderHostFor({
+            ...nominalHostPower,
+            onBattery: "true",
+            lowPowerMode: "true",
+            stale: false,
+          }),
+        ),
+      ),
   );
 });
