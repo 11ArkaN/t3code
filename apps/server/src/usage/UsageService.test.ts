@@ -1441,9 +1441,9 @@ describe("UsageService", () => {
           );
           const summary = yield* service.readSummary({ ...WINDOW, awaitRefresh: true });
           return {
-            readsAccount: summary.sources.some(
-              (source) => source.fingerprint.provider === "cursor" && source.status === "ok",
-            ),
+            cursorSources: summary.sources
+              .filter((source) => source.fingerprint.provider === "cursor")
+              .map((source) => ({ status: source.status, message: source.message })),
             outputTokens: totalOutputTokens({
               buckets: summary.buckets.filter((bucket) => bucket.provider === "cursor"),
             }),
@@ -1451,8 +1451,8 @@ describe("UsageService", () => {
         }),
       );
       assert.deepStrictEqual(results, [
-        { readsAccount: true, outputTokens: 7 },
-        { readsAccount: true, outputTokens: 7 },
+        { cursorSources: [{ status: "ok", message: null }], outputTokens: 7 },
+        { cursorSources: [{ status: "ok", message: null }], outputTokens: 7 },
       ]);
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
   );

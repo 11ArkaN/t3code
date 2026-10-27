@@ -90,7 +90,7 @@ const DASHBOARD_USAGE_URL = "https://cursor.com/api/dashboard/get-filtered-usage
 /** Credentials must never follow a redirect off the host they were issued for. */
 const NO_REDIRECT: RequestInit = { redirect: "error" };
 
-const API_KEY_REJECTED = "Cursor rejected the API key. Check it or sign in to Cursor again.";
+const API_KEY_REJECTED = "Cursor rejected this account's API key.";
 
 /** The cursor.com dashboard rejects API keys; they exchange for a token the backend's RPC accepts. */
 const exchangeApiKey = Effect.fn("CursorAccountUsage.exchangeApiKey")(function* (
