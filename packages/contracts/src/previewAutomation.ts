@@ -71,7 +71,8 @@ export const PreviewAutomationProfile = Schema.Struct({
 });
 export type PreviewAutomationProfile = typeof PreviewAutomationProfile.Type;
 
-const VISIBLE_DESCRIPTION = "True while a T3 client shows this tab's live view.";
+const VISIBLE_DESCRIPTION =
+  "True while a client streams this tab's live view. Tabs the desktop app renders itself read false.";
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,

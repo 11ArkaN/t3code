@@ -1831,8 +1831,8 @@ const make = Effect.gen(function* () {
                   force: reveal === true,
                 }),
               );
-              // Desktop webviews never attach viewers, so only streamed tabs wait to be shown.
-              if (tab.viewers.size === 0 && tab.desktop === null)
+              // Only an explicit show is sure to reach a client, and desktop webviews never attach viewers.
+              if (reveal === true && tab.viewers.size === 0 && tab.desktop === null)
                 shown = awaitViewer(
                   tab,
                   Math.min(REVEAL_VIEWER_WAIT_MS, deadlineMs - performance.now()),
