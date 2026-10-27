@@ -155,7 +155,7 @@ struct HomeThreadCollectionView: UIViewRepresentable {
             guard !isApplyingSnapshot, hasQueuedUpdate, let dataSource else { return }
             // A pushed thread covers Home on iPhone, and its rows still change
             // every second while a reply streams. Apply once Home is back.
-            guard collectionView.window != nil || dataSource.snapshot().numberOfItems == 0 else { return }
+            guard (collectionView as? HomeThreadListView)?.isCovered != true else { return }
             hasQueuedUpdate = false
             let previousItems = itemsByID
             let previousThreadItemIDs = threadItemIDs
@@ -1263,13 +1263,19 @@ private extension Optional where Wrapped == [IndexPath] {
     var orEmpty: [IndexPath] { self ?? [] }
 }
 
-/// Reports when Home returns to the window so updates queued while it was
-/// covered land before it is visible.
+/// Tracks when Home leaves the window after being shown (a pushed thread
+/// covers it) and reports its return, so updates queued meanwhile land first.
 private final class HomeThreadListView: UICollectionView {
     var onReturnToWindow: (() -> Void)?
+    private(set) var isCovered = false
+    private var hasBeenShown = false
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil { onReturnToWindow?() }
+        isCovered = window == nil && hasBeenShown
+        if window != nil {
+            hasBeenShown = true
+            onReturnToWindow?()
+        }
     }
 }
