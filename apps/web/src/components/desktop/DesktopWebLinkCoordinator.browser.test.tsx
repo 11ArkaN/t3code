@@ -76,7 +76,11 @@ vi.mock("../../browser/useOpenLink", () => ({ useOpenLink: () => state.openLink 
 import { AppAtomRegistryProvider, appAtomRegistry } from "../../rpc/atomRegistry";
 import { allReachableShellsLiveAtom } from "../../state/shell";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../../diffPanelStore";
-import { selectActiveRightPanel, useRightPanelStore } from "../../rightPanelStore";
+import {
+  selectActiveRightPanel,
+  selectActiveRightPanelSurface,
+  useRightPanelStore,
+} from "../../rightPanelStore";
 import { DesktopWebLinkCoordinator } from "./DesktopWebLinkCoordinator";
 
 const discoverySettled = allReachableShellsLiveAtom as Atom.Writable<boolean>;
@@ -234,7 +238,7 @@ it.each(["no route", "missing thread", "draft"])(
   },
 );
 
-it("opens an unavailable active-thread commit externally", async () => {
+it("opens an unavailable active-thread PR commit in the thread's PR panel", async () => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
   state.projects = [project];
@@ -242,7 +246,34 @@ it("opens an unavailable active-thread commit externally", async () => {
   appAtomRegistry.set(discoverySettled, true);
   await using _coordinator = await mount(commitUrl);
   await vi.waitFor(() =>
-    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(commitUrl, {
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef),
+    ).toMatchObject({
+      kind: "pull-request",
+      projectId,
+      host: "github.com",
+      repository: "effect-ts/effect",
+      number: 9339,
+      url: commitUrl,
+    }),
+  );
+  expect(state.preview).toHaveBeenCalledOnce();
+  expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
+  expect(state.openLink).not.toHaveBeenCalled();
+  expect(state.navigate).not.toHaveBeenCalled();
+  expect(state.openScratchProject).not.toHaveBeenCalled();
+});
+
+it("opens an unavailable active-thread plain commit externally", async () => {
+  setup();
+  state.routeParams = { environmentId: "local", threadId: "thread" };
+  state.projects = [project];
+  state.preview.mockResolvedValueOnce(AsyncResult.success({ sources: [] }));
+  appAtomRegistry.set(discoverySettled, true);
+  const plainCommitUrl = `https://github.com/Effect-TS/effect/commit/${sha}`;
+  await using _coordinator = await mount(plainCommitUrl);
+  await vi.waitFor(() =>
+    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(plainCommitUrl, {
       event: { metaKey: true, ctrlKey: false },
       threadRef,
     }),
