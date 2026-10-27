@@ -24,6 +24,9 @@ import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as ThreadLocalCheckout from "./ThreadLocalCheckout.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
+// These need folders that differ only by case, which Windows' default volumes can't hold.
+const caseFoldingHost = HostProcess.Platform.defaultValue() === "win32";
+
 const threadId = ThreadId.make("thread-move-to-local");
 const projectId = ProjectId.make("project-move-to-local");
 
@@ -447,19 +450,21 @@ describe("rollback and recovery safety", () => {
     }).pipe(Effect.provide(gitLayer)),
   );
 
-  it.effect("a case-sensitive macOS volume permits distinct checkout paths differing by case", () =>
-    Effect.gen(function* () {
-      const f = yield* makeFixture();
-      const upper = `${f.root}/REPO`;
-      yield* f.git(f.local, ["worktree", "move", f.worktree, upper]);
-      const preview = yield* makeHarness({ fixture: { ...f, worktree: upper } })
-        .preview()
-        .pipe(Effect.provideService(HostProcess.Platform, "darwin"));
-      expect({ blocker: preview.blocker, branch: preview.branch }).toEqual({
-        blocker: null,
-        branch: "feature",
-      });
-    }).pipe(Effect.provide(gitLayer)),
+  it.effect.skipIf(caseFoldingHost)(
+    "a case-sensitive macOS volume permits distinct checkout paths differing by case",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* makeFixture();
+        const upper = `${f.root}/REPO`;
+        yield* f.git(f.local, ["worktree", "move", f.worktree, upper]);
+        const preview = yield* makeHarness({ fixture: { ...f, worktree: upper } })
+          .preview()
+          .pipe(Effect.provideService(HostProcess.Platform, "darwin"));
+        expect({ blocker: preview.blocker, branch: preview.branch }).toEqual({
+          blocker: null,
+          branch: "feature",
+        });
+      }).pipe(Effect.provide(gitLayer)),
   );
 });
 
@@ -547,7 +552,7 @@ describe("journal identity and preview", () => {
 });
 
 describe("case-sensitive volumes", () => {
-  it.effect(
+  it.effect.skipIf(caseFoldingHost)(
     "case-insensitive containment does not permit a copy into a distinct sibling root",
     () =>
       Effect.gen(function* () {
