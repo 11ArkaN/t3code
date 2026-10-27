@@ -72,10 +72,6 @@ const TranscriptMessage = Schema.Struct({
   model: Schema.optional(Schema.String),
 });
 
-const CodexTurnMetadata = Schema.Struct({
-  turn_id: Schema.optional(Schema.Union([Schema.String, Schema.Null])),
-});
-
 const TranscriptRecord = Schema.Struct({
   type: Schema.optional(Schema.String),
   timestamp: Schema.optional(Schema.String),
@@ -97,7 +93,6 @@ const TranscriptRecord = Schema.Struct({
       model: Schema.optional(Schema.String),
       cwd: Schema.optional(Schema.String),
       content: Schema.optional(Schema.Array(TranscriptContentBlock)),
-      internal_chat_message_metadata_passthrough: Schema.optional(Schema.Unknown),
     }),
   ),
 });
@@ -107,7 +102,6 @@ const decodeCodexSettings = Schema.decodeUnknownOption(CodexSettings);
 const decodeTranscriptRecord = Schema.decodeUnknownOption(Schema.fromJsonString(TranscriptRecord));
 const decodeTranscriptValue = Schema.decodeUnknownOption(TranscriptRecord);
 const selectTranscriptPath = createTranscriptJsonSelector(TranscriptRecord);
-const decodeCodexTurnMetadata = Schema.decodeUnknownOption(CodexTurnMetadata);
 
 type DecodedTranscriptRecord = typeof TranscriptRecord.Type;
 
@@ -231,18 +225,6 @@ function normalizeTimestamp(value: string | undefined, fallback: string): string
   return Option.isSome(parsed) ? DateTime.formatIso(parsed.value) : fallback;
 }
 
-function codexTurnId(metadata: unknown): string | null {
-  const decoded = decodeCodexTurnMetadata(metadata);
-  if (
-    Option.isNone(decoded) ||
-    typeof decoded.value.turn_id !== "string" ||
-    decoded.value.turn_id.trim().length === 0
-  ) {
-    return null;
-  }
-  return decoded.value.turn_id;
-}
-
 function isHiddenClaudeRecord(record: DecodedTranscriptRecord): boolean {
   return record.isSidechain === true || record.isMeta === true || record.isCompactSummary === true;
 }
@@ -280,7 +262,56 @@ function foldClaudeFields(fields: ClaudeFields, record: DecodedTranscriptRecord)
 // Codex records setup context as user text ahead of the real request. Skip
 // these leading blocks when deriving a title; imported messages keep them.
 const CODEX_TITLE_PREAMBLE =
-  /^(?:\s*(?:<(recommended_plugins|environment_context|user_instructions|INSTRUCTIONS|in-app-browser-context)(?:\s[^>]*)?>[\s\S]*?<\/\1>|# AGENTS\.md instructions\b[^\n]*|## My request for Codex:))+/;
+  /^(?:\s*(?:<(recommended_plugins|environment_context|user_instructions|INSTRUCTIONS|in-app-browser-context)(?:\s[^>]*)?>[\s\S]*?<\/\1>|# AGENTS\.md instructions\b[^\n]*))+/;
+
+// Codex's USER_MESSAGE_BEGIN: attachments and context precede it, the typed request follows.
+const CODEX_REQUEST_MARKER = "## My request for Codex:";
+
+function codexRequestText(text: string): string {
+  const index = text.indexOf(CODEX_REQUEST_MARKER);
+  return index === -1 ? text : text.slice(index + CODEX_REQUEST_MARKER.length).trim();
+}
+
+const CLAUDE_LOCAL_COMMAND_TAGS = new Set([
+  "command-name",
+  "command-message",
+  "command-args",
+  "local-command-stdout",
+  "local-command-stderr",
+]);
+
+// Claude stores local slash commands and their output as user text made only of these tags.
+function parseClaudeLocalCommandTags(text: string): Map<string, string> | null {
+  const tags = new Map<string, string>();
+  const whitespace = /\s*/y;
+  let position = 0;
+  while (true) {
+    whitespace.lastIndex = position;
+    whitespace.test(text);
+    position = whitespace.lastIndex;
+    if (position === text.length) return tags;
+    if (text[position] !== "<") return null;
+    const nameEnd = text.indexOf(">", position);
+    if (nameEnd === -1) return null;
+    const name = text.slice(position + 1, nameEnd);
+    if (!CLAUDE_LOCAL_COMMAND_TAGS.has(name)) return null;
+    const closingTag = `</${name}>`;
+    const contentEnd = text.indexOf(closingTag, nameEnd + 1);
+    if (contentEnd === -1) return null;
+    tags.set(name, text.slice(nameEnd + 1, contentEnd));
+    position = contentEnd + closingTag.length;
+  }
+}
+
+// Mirrors the Claude transcript view: the command as typed, never its local output.
+function claudeUserText(text: string): string | null {
+  const tags = parseClaudeLocalCommandTags(text);
+  if (tags === null) return text;
+  const command = tags.get("command-name")?.trim();
+  if (!command) return null;
+  const args = tags.get("command-args")?.trim();
+  return args ? `${command} ${args}` : command;
+}
 
 function deriveTitle(source: AgentSessionSource, text: string): string | undefined {
   const request = source === "codex" ? text.replace(CODEX_TITLE_PREAMBLE, "") : text;
@@ -316,106 +347,38 @@ function parseAgentSessionRecords(
   let model = claudeFields.model ?? null;
   let derivedTitle: string | undefined;
   let hasCodexSessionId = false;
-  const messages: Array<AgentSessionThreadMessage & { readonly codexResponseUser: boolean }> = [];
-  let firstUserMessage:
-    | (AgentSessionThreadMessage & { readonly codexResponseUser: boolean })
-    | undefined;
-  const canonicalCodexResponseUserIndices = new Set<number>();
-  let canonicalUserTextsInTurn = new Set<string>();
-  let responseUsersInTurn: Array<{
-    readonly index: number;
-    readonly turnId: string;
-    readonly text: string;
-  }> = [];
-  const finishCodexTurn = () => {
-    const canonicalTurnIds = new Set(
-      responseUsersInTurn.flatMap((responseUser) =>
-        canonicalUserTextsInTurn.has(responseUser.text) ? [responseUser.turnId] : [],
-      ),
+  const messages: Array<AgentSessionThreadMessage> = [];
+  let firstUserMessage: AgentSessionThreadMessage | undefined;
+  // Like Codex's own history, rollouts with user events show only those; their
+  // response copies add injected context. Older rollouts only have responses.
+  const hasCodexUserEvents =
+    input.source === "codex" &&
+    records.some(
+      (record) => record.type === "event_msg" && record.payload?.type === "user_message",
     );
-    for (const responseUser of responseUsersInTurn) {
-      if (canonicalTurnIds.has(responseUser.turnId)) {
-        canonicalCodexResponseUserIndices.add(responseUser.index);
-      }
-    }
-    canonicalUserTextsInTurn = new Set();
-    responseUsersInTurn = [];
-  };
-  if (input.source === "codex") {
-    let recordIndex = -1;
-    for (const record of records) {
-      recordIndex += 1;
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "assistant"
-      ) {
-        finishCodexTurn();
-        continue;
-      }
-      if (record.type === "event_msg" && record.payload?.type === "user_message") {
-        const text = record.payload.message?.trim() ?? "";
-        if (text.length > 0) canonicalUserTextsInTurn.add(text);
-        continue;
-      }
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "user"
-      ) {
-        const turnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
-        const text = extractText(record.payload.content);
-        if (turnId !== null && text.length > 0) {
-          responseUsersInTurn.push({ index: recordIndex, turnId, text });
-        }
-      }
-    }
-    finishCodexTurn();
-  }
 
   const retainMessage = (
-    message: AgentSessionThreadMessage & { readonly codexResponseUser: boolean },
+    role: AgentSessionThreadMessage["role"],
+    text: string,
+    timestamp: string | undefined,
   ) => {
-    if (firstUserMessage === undefined && message.role === "user") {
-      firstUserMessage = message;
-    }
-    if (derivedTitle === undefined && message.role === "user") {
-      derivedTitle = deriveTitle(input.source, message.text);
+    if (text.trim().length === 0) return;
+    const message = { role, text, createdAt: normalizeTimestamp(timestamp, fallbackTimestamp) };
+    if (role === "user") {
+      firstUserMessage ??= message;
+      derivedTitle ??= deriveTitle(input.source, text);
     }
     messages.push(message);
     if (messages.length > MAX_IMPORTED_MESSAGES) messages.shift();
   };
 
-  const hasMatchingCodexEventInTurn = (text: string) => {
-    const comparisonText = text.trim();
-    for (let index = messages.length - 1; index >= 0; index--) {
-      const message = messages[index];
-      if (message?.role === "assistant") return false;
-      if (
-        message?.role === "user" &&
-        !message.codexResponseUser &&
-        message.text.trim() === comparisonText
-      ) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  let recordIndex = -1;
   for (const record of records) {
-    recordIndex += 1;
     if (input.source === "claudeAgent") {
       if (isHiddenClaudeRecord(record)) continue;
       if (record.type !== "user" && record.type !== "assistant") continue;
       const text = extractText(record.message?.content);
-      if (text.length === 0) continue;
-      retainMessage({
-        role: record.type,
-        text,
-        createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
-        codexResponseUser: false,
-      });
+      const visibleText = record.type === "user" ? claudeUserText(text) : text;
+      if (visibleText !== null) retainMessage(record.type, visibleText, record.timestamp);
       continue;
     }
 
@@ -432,59 +395,25 @@ function parseAgentSessionRecords(
       continue;
     }
     if (record.type === "event_msg" && record.payload?.type === "user_message") {
-      const text = record.payload.message ?? "";
-      if (text.trim().length === 0) continue;
-      // Codex can duplicate prompts across formats; remove only matching response copies.
-      for (let index = messages.length - 1; index >= 0; index--) {
-        const message = messages[index];
-        if (message?.role === "assistant") break;
-        if (message?.codexResponseUser === true && message.text.trim() === text.trim()) {
-          if (firstUserMessage === message) firstUserMessage = undefined;
-          messages.splice(index, 1);
-          break;
-        }
-      }
-      retainMessage({
-        role: "user",
-        text,
-        createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
-        codexResponseUser: false,
-      });
+      retainMessage("user", codexRequestText(record.payload.message ?? ""), record.timestamp);
       continue;
     }
-    if (
-      record.type !== "response_item" ||
-      record.payload?.type !== "message" ||
-      (record.payload.role !== "user" && record.payload.role !== "assistant")
-    ) {
-      continue;
+    if (record.type !== "response_item" || record.payload?.type !== "message") continue;
+    if (record.payload.role === "assistant") {
+      retainMessage("assistant", extractText(record.payload.content), record.timestamp);
+    } else if (record.payload.role === "user" && !hasCodexUserEvents) {
+      retainMessage(
+        "user",
+        codexRequestText(extractText(record.payload.content)),
+        record.timestamp,
+      );
     }
-
-    const extractedText = extractText(record.payload.content);
-    if (extractedText.length === 0) continue;
-    if (record.payload.role === "user" && canonicalCodexResponseUserIndices.has(recordIndex)) {
-      continue;
-    }
-    if (record.payload.role === "user" && hasMatchingCodexEventInTurn(extractedText)) {
-      continue;
-    }
-    retainMessage({
-      role: record.payload.role,
-      text: extractedText,
-      createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
-      codexResponseUser: record.payload.role === "user",
-    });
   }
 
-  const visibleMessages = messages.map(
-    ({ codexResponseUser: _codexResponseUser, ...message }) => message,
-  );
   if (providerSessionId.trim().length === 0 || firstUserMessage === undefined) return null;
-  const firstUserMessageRetained = messages.includes(firstUserMessage);
-  const { codexResponseUser: _codexResponseUser, ...visibleFirstUserMessage } = firstUserMessage;
-  const retainedMessages = firstUserMessageRetained
-    ? visibleMessages
-    : [visibleFirstUserMessage, ...visibleMessages.slice(-(MAX_IMPORTED_MESSAGES - 1))];
+  const retainedMessages = messages.includes(firstUserMessage)
+    ? messages
+    : [firstUserMessage, ...messages.slice(-(MAX_IMPORTED_MESSAGES - 1))];
 
   return {
     source: input.source,
