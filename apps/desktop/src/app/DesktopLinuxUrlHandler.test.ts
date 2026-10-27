@@ -66,7 +66,7 @@ const layerHandler = (
     readonly writeError?: PlatformError.PlatformError;
     readonly existingEntry?: string;
     readonly iconSource?: string;
-    readonly iconCopyError?: PlatformError.PlatformError;
+    readonly iconWriteError?: PlatformError.PlatformError;
   } = {},
 ) =>
   DesktopLinuxUrlHandler.layer.pipe(
@@ -89,11 +89,9 @@ const layerHandler = (
         }),
         FileSystem.layerNoop({
           copyFile: (source, destination) =>
-            input.iconCopyError
-              ? Effect.fail(input.iconCopyError)
-              : Effect.sync(() => {
-                  recorded.copies.push({ source, destination });
-                }),
+            Effect.sync(() => {
+              recorded.copies.push({ source, destination });
+            }),
           readFile: (path) =>
             path === input.iconSource
               ? Effect.succeed(ICON_BYTES)
@@ -106,9 +104,11 @@ const layerHandler = (
                   }),
                 ),
           writeFile: (path, bytes) =>
-            Effect.sync(() => {
-              recorded.icons.push({ path, bytes: [...bytes] });
-            }),
+            input.iconWriteError
+              ? Effect.fail(input.iconWriteError)
+              : Effect.sync(() => {
+                  recorded.icons.push({ path, bytes: [...bytes] });
+                }),
           readFileString: () => Effect.succeed(input.existingEntry ?? ""),
           makeDirectory: (path) =>
             Effect.sync(() => {
@@ -309,15 +309,15 @@ describe("DesktopLinuxUrlHandler", () => {
     });
   });
 
-  it.effect("still registers the handler when copying its icon fails", () => {
+  it.effect("still registers the handler when installing its icon fails", () => {
     const recorded = emptyRecording();
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         iconSource: "/tmp/.mount_T3/resources/icon.png",
-        iconCopyError: PlatformError.systemError({
+        iconWriteError: PlatformError.systemError({
           _tag: "PermissionDenied",
           module: "FileSystem",
-          method: "copyFile",
+          method: "writeFile",
           description: "read-only icon directory",
         }),
       });
