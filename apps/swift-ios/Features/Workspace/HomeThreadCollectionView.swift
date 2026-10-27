@@ -49,10 +49,14 @@ struct HomeThreadCollectionView: UIViewRepresentable {
             coordinator?.trailingSwipeActions(at: indexPath)
         }
 
-        let collectionView = UICollectionView(
+        let collectionView = HomeThreadListView(
             frame: .zero,
             collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
         )
+        collectionView.onReturnToWindow = { [weak coordinator = context.coordinator, weak collectionView] in
+            guard let collectionView else { return }
+            coordinator?.applyQueuedUpdate(in: collectionView)
+        }
         collectionView.backgroundColor = T3Colors.uiBackground
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
@@ -141,10 +145,17 @@ struct HomeThreadCollectionView: UIViewRepresentable {
             applyLatestSnapshot(in: collectionView)
         }
 
+        func applyQueuedUpdate(in collectionView: UICollectionView) {
+            applyLatestSnapshot(in: collectionView)
+        }
+
         /// Keep a row's content and size fixed during its removal. Stream updates
         /// that arrive mid-animation are applied together after that animation.
         private func applyLatestSnapshot(in collectionView: UICollectionView) {
             guard !isApplyingSnapshot, hasQueuedUpdate, let dataSource else { return }
+            // A pushed thread covers Home on iPhone, and its rows still change
+            // every second while a reply streams. Apply once Home is back.
+            guard collectionView.window != nil || dataSource.snapshot().numberOfItems == 0 else { return }
             hasQueuedUpdate = false
             let previousItems = itemsByID
             let previousThreadItemIDs = threadItemIDs
@@ -1250,4 +1261,15 @@ private struct HomeCollectionCellContent: View {
 
 private extension Optional where Wrapped == [IndexPath] {
     var orEmpty: [IndexPath] { self ?? [] }
+}
+
+/// Reports when Home returns to the window so updates queued while it was
+/// covered land before it is visible.
+private final class HomeThreadListView: UICollectionView {
+    var onReturnToWindow: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { onReturnToWindow?() }
+    }
 }

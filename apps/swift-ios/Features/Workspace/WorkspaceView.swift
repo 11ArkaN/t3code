@@ -584,23 +584,35 @@ public struct WorkspaceView: View {
     private func threadDetail(_ id: String?) -> some View {
         if let id,
            let thread = model.snapshot.threads.first(where: { $0.id == id }) {
-            ThreadDetailView(
+            let initialDestination = id == selectedThreadID ? requestedThreadDestination : nil
+            let initialDestinationID = id == selectedThreadID ? requestedThreadDestinationID : nil
+            let linkedPromptRequest = id == requestedThreadPromptID ? requestedThreadPrompt : nil
+            let dismissalID = id == selectedThreadID ? rootNavigationDismissalID : nil
+            ThreadDetailSlot(key: ThreadDetailSlot.Key(
+                thread: thread.withoutStreamingFields(),
+                initialDestination: initialDestination,
+                initialDestinationID: initialDestinationID,
+                linkedPromptRequest: linkedPromptRequest,
+                rootNavigationDismissalID: dismissalID,
+                isPresentedThread: id == selectedThreadID
+            )) { ThreadDetailView(
                 model: model,
                 thread: thread,
                 submitMessage: submitMessage,
                 onNavigateBack: { if selectedThreadID == id { closeSelectedThread() } },
                 onOpenThread: { if selectedThreadID == id { openRelatedThread($0) } },
                 onNewTaskFromThread: openNewTaskOnBranch,
-                initialDestination: id == selectedThreadID ? requestedThreadDestination : nil,
-                initialDestinationID: id == selectedThreadID ? requestedThreadDestinationID : nil,
-                linkedPromptRequest: id == requestedThreadPromptID ? requestedThreadPrompt : nil,
+                initialDestination: initialDestination,
+                initialDestinationID: initialDestinationID,
+                linkedPromptRequest: linkedPromptRequest,
                 onLinkedPromptConsumed: consumeThreadPrompt,
                 onToolDestinationChange: { if id == selectedThreadID { activeToolDestination = $0 } },
-                rootNavigationDismissalID: id == selectedThreadID ? rootNavigationDismissalID : nil,
+                rootNavigationDismissalID: dismissalID,
                 onRootNavigationDismissed: finishThreadNavigationDismissal,
                 onOpenWorkspaceTool: id == selectedThreadID ? { setWorkspaceTool(FeatureThreadToolSurface($0)) } : nil,
                 isPresentedThread: id == selectedThreadID
-            )
+            ) }
+            .equatable()
             .id(id)
         } else {
             VStack(spacing: 14) {
@@ -2176,4 +2188,26 @@ private final class FeatureProjectFaviconImageCache {
     func set(_ image: UIImage, for key: String) {
         images.setObject(image, forKey: key as NSString)
     }
+}
+
+/// Home rows change several times a second while a reply streams (preview,
+/// timestamps), and each change re-runs this workspace's body. The open thread
+/// re-renders only when its own inputs change. Its callbacks read live state
+/// (`@State`, the model), so keeping the first copy is safe.
+private struct ThreadDetailSlot: View, Equatable {
+    struct Key: Equatable {
+        let thread: FeatureThread
+        let initialDestination: FeatureThreadDestination?
+        let initialDestinationID: UUID?
+        let linkedPromptRequest: PlatformThreadPromptRequest?
+        let rootNavigationDismissalID: UUID?
+        let isPresentedThread: Bool
+    }
+
+    let key: Key
+    @ViewBuilder let content: () -> ThreadDetailView
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.key == rhs.key }
+
+    var body: some View { content() }
 }

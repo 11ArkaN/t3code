@@ -40,7 +40,9 @@ struct MarkdownMessageView: View {
     private let messageContext: OrchestrationMessageContext?
     private let copyText: String?
     @State private var copyError: String?
-    @State private var selectionSource: MarkdownSelectionSource
+    /// Private, so the @State macro creates this once per view identity rather
+    /// than on every parent update; `selectionContext` refreshes its fields.
+    @State private var selectionSource = MarkdownSelectionSource("")
     @State private var renderedDocument: MarkdownRenderedDocument?
     @State private var streamingRenderer = StreamingMarkdownRenderer()
 
@@ -62,7 +64,6 @@ struct MarkdownMessageView: View {
         self.clipboardSource = clipboardSource
         self.messageContext = messageContext
         self.copyText = copyText
-        _selectionSource = State(initialValue: MarkdownSelectionSource(source))
         let revision = MarkdownContentRevision(source)
         self.revision = revision
         let initialDocument = if isStreaming {
@@ -110,6 +111,15 @@ struct MarkdownMessageView: View {
                     MarkdownRenderCache.shared.promote(renderedDocument)
                     return
                 }
+                // The last streamed render is usually a little behind the final
+                // text. Keep it on screen and finish off the main thread; a
+                // synchronous parse of a long reply here stalls ~100 ms.
+                if isEarlierRender(renderedDocument) {
+                    if let document = await MarkdownRenderCache.shared.document(for: revision) {
+                        renderedDocument = document
+                    }
+                    return
+                }
                 renderedDocument = MarkdownRenderCache.shared.documentImmediately(for: revision)
                 return
             }
@@ -135,20 +145,27 @@ struct MarkdownMessageView: View {
         if let renderedDocument, renderedDocument.revision == revision {
             return renderedDocument
         }
-        // While streaming, a slightly stale document is better than flashing
-        // back to plain text between renders. Streamed content only appends,
-        // so require the stale document to be a prefix of the current source:
+        // While streaming, and while the final parse finishes, a slightly stale
+        // document is better than flashing back to plain text. Streamed content
+        // only appends, so require the stale document to be a prefix of the current source:
         // that accepts earlier snapshots of this message and rejects leftovers
         // from a recycled cell showing a different message.
+        if isEarlierRender(renderedDocument) { return renderedDocument }
         if isStreaming {
-            if let renderedDocument,
-               renderedDocument.revision.utf8Count <= revision.utf8Count,
-               source.utf8.starts(with: renderedDocument.revision.source.utf8) {
-                return renderedDocument
-            }
-            return nil
+            // A new streamed message starts small. Parsing it inline until the
+            // first async render lands keeps plain text from swapping to
+            // Markdown geometry, which shifts every row below it.
+            return revision.utf8Count <= 2_048
+                ? MarkdownRenderCache.shared.documentImmediately(for: revision)
+                : nil
         }
         return MarkdownRenderCache.shared.documentImmediately(for: revision)
+    }
+
+    private func isEarlierRender(_ document: MarkdownRenderedDocument?) -> Bool {
+        guard let document else { return false }
+        return document.revision.utf8Count <= revision.utf8Count
+            && source.utf8.starts(with: document.revision.source.utf8)
     }
 
     private var selectionContext: MarkdownSelectionContext {

@@ -67,10 +67,13 @@ struct TranscriptViewportGeometryTests {
         button.sendActions(for: .touchUpInside)
         #expect(view.maintainsBottomAnchor)
 
+        // New output glides instead of snapping; a viewport change still snaps.
         layout.height = 3_200
         layout.invalidateLayout()
         view.layoutIfNeeded()
-        #expect(view.contentOffset.y == 2_600)
+        #expect(view.contentOffset.y == 2_400)
+        #expect(view.maintainsBottomAnchor)
+        #expect(button.isHidden)
         view.frame.size.height = 350
         view.layoutIfNeeded()
         #expect(view.contentOffset.y == 2_850)
@@ -168,6 +171,39 @@ struct TranscriptViewportGeometryTests {
         view.layoutIfNeeded()
         #expect(abs(view.contentOffset.y - 200) < 1)
         #expect(!view.maintainsBottomAnchor)
+    }
+
+    @Test
+    func glideReachesNewOutputAtTheSameSpeedOnAnyDisplay() {
+        func glide(fps: Double, duration: Double, velocity: CGFloat = 0) -> (offset: CGFloat, velocity: CGFloat) {
+            var state = (offset: CGFloat(0), velocity: velocity)
+            for _ in 0..<Int(fps * duration) {
+                state = TranscriptViewportGeometry.glideStep(
+                    from: state.offset, velocity: state.velocity, to: 300, elapsed: 1 / fps
+                )
+            }
+            return state
+        }
+        #expect(abs(glide(fps: 60, duration: 0.2).offset - glide(fps: 120, duration: 0.2).offset) < 1)
+        #expect(glide(fps: 120, duration: 0.3).offset > 270)
+        // Eases in: the first frame of a new chunk moves only a few points.
+        #expect(glide(fps: 60, duration: 1 / 60).offset < 20)
+        // A glide already in motion keeps its speed instead of restarting.
+        #expect(glide(fps: 60, duration: 1 / 60, velocity: 2_000).offset > 25)
+        #expect(glide(fps: 60, duration: 1) == (300, 0))
+        #expect(glide(fps: 60, duration: 0.2).offset <= 300)
+    }
+
+    @Test
+    func onlyContentChangesGlide() {
+        let before = TranscriptViewportGeometry(contentHeight: 1_200, viewportHeight: 700, topInset: 0, bottomInset: 0)
+        let grown = TranscriptViewportGeometry(contentHeight: 1_300, viewportHeight: 700, topInset: 0, bottomInset: 0)
+        let keyboard = TranscriptViewportGeometry(contentHeight: 1_300, viewportHeight: 700, topInset: 0, bottomInset: 300)
+        let empty = TranscriptViewportGeometry(contentHeight: 0, viewportHeight: 700, topInset: 0, bottomInset: 0)
+        #expect(grown.glidesToBottom(after: before))
+        #expect(!keyboard.glidesToBottom(after: before))
+        #expect(!grown.glidesToBottom(after: empty))
+        #expect(!grown.glidesToBottom(after: nil))
     }
 
     @Test
