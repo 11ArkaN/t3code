@@ -324,7 +324,8 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
     }),
     /** Stops every unfinished run, so one sample's held turns never leak into the next. */
     interruptAll: Effect.fn("environment.interruptAll")(function* () {
-      for (const thread of (yield* shell()).threads) {
+      const threads = (yield* shell()).threads;
+      for (const thread of threads)
         for (const run of (yield* projection(thread.id)).runs) {
           if (["completed", "failed", "interrupted", "cancelled"].includes(run.status)) continue;
           yield* client["orchestration.dispatchCommand"]({
@@ -333,9 +334,9 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
             threadId: thread.id,
             runId: run.id,
           });
-          yield* settled(thread.id);
         }
-      }
+      for (const thread of threads)
+        if ((yield* projection(thread.id)).runs.length) yield* settled(thread.id);
     }),
     waitForPendingInput: (threadId: ThreadId) =>
       until("a pending question", threadId, (value) =>

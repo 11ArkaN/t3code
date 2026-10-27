@@ -154,11 +154,8 @@ const command = Command.make(
 
     const env = yield* startEnvironment({ baseDir: NodePath.join(out, "env"), deviceHost: host });
     const tag = (yield* uuid).slice(0, 4);
-    const titles = { long: `Long settled thread ${tag}`, second: `Second thread ${tag}` };
     yield* Console.error(`Seeding a 60-turn thread on ${env.origin}...`);
-    const longThread = yield* env.longThread(titles.long, 60);
-    const second = yield* env.launch(titles.second, "Say hi. [[eval:reply]]");
-    yield* env.settled(second);
+    const longThread = yield* env.longThread(`Long settled thread ${tag}`, 60);
 
     const metro = yield* startMetro(host, out);
     const device = makeDevice({
@@ -177,20 +174,25 @@ const command = Command.make(
       deviceName: flags.deviceName,
     });
     yield* Console.error(`Opening the dev client against ${metro}...`);
-    // agent-device builds the dev-client link and answers iOS's "Open in" prompt itself.
+    // agent-device answers iOS's "Open in" prompt; the flags keep dev-menu chrome off the app.
     const metroUrl = new URL(metro);
-    yield* device.run(
-      [
-        "open",
-        APP_ID,
-        "--relaunch",
-        "--metro-host",
-        metroUrl.hostname,
-        "--metro-port",
-        metroUrl.port,
-      ],
-      240_000,
-    );
+    const launchUrl = `${SCHEME}://expo-development-client/?url=${encodeURIComponent(metro)}&disableOnboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`;
+    yield* device
+      .run(
+        [
+          "open",
+          APP_ID,
+          "--relaunch",
+          "--metro-host",
+          metroUrl.hostname,
+          "--metro-port",
+          metroUrl.port,
+          "--launch-url",
+          launchUrl,
+        ],
+        240_000,
+      )
+      .pipe(Effect.retry({ times: 2 }));
     for (let attempt = 0; ; attempt++) {
       const loaded = yield* device
         .evaluate("typeof __t3Behavior")
@@ -207,10 +209,16 @@ const command = Command.make(
     }
     if (flags.pose === "duo-closed" || flags.pose === "duo-open")
       yield* device.fold(flags.pose === "duo-closed" ? "closed" : "open");
+    const forget = (ids: ReadonlyArray<string>) =>
+      device
+        .evaluate(`__t3Behavior.forgetEnvironments(${JSON.stringify(ids)})`)
+        .pipe(Effect.andThen(Effect.sleep("3 seconds")));
     const pairing = yield* env.pairingUrl();
     yield* device.openUrl(
       `${SCHEME}://connections/new?pairingUrl=${encodeURIComponent(pairing)}&autoConnect=1`,
     );
+    // Registered once pairing starts, so a stopped run never leaves its environment in the app.
+    yield* Effect.addFinalizer(() => forget([env.environmentId]).pipe(Effect.ignore));
     const seeded = (state: { homeList: unknown; threads: Record<string, string> }) =>
       state.homeList !== null && longThread in state.threads;
     yield* device.waitFor("the paired environment's threads on Home", seeded, 60_000);
@@ -220,17 +228,12 @@ const command = Command.make(
       return yield* new DeviceError({
         message: `The app has ${others.length} other saved environment(s). Use a simulator with no other connections, or pass --forget-other-environments to remove them.`,
       });
-    const forget = (ids: ReadonlyArray<string>) =>
-      device
-        .evaluate(`__t3Behavior.forgetEnvironments(${JSON.stringify(ids)})`)
-        .pipe(Effect.andThen(Effect.sleep("3 seconds")));
     if (others.length > 0) yield* forget(others);
-    yield* Effect.addFinalizer(() => forget([env.environmentId]).pipe(Effect.ignore));
     const ctx: ScenarioContext = {
       env,
       device,
       pose: flags.pose,
-      fixtures: { longThread, second, titles },
+      fixtures: { longThread },
     };
     const scenarios = [...new Set(selected.map((testCase) => testCase.scenario))];
     const rows: SampleRow[] = [];
@@ -242,12 +245,9 @@ const command = Command.make(
           Effect.andThen(device.reload(seeded)),
           Effect.andThen(SCENARIOS[scenario](ctx)),
           Effect.map((metrics) => ({ metrics, error: undefined })),
-          Effect.catch((error) =>
-            Effect.succeed({
-              metrics: {},
-              error: error.message,
-            }),
-          ),
+          Effect.catch((error) => Effect.succeed({ metrics: {}, error: error.message })),
+          // A bad probe reply or snapshot must cost one sample, not the run.
+          Effect.catchDefect((defect) => Effect.succeed({ metrics: {}, error: String(defect) })),
         );
         for (const testCase of cases) {
           const failures = outcome.error

@@ -22,15 +22,20 @@ export function median(values: ReadonlyArray<number>): number {
 const round = (value: number, digits = 1) => Number(value.toFixed(digits));
 
 /**
- * Frame times from rAF timestamps, graded against the display's budget: 120 Hz when its
- * fastest frames come under 12 ms, else 60 Hz. A steady low frame rate still counts as
- * dropped frames. `dropped` counts the frames that should have run inside each long gap.
+ * Frame times from rAF timestamps, graded against the display's budget: `refreshMs` when given,
+ * else 120 Hz when the fastest frames come under 12 ms and 60 Hz otherwise. A steady low frame
+ * rate still counts as dropped frames. `dropped` counts the frames that should have run inside
+ * each long gap.
  */
-export function frameStats(timestamps: ReadonlyArray<number>, prefix: string): Metrics {
+export function frameStats(
+  timestamps: ReadonlyArray<number>,
+  prefix: string,
+  refreshMs?: number,
+): Metrics {
   const gaps = timestamps.slice(1).map((time, index) => time - timestamps[index]!);
   if (gaps.length < 10) return { [`${prefix}Frames`]: gaps.length };
   const sorted = [...gaps].sort((a, b) => a - b);
-  const refresh = percentile(sorted, 0.05) < 12 ? 1000 / 120 : 1000 / 60;
+  const refresh = refreshMs ?? (percentile(sorted, 0.05) < 12 ? 1000 / 120 : 1000 / 60);
   const dropped = gaps.reduce(
     (total, gap) => total + Math.max(0, Math.round(gap / refresh) - 1),
     0,
@@ -189,6 +194,10 @@ export function summarize(input: {
     );
   }
   const ran = input.results.filter((result) => result.pass !== null);
-  lines.push("", `${ran.filter((r) => r.pass).length} of ${ran.length} case runs pass.`);
+  const incomplete = input.results.length - ran.length;
+  lines.push(
+    "",
+    `${ran.filter((r) => r.pass).length} of ${ran.length} case runs pass${incomplete ? `, ${incomplete} incomplete` : ""}.`,
+  );
   return `${lines.join("\n")}\n`;
 }

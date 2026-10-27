@@ -165,7 +165,11 @@ async function runPrompt(sessionId: string, prompt: string, turn: number): Promi
         content: [
           {
             type: "content",
-            content: { type: "text", text: JSON.stringify({ ok: true, result: `Read ${name}.` }) },
+            // A long reply gives the child thread something to scroll.
+            content: {
+              type: "text",
+              text: JSON.stringify({ ok: true, result: fillerText(1500, turn) }),
+            },
           },
         ],
       });

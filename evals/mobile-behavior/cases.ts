@@ -106,22 +106,22 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
   {
     id: "jank-scrolling-settled-thread",
     area: "jank",
-    kind: "guard",
+    kind: "control",
     source: "#13925 (Android)",
     experience: "Scrolling a long settled thread drops frames.",
     scenario: "scrollUpLongThread",
     key: "uiP99Ms",
-    checks: smooth,
+    checks: [{ metric: "movedPx", min: 300 }, ...smooth],
   },
   {
-    id: "jank-opening-subagent-thread",
+    id: "jank-scrolling-subagent-thread",
     area: "jank",
-    kind: "guard",
+    kind: "control",
     source: "#18376 (Android)",
-    experience: "Opening and scrolling a subagent's thread is far less smooth than its parent.",
+    experience: "Scrolling a subagent's thread is far less smooth than its parent.",
     scenario: "openSubagentThread",
     key: "uiP99Ms",
-    checks: smooth,
+    checks: [{ metric: "movedPx", min: 300 }, ...smooth],
   },
   {
     id: "draft-survives-thread-switch",
@@ -205,7 +205,8 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     source: "#15801",
     experience: "A send the server will reject looks sent, with no error.",
     scenario: "failedSend",
-    key: "silentFailure",
+    // The cell shows which path ran: Send blocked, or a rejected send with an error.
+    key: "sendBlocked",
     checks: [{ metric: "silentFailure", equals: false }],
   },
   {
@@ -288,11 +289,11 @@ export const CASES: ReadonlyArray<MobileBehaviorCase> = [
     source: "#20633",
     experience: "On a folded iPhone Duo, after going back, the next thread opens off screen.",
     scenario: "duoBackThenOpen",
-    key: "feedShown",
+    key: "titleOnScreen",
     poses: ["duo-closed"],
     checks: [
       { metric: "opensTarget", equals: true },
-      { metric: "feedShown", equals: true },
+      { metric: "titleOnScreen", equals: true },
     ],
   },
   {

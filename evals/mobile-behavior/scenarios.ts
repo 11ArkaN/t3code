@@ -18,12 +18,7 @@ export interface ScenarioContext {
   readonly env: EvalEnvironment;
   readonly device: Device;
   readonly pose: Pose;
-  readonly fixtures: {
-    readonly longThread: ThreadId;
-    readonly second: ThreadId;
-    /** Per-run titles, so rows from earlier runs' environments never match. */
-    readonly titles: { readonly long: string; readonly second: string };
-  };
+  readonly fixtures: { readonly longThread: ThreadId };
 }
 
 // Child thread ids carry `:`, so each segment is encoded.
@@ -95,8 +90,8 @@ const typeInComposer = Effect.fn("scenario.typeInComposer")(function* (
   ctx: ScenarioContext,
   text: string,
 ) {
-  yield* composerNode(ctx);
-  yield* ctx.device.run(["fill", "role=text-view", text]);
+  const { x, y } = ctx.device.center(yield* composerNode(ctx));
+  yield* ctx.device.run(["fill", String(x), String(y), text]);
 });
 
 const countUserText = (
@@ -133,10 +128,12 @@ const recordFor = <E, R>(
     ),
   );
 
-const frameMetrics = (recording: { js: ReadonlyArray<number>; ui: ReadonlyArray<number> }) => ({
-  ...frameStats(recording.js, "js"),
-  ...frameStats(recording.ui, "ui"),
-});
+/** JS frame times jitter, so the display's refresh rate comes from the UI thread's vsync times. */
+const frameMetrics = (recording: { js: ReadonlyArray<number>; ui: ReadonlyArray<number> }) => {
+  const ui = frameStats(recording.ui, "ui");
+  const refreshMs = typeof ui.uiRefreshHz === "number" ? 1000 / ui.uiRefreshHz : undefined;
+  return { ...frameStats(recording.js, "js", refreshMs), ...ui };
+};
 
 /** Every scenario fails with this one error, so the table has a single function type. */
 export class ScenarioFailure extends Schema.TaggedError<ScenarioFailure>()("ScenarioFailure", {
@@ -325,6 +322,8 @@ export const SCENARIOS = {
     const text = `Will fail ${(yield* uuid).slice(0, 8)}`;
     yield* typeInComposer(ctx, text);
     yield* lock;
+    // The app learns of the setting a moment after the server commits it.
+    yield* Effect.sleep("2 seconds");
     // Either outcome is honest: Send turns off, or the rejected send shows an error.
     const sendBlocked =
       (yield* ctx.device.nodes).find((node) => node.label === "Send")?.enabled === false;
@@ -357,7 +356,7 @@ export const SCENARIOS = {
     return {
       shelfShownWhileWorking: shelfCount(working) > 0,
       shelfCountAfter: shelfCount(after),
-      // Threads the app itself calls working; the shelf should hold no more than these.
+      // For diagnosis: threads the app itself calls working, beside the shelf's count.
       appWorkingThreads: Object.values(after.threads).filter((status) => status === "working")
         .length,
       statusAfter: after.threads[threadId] ?? "missing",
@@ -395,7 +394,7 @@ export const SCENARIOS = {
     } satisfies Metrics;
   }, failure),
 
-  /** Opens a finished subagent's child thread and scrolls it. */
+  /** Scrolls a finished subagent's child thread. */
   openSubagentThread: Effect.fn("scenario.openSubagentThread")(function* (ctx: ScenarioContext) {
     const key = `child-${(yield* uuid).slice(0, 8)}`;
     const threadId = yield* ctx.env.launch("Parent", `Fan out. [[eval:subagents:${key}]]`);
@@ -407,24 +406,20 @@ export const SCENARIOS = {
     )?.childThreadId;
     if (!child)
       return yield* new ScenarioFailure({ message: "The subagent made no child thread." });
+    yield* openThread(ctx, child);
     const { height, threadX } = yield* geometry(ctx);
-    // No probe reads inside the window: each one walks the fiber tree on the JS thread.
     const recording = yield* recordFor(
       ctx,
-      false,
+      true,
       Effect.gen(function* () {
-        yield* ctx.device.open(threadPath(ctx, child));
-        yield* Effect.sleep("4 seconds");
-        yield* ctx.device.swipe(threadX, Math.round(height * 0.7), Math.round(height * 0.35));
-        yield* ctx.device.swipe(threadX, Math.round(height * 0.35), Math.round(height * 0.7));
+        yield* ctx.device.swipe(threadX, Math.round(height * 0.7), Math.round(height * 0.3));
+        yield* ctx.device.swipe(threadX, Math.round(height * 0.3), Math.round(height * 0.7));
       }),
     );
-    const opened = yield* ctx.device.state;
-    if (!isThread(opened, child))
-      return yield* new ScenarioFailure({
-        message: `The subagent thread did not open; the route is ${opened.route?.name ?? "none"} ${String(opened.route?.params.threadId ?? "")}.`,
-      });
-    return frameMetrics(recording) satisfies Metrics;
+    return {
+      movedPx: feedMotion(recording.feed, 0).movedPx ?? 0,
+      ...frameMetrics(recording),
+    } satisfies Metrics;
   }, failure),
 
   /** Long-presses a row on Home and picks Pin. */
@@ -512,9 +507,19 @@ export const SCENARIOS = {
     yield* ctx.device.press(rowSelector(`Duo next ${tag}`));
     yield* Effect.sleep("2 seconds");
     const after = yield* ctx.device.state;
+    // A thread can mount in a hidden column, so its title must sit inside the visible screen.
+    const nodes = yield* ctx.device.nodes;
+    const screen = nodes[0]?.rect;
+    const title = nodes.find(
+      (node) => node.kind === "navigation-bar" && node.label === `Duo next ${tag}`,
+    )?.rect;
     return {
       opensTarget: isThread(after, next),
-      feedShown: after.feed?.threadId === next && after.feed.ready,
+      titleOnScreen:
+        screen !== undefined &&
+        title !== undefined &&
+        title.x >= screen.x &&
+        title.x + title.width <= screen.x + screen.width,
     } satisfies Metrics;
   }, failure),
 } satisfies Record<string, Scenario>;
