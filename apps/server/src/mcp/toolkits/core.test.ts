@@ -579,19 +579,18 @@ it.effect("a read-only client reads threads and is refused every write before it
     ),
   ),
 );
-const dispatched: Array<string> = [];
 
 it.effect("t3_thread_configure refuses a model the provider instance does not advertise", () => {
   const dispatchedModels: Array<string> = [];
   return Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
-    const configure = (model: string) =>
+    const configure = (instanceId: string, model: string) =>
       server
         .callTool({
           name: "t3_thread_configure",
           arguments: {
             threadId: "other-project-thread",
-            modelSelection: { instanceId: "codex", model },
+            modelSelection: { instanceId, model },
           },
         })
         .pipe(
@@ -599,11 +598,13 @@ it.effect("t3_thread_configure refuses a model the provider instance does not ad
           Effect.provideService(McpSchema.McpServerClient, client),
         );
 
-    const refused = yield* configure("not-advertised");
+    const refused = yield* configure("codex", "not-advertised");
     expect(declaredFailure(refused)).toMatchObject({ code: "model_unavailable" });
+    const unregistered = yield* configure("missing", "gpt-5.5");
+    expect(declaredFailure(unregistered)).toMatchObject({ code: "provider_unavailable" });
     expect(dispatchedModels).toEqual([]);
 
-    const advertised = yield* configure("gpt-5.5");
+    const advertised = yield* configure("codex", "gpt-5.5");
     expect(advertised.isError).toBe(false);
     expect(dispatchedModels).toEqual(["gpt-5.5"]);
   }).pipe(
@@ -641,7 +642,10 @@ it.effect("t3_thread_configure refuses a model the provider instance does not ad
               } as never),
             dispatch: (command) =>
               Effect.sync(() => {
-                if (command.type === "thread.model-selection.set") {
+                if (
+                  command.type === "thread.model-selection.set" ||
+                  command.type === "provider.switch"
+                ) {
                   dispatchedModels.push(command.modelSelection.model);
                 }
                 return { sequence: 7, storedEvents: [] };
@@ -652,6 +656,8 @@ it.effect("t3_thread_configure refuses a model the provider instance does not ad
     ),
   );
 });
+
+const dispatched: Array<string> = [];
 
 it.effect("refuses act-as-caller tools to a client caller", () =>
   Effect.gen(function* () {
