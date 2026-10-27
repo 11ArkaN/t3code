@@ -219,7 +219,10 @@ import { assertFxSubagentOutput } from "./fx_subagent/fx_output.ts";
 import { assertTurnInterruptMidToolClaudeOutput } from "./turn_interrupt_mid_tool/claude_output.ts";
 import { assertTurnInterruptMidToolCodexOutput } from "./turn_interrupt_mid_tool/codex_output.ts";
 import { assertTurnInterruptMidToolCursorOutput } from "./turn_interrupt_mid_tool/cursor_output.ts";
-import { turnInterruptMidToolInput } from "./turn_interrupt_mid_tool/input.ts";
+import {
+  turnInterruptMidToolInput,
+  turnInterruptMidToolKiroInput,
+} from "./turn_interrupt_mid_tool/input.ts";
 import { assertTurnInterruptMidToolKiroOutput } from "./turn_interrupt_mid_tool/kiro_output.ts";
 import { assertTurnInterruptMidToolPiOutput } from "./turn_interrupt_mid_tool/pi_output.ts";
 import { assertTurnInterruptRestartClaudeOutput } from "./turn_interrupt_restart/claude_output.ts";
@@ -1876,6 +1879,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertTurnInterruptMidToolPiOutput,
       },
+    ],
+  },
+  {
+    name: "kiro_turn_interrupt_mid_tool",
+    buildInput: turnInterruptMidToolKiroInput,
+    providers: [
       {
         driver: ProviderDriverKind.make("kiro"),
         transcriptFile: new URL(

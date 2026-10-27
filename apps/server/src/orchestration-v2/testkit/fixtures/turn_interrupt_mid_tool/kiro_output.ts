@@ -12,14 +12,31 @@ import {
 } from "../shared.ts";
 import { kiroFailedAfterCancel } from "../kiro_subagent_interrupt/output.ts";
 
-/** Kiro answers Stop's cancel by failing the running command; T3 shows it interrupted. */
+/** Tool call ids Kiro reported `in_progress` before T3's `session/cancel`. */
+function kiroRunningBeforeCancel(transcript: ProviderReplayTranscript): Set<string> {
+  const cancelIndex = transcript.entries.findIndex(
+    (entry) => entry.type === "expect_outbound" && entry.label === "notification:session/cancel",
+  );
+  return new Set(
+    transcript.entries.slice(0, Math.max(cancelIndex, 0)).flatMap((entry) => {
+      if (entry.type !== "emit_inbound") return [];
+      const update = Reflect.get(Object(Reflect.get(Object(entry.frame), "params")), "update");
+      return Reflect.get(Object(update), "status") === "in_progress"
+        ? [String(Reflect.get(Object(update), "toolCallId"))]
+        : [];
+    }),
+  );
+}
+
+/** Stop reaches Kiro while its command runs; Kiro fails it and T3 shows it interrupted. */
 export function assertTurnInterruptMidToolKiroOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assert.isNotEmpty(
-    kiroFailedAfterCancel(transcript),
-    "Kiro must fail the command after the cancel",
+  const running = kiroRunningBeforeCancel(transcript);
+  assert.isTrue(
+    kiroFailedAfterCancel(transcript).some((id) => running.has(id)),
+    "Kiro must fail, after the cancel, a command that was already running",
   );
   assertBaseProjection({ result, transcript, runCount: 1, runStatuses: ["interrupted"] });
 

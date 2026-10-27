@@ -75,6 +75,8 @@ export type OrchestratorV2ScenarioStep =
       readonly threadId: ThreadId;
       readonly runId: OrchestrationV2Run["id"];
       readonly itemType: OrchestrationV2TurnItem["type"];
+      /** Wait until the item also has this status. */
+      readonly itemStatus?: OrchestrationV2TurnItem["status"];
       /** Look in the threads of the run's provider subagents instead of the run itself. */
       readonly inSubagentThreads?: boolean;
     }
@@ -447,6 +449,7 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         itemType: OrchestrationV2TurnItem["type"],
+        itemStatus: OrchestrationV2TurnItem["status"] | undefined,
         inSubagentThreads: boolean,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(),
@@ -457,20 +460,21 @@ export function runOrchestratorV2Scenario(
       > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
+          const matches = (item: OrchestrationV2TurnItem) =>
+            item.type === itemType && (itemStatus === undefined || item.status === itemStatus);
           if (!inSubagentThreads) {
-            if (projection.turnItems.some((item) => item.runId === runId && item.type === itemType))
-              return;
+            if (projection.turnItems.some((item) => item.runId === runId && matches(item))) return;
           } else {
             for (const subagent of projection.subagents) {
               if (subagent.runId !== runId || subagent.childThreadId === null) continue;
               const child = yield* orchestrator.getThreadProjection(subagent.childThreadId);
-              if (child.turnItems.some((item) => item.type === itemType)) return;
+              if (child.turnItems.some(matches)) return;
             }
           }
           if (scenarioWaitExhausted(attemptsRemaining, deadlineAt)) {
             return yield* new OrchestratorV2ScenarioStepError({
               scenario: scenario.name,
-              step: `await_run_turn_item:${runId}:${itemType}`,
+              step: `await_run_turn_item:${runId}:${itemType}${itemStatus === undefined ? "" : `:${itemStatus}`}`,
             });
           }
           yield* yieldToRuntime;
@@ -478,6 +482,7 @@ export function runOrchestratorV2Scenario(
             threadId,
             runId,
             itemType,
+            itemStatus,
             inSubagentThreads,
             attemptsRemaining - 1,
             deadlineAt,
@@ -672,6 +677,7 @@ export function runOrchestratorV2Scenario(
               step.threadId,
               step.runId,
               step.itemType,
+              step.itemStatus,
               step.inSubagentThreads === true,
             );
             break;
