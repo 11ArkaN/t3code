@@ -565,6 +565,16 @@ it("lists every environment's scratch project under one No project row", async (
     .toBeVisible();
 });
 
+it("names the grouped scratch project by its saved title", async () => {
+  setup();
+  replaceProjectsWithScratch();
+  state.projects = state.projects.map((project) => ({ ...project, title: "Personal" }));
+  await using screen = await mountSettings({});
+
+  await userEvent.click(page.getByRole("button", { name: /^Personal/ }));
+  await vi.waitFor(() => expect(nameInput(screen).value).toBe("Personal"));
+});
+
 it("opens a link to one environment's scratch project as the grouped No project", async () => {
   setup();
   replaceProjectsWithScratch();

@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { createContext, type ReactNode, useContext } from "react";
 
+import { useClientSettings } from "../../hooks/useSettings";
 import { resolveSidebarProjectScopeKey } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { getProjectFileQueryAtom, optimisticFileAtom } from "../files/projectFilesQueryState";
@@ -59,9 +60,19 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
 
 function useResolvedSettingsScope(linkedSearch: SettingsScopeSearch, singleEnvironment: boolean) {
   const groups = useSettingsProjectGroups();
+  const sidebarProjectGroupingMode = useClientSettings(
+    (settings) => settings.sidebarProjectGroupingMode,
+  );
+  const sidebarProjectGroupingOverrides = useClientSettings(
+    (settings) => settings.sidebarProjectGroupingOverrides,
+  );
   // Links saved before scratch projects were grouped name one environment's scratch project.
   const project =
-    resolveSidebarProjectScopeKey({ groups, key: linkedSearch.project ?? null }) ?? undefined;
+    resolveSidebarProjectScopeKey({
+      groups,
+      key: linkedSearch.project ?? null,
+      settings: { sidebarProjectGroupingMode, sidebarProjectGroupingOverrides },
+    }) ?? undefined;
   const rawSearch = project === linkedSearch.project ? linkedSearch : { ...linkedSearch, project };
   const { environments: availableEnvironments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();

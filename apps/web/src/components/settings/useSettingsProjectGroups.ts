@@ -15,11 +15,15 @@ export function useSettingsProjectGroups() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
   const labels = new Map(environments.map((entry) => [entry.environmentId, entry.label]));
-  return buildSidebarProjectSnapshots({
+  const groups = buildSidebarProjectSnapshots({
     projects,
     settings: { sidebarProjectGroupingMode, sidebarProjectGroupingOverrides },
     groupScratchProjects: true,
     primaryEnvironmentId,
     resolveEnvironmentLabel: (id) => labels.get(id) ?? null,
-  }).sort((a, b) => a.displayName.localeCompare(b.displayName));
+  });
+  // Settings names the scratch project by its saved title, which a rename writes to every member.
+  return groups
+    .map((group) => (group.isScratch ? { ...group, displayName: group.title } : group))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }

@@ -50,7 +50,10 @@ function settingsProjectGroups(
       projects,
       settings: { sidebarProjectGroupingMode: groupingMode, sidebarProjectGroupingOverrides: {} },
       groupScratchProjects: true,
-    });
+    }).map((group) =>
+      // Settings names the scratch project by its saved title, which a rename writes to every member.
+      group.representative.isScratch ? { ...group, label: group.representative.title } : group,
+    );
     byMode.set(groupingMode, groups);
   }
   return groups;
