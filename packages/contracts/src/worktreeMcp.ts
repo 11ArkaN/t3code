@@ -79,7 +79,7 @@ export type WorktreeMcpHandoffResult = typeof WorktreeMcpHandoffResult.Type;
 export const WorktreeMcpMoveToLocalInput = Schema.Struct({
   continuationPrompt: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
-      description: "Work to resume in the local checkout next turn. Omitted: thread waits.",
+      description: "Work to resume next turn. Omitted: thread waits.",
     }),
   ),
 });
