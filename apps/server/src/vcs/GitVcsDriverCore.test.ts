@@ -2498,7 +2498,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.isTrue(yield* Deferred.isDone(totalsDiffStarted));
         assert.isTrue(yield* Deferred.isDone(totalsDiffAbandonedAt));
         const statusHeldForMs = (yield* Deferred.await(totalsDiffAbandonedAt)) - startedAt;
-        assert.isBelow(statusHeldForMs, 5_000, "status waited on the Changes-totals diff");
+        assert.isAtMost(statusHeldForMs, 2_000, "status waited past the Changes-totals budget");
         assert.isUndefined(reported.branchChanges);
         assert.isTrue(reported.isRepo);
         assert.strictEqual(reported.branch, "main");
