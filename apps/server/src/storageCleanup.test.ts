@@ -1198,6 +1198,36 @@ describe("orphan worktree reports", () => {
     ),
   );
 
+  it.live("reports linked worktrees nested deeper inside a plain folder", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const fixture = yield* cleanupFixture();
+        fixture.setThreads([]);
+        const replay = `${fixture.config.worktreesDir}/repository/replay`;
+        const deep = `${fixture.config.worktreesDir}/repository/deep`;
+        const worktrees = [`${deep}/a/b`, `${replay}/1376`];
+        for (const [index, worktree] of worktrees.entries()) {
+          yield* fixture.command(fixture.repo, [
+            "worktree",
+            "add",
+            "-b",
+            `nested-${index}`,
+            worktree,
+          ]);
+        }
+        for (const folder of [...worktrees, `${deep}/a`, deep, replay]) {
+          yield* fixture.fs.utimes(folder, 1, 1);
+        }
+        const report = yield* fixture.service.runNow;
+        expect(
+          report.entries
+            .map((entry) => ({ path: entry.path, reason: entry.reason }))
+            .sort((left, right) => left.path.localeCompare(right.path)),
+        ).toEqual(worktrees.map((path) => ({ path, reason: "No thread uses this worktree" })));
+      }),
+    ),
+  );
+
   it.live("continues after an inaccessible directory's git probe", (context) =>
     runCleanupTest(
       Effect.gen(function* () {
