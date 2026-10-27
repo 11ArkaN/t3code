@@ -12641,7 +12641,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         // Mirrors ProcessTransport.getProcessExitError in @anthropic-ai/claude-agent-sdk.
         const processExit = Object.assign(
-          new Error("Claude Code process terminated by signal SIGABRT"),
+          new Error(
+            "Claude Code process terminated by signal SIGABRT. stderr: fork failed: Resource temporarily unavailable",
+          ),
           {
             telemetryMessage: "Claude Code process terminated by signal SIGABRT",
             errorClass: "process_killed_by_signal",
@@ -12664,6 +12666,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           terminal.failure.message,
           "Claude Code process terminated by signal SIGABRT",
         );
+        assert.notInclude(terminal.failure.message, "stderr");
       }).pipe(
         Effect.provide(
           Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
