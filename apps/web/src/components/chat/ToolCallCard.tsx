@@ -3,7 +3,13 @@ import { use, type ReactNode } from "react";
 import { formatDuration, type WorkLogEntry } from "../../session-logic";
 import { cn } from "~/lib/utils";
 import { WorkLogList } from "./WorkLog";
-import { TimelineRowCtx, type TimelineRow, type TimelineWorkEntry } from "./timelineRowContext";
+import { summarizeToolGroup } from "@t3tools/client-runtime/work-log/presentation";
+import {
+  TimelineRowActivityCtx,
+  TimelineRowCtx,
+  type TimelineRow,
+  type TimelineWorkEntry,
+} from "./timelineRowContext";
 import { ToolActivityIconView } from "./TimelineToolActivityIcon";
 import { workEntryIconName } from "./TimelineWorkEntryRow.logic";
 import { SimpleWorkEntryRow } from "./TimelineWorkEntryRow";
@@ -78,16 +84,19 @@ function CardHeader(props: {
   trailing?: ReactNode;
   expanded: boolean;
   className: string;
-  onToggle: () => void;
+  /** Absent for a card with nothing more to open; it keeps the chevron's space. */
+  onToggle?: () => void;
 }) {
+  const Root = props.onToggle ? "button" : "div";
   return (
-    <button
-      type="button"
-      aria-expanded={props.expanded}
+    <Root
+      {...(props.onToggle
+        ? { type: "button" as const, "aria-expanded": props.expanded, onClick: props.onToggle }
+        : {})}
       aria-label={props.accessibleLabel}
-      onClick={props.onToggle}
       className={cn(
-        "group/timeline-row flex h-8 w-full min-w-0 cursor-pointer items-center gap-2.5 px-3.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        "group/timeline-row flex h-8 w-full min-w-0 items-center gap-2.5 px-3.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        props.onToggle && "cursor-pointer",
         props.className,
       )}
     >
@@ -102,10 +111,36 @@ function CardHeader(props: {
         {props.trailing}
         {/* Lines the header time up with the row durations, left of the status column. */}
         <span className="size-3.5" aria-hidden />
-        <Chevron open={props.expanded} />
+        {props.onToggle ? (
+          <Chevron open={props.expanded} />
+        ) : (
+          <span className="size-3.5" aria-hidden />
+        )}
       </span>
-    </button>
+    </Root>
   );
+}
+
+/**
+ * The newest calls and thoughts, in a body that is always 4 rows tall, so a card never grows
+ * as calls arrive and never shrinks when it settles.
+ */
+function ToolCardTail({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
+  const { workspaceRoot } = use(TimelineRowCtx);
+  return (
+    <div className="min-h-30 border-t border-border px-1 py-1">
+      <WorkLogList density="card">
+        {entries.map((entry) => (
+          <SimpleWorkEntryRow key={entry.id} workEntry={entry} workspaceRoot={workspaceRoot} />
+        ))}
+      </WorkLogList>
+    </div>
+  );
+}
+
+function useRunIsWorking(runId: string | null | undefined) {
+  const { isWorking, latestRunId } = use(TimelineRowActivityCtx);
+  return isWorking && runId != null && runId === latestRunId;
 }
 
 function toolNoun(count: number) {
@@ -116,10 +151,10 @@ function toolNoun(count: number) {
 export function LiveToolCard({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
   const stats = toolGroupStats(row.groupedEntries);
-  // The live thought shows above the card, so the tail shows only calls.
-  const calls = row.groupedEntries.filter((entry) => entry.itemType !== "reasoning");
-  const tail = row.expanded ? [] : liveToolCardTail(calls, LIVE_TAIL_ROWS);
-  const hiddenCount = row.expanded ? 0 : calls.length - tail.length;
+  const tail = liveToolCardTail(row.groupedEntries, LIVE_TAIL_ROWS);
+  const hiddenCount = row.expanded
+    ? 0
+    : stats.toolCount - tail.filter((entry) => entry.itemType !== "reasoning").length;
   const label = `Using ${stats.toolCount} ${toolNoun(stats.toolCount)}`;
   return (
     <div className={row.expanded ? toolCardClassName.top : toolCardClassName.whole}>
@@ -141,34 +176,28 @@ export function LiveToolCard({ row }: { row: Extract<TimelineRow, { kind: "work-
         className="rounded-t-xl"
         onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
       />
-      {tail.length > 0 ? (
-        <div className="border-t border-border px-1 py-1">
-          <WorkLogList density="card">
-            {tail.map((entry) => (
-              <SimpleWorkEntryRow
-                key={entry.id}
-                workEntry={entry}
-                workspaceRoot={ctx.workspaceRoot}
-              />
-            ))}
-          </WorkLogList>
-        </div>
-      ) : null}
+      {row.expanded ? null : <ToolCardTail entries={tail} />}
     </div>
   );
 }
 
-/** Finished tools: one quiet line that opens into the card. */
+/**
+ * Finished tools. While the run still works they keep the live card's size, so nothing below
+ * moves; once the run ends they settle to one quiet line that opens into the card.
+ */
 export function ToolGroupLine({ row }: { row: Extract<TimelineRow, { kind: "work-toggle" }> }) {
   const ctx = use(TimelineRowCtx);
   const stats = toolGroupStats(row.groupedEntries);
   const duration = stats.durationMs !== null ? formatDuration(stats.durationMs) : null;
+  const holdCard = useRunIsWorking(row.runId) && !row.expanded;
   return (
     <div
       className={
-        row.expanded
-          ? toolCardClassName.top
-          : "mt-1.5 rounded-md border border-transparent hover:bg-foreground/[0.03]"
+        holdCard
+          ? toolCardClassName.whole
+          : row.expanded
+            ? toolCardClassName.top
+            : "mt-1.5 rounded-md border border-transparent hover:bg-foreground/[0.03]"
       }
     >
       <CardHeader
@@ -200,11 +229,45 @@ export function ToolGroupLine({ row }: { row: Extract<TimelineRow, { kind: "work
           </>
         }
         expanded={row.expanded}
-        className={row.expanded ? "rounded-t-xl" : "rounded-md"}
+        className={row.expanded || holdCard ? "rounded-t-xl" : "rounded-md"}
         onToggle={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
       />
+      {holdCard ? (
+        <ToolCardTail entries={liveToolCardTail(row.groupedEntries, LIVE_TAIL_ROWS)} />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * A single finished call while its run still works. It keeps the live card's size; once the
+ * run ends the call shows as a plain row.
+ */
+export function SettledToolCard({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
+  const stats = toolGroupStats(entries);
+  const { summary } = summarizeToolGroup(entries);
+  const duration = stats.durationMs !== null ? formatDuration(stats.durationMs) : null;
+  return (
+    <div className={toolCardClassName.whole}>
+      <CardHeader
+        entries={entries}
+        label={summary}
+        accessibleLabel={[summary, stats.failedCount > 0 ? `${stats.failedCount} failed` : null]
+          .filter(Boolean)
+          .join(", ")}
+        failedCount={stats.failedCount}
+        trailing={duration}
+        expanded={false}
+        className="rounded-t-xl"
+      />
+      <ToolCardTail entries={liveToolCardTail(entries, LIVE_TAIL_ROWS)} />
+    </div>
+  );
+}
+
+/** True when the entries belong to the run that is working now. */
+export function useEntriesInWorkingRun(entries: ReadonlyArray<WorkLogEntry>) {
+  return useRunIsWorking(entries[0]?.runId);
 }
 
 /** Bottom of an open card: the full list of calls. */

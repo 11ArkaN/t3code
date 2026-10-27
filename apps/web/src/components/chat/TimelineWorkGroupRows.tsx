@@ -58,7 +58,14 @@ import {
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
 import { useClientSettings } from "../../hooks/useSettings";
-import { LiveToolCard, ToolCardBody, ToolGroupLine, groupHasTools } from "./ToolCallCard";
+import {
+  LiveToolCard,
+  SettledToolCard,
+  ToolCardBody,
+  ToolGroupLine,
+  groupHasTools,
+  useEntriesInWorkingRun,
+} from "./ToolCallCard";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -75,6 +82,7 @@ export const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { workspaceRoot, routeThreadKey, onToggleWorkEntry } = use(TimelineRowCtx);
   const toolCallCards = useClientSettings((settings) => settings.toolCallCards);
+  const inWorkingRun = useEntriesInWorkingRun(groupedEntries);
   const onToggleStandaloneEntry = (collapsed: boolean) =>
     onToggleWorkEntry(disclosureAnchorKey, collapsed);
   const nonEmptyEntries = groupedEntries.filter((entry) =>
@@ -100,6 +108,9 @@ export const WorkGroupSection = memo(function WorkGroupSection({
     return inCard ? <ToolCardBody>{entries}</ToolCardBody> : entries;
   }
 
+  if (toolCallCards && inWorkingRun && groupHasTools(nonEmptyEntries)) {
+    return <SettledToolCard entries={nonEmptyEntries} />;
+  }
   return (
     <section aria-label="Activity">
       {nonEmptyEntries.map((workEntry) => (
@@ -487,14 +498,9 @@ export function LiveWorkEntryTimelineRow({
   row: Extract<TimelineRow, { kind: "work-live" }>;
 }) {
   const toolCallCards = useClientSettings((settings) => settings.toolCallCards);
+  // Thoughts show as rows inside the card, so its height never changes as they come and go.
   if (!toolCallCards || !groupHasTools(row.groupedEntries)) return <LiveWorkEntryLine row={row} />;
-  const thoughtLine = row.thought && !row.expanded ? liveThoughtLine(row.thought.detail ?? "") : "";
-  return (
-    <>
-      {thoughtLine ? <LiveThoughtLine text={thoughtLine} /> : null}
-      <LiveToolCard row={row} />
-    </>
-  );
+  return <LiveToolCard row={row} />;
 }
 
 function LiveThoughtLine({ text }: { text: string }) {
