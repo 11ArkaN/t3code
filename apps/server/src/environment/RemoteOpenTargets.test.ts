@@ -91,10 +91,15 @@ const layerNet = (input: { readonly ipv4: boolean; readonly ipv6: boolean }) =>
 const layerTargets = (
   sshd: { readonly ipv4: boolean; readonly ipv6: boolean },
   spawner: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+  platform: NodeJS.Platform = "linux",
 ) =>
   RemoteOpenTargets.layer.pipe(
     Layer.provide(layerNet(sshd)),
-    Layer.provide(TailscaleStatusCache.layer.pipe(Layer.provide(spawner))),
+    Layer.provide(
+      TailscaleStatusCache.layer.pipe(
+        Layer.provide(Layer.mergeAll(spawner, Layer.succeed(HostProcess.Platform, platform))),
+      ),
+    ),
   );
 
 const resolveTargets = (input: {
@@ -168,7 +173,7 @@ describe("RemoteOpenTargets", () => {
     }),
   );
 
-  it.effect("keeps a Tailscale read until the tailnet addresses change", () => {
+  it.effect("on macOS keeps a Tailscale read until the tailnet addresses change", () => {
     const spawnedArgs: Array<ReadonlyArray<string>> = [];
     const spawned = () => ({
       status: spawnedArgs.filter((args) => args[0] === "status").length,
@@ -192,12 +197,16 @@ describe("RemoteOpenTargets", () => {
       Effect.provideService(HostProcess.Hostname, "bb-1"),
       Effect.provideService(HostProcess.Username, "t3-user"),
       Effect.provide(
-        layerTargets({ ipv4: false, ipv6: false }, layerSpawner(TAILSCALE_SSH, spawnedArgs)),
+        layerTargets(
+          { ipv4: false, ipv6: false },
+          layerSpawner(TAILSCALE_SSH, spawnedArgs),
+          "darwin",
+        ),
       ),
     );
   });
 
-  it.effect("retries a failed Tailscale read after a minute", () => {
+  it.effect("on macOS retries a failed Tailscale read after a minute", () => {
     const spawnedArgs: Array<ReadonlyArray<string>> = [];
     const tailscale = { ...TAILSCALE_SSH, status: TAILSCALE_DOWN.status };
     const statusReads = () => spawnedArgs.filter((args) => args[0] === "status").length;
@@ -217,8 +226,25 @@ describe("RemoteOpenTargets", () => {
       Effect.provideService(HostProcess.Hostname, "bb-1"),
       Effect.provideService(HostProcess.Username, "t3-user"),
       Effect.provide(
-        layerTargets({ ipv4: false, ipv6: false }, layerSpawner(tailscale, spawnedArgs)),
+        layerTargets({ ipv4: false, ipv6: false }, layerSpawner(tailscale, spawnedArgs), "darwin"),
       ),
+    );
+  });
+
+  it.effect("outside macOS reads a Tailscale SSH change on the next resolve", () => {
+    const tailscale = { ...TAILSCALE_SSH };
+    return Effect.gen(function* () {
+      const service = yield* RemoteOpenTargets.RemoteOpenTargets;
+      yield* useTailnetAddress("100.64.1.2");
+      expect(yield* service.resolveTargets()).toEqual([
+        { kind: "tailscale", host: "bb-1.tail1234.ts.net", username: "t3-user" },
+      ]);
+      tailscale.prefs = prefsJson({ RunSSH: false, WantRunning: true });
+      expect(yield* service.resolveTargets()).toEqual([]);
+    }).pipe(
+      Effect.provideService(HostProcess.Hostname, "bb-1"),
+      Effect.provideService(HostProcess.Username, "t3-user"),
+      Effect.provide(layerTargets({ ipv4: false, ipv6: false }, layerSpawner(tailscale))),
     );
   });
 

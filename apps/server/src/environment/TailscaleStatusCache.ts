@@ -1,3 +1,4 @@
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   isTailscaleIpv4Address,
   readTailscaleSshEnabled,
@@ -45,12 +46,14 @@ const tailnetAddressKey = (): string =>
     .toSorted()
     .join(",");
 
-const timeToLive = (exit: Exit.Exit<unknown, unknown>) =>
-  Exit.isSuccess(exit) ? Duration.infinity : FAILED_READ_TTL;
-
 const make = Effect.gen(function* () {
-  // Each `tailscale` spawn can raise a macOS "access data from other apps" prompt on every
-  // client connect, so a successful read is kept until the tailnet addresses change, not timed out.
+  // Only macOS keeps reads: there each `tailscale` spawn can raise an "access data from other
+  // apps" prompt, so a success lives until the tailnet addresses change. Elsewhere every read is fresh.
+  const timeToLive =
+    (yield* HostProcess.Platform) === "darwin"
+      ? (exit: Exit.Exit<unknown, unknown>) =>
+          Exit.isSuccess(exit) ? Duration.infinity : FAILED_READ_TTL
+      : () => Duration.zero;
   const statusCache = yield* Cache.makeWith((_key: string) => readTailscaleStatus, {
     capacity: 1,
     timeToLive,
