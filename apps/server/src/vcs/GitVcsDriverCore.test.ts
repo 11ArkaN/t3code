@@ -2495,12 +2495,53 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* TestClock.adjust("30 seconds");
         const reported = yield* Fiber.join(status);
 
-        const statusHeldForMs = (yield* Deferred.isDone(totalsDiffAbandonedAt))
-          ? (yield* Deferred.await(totalsDiffAbandonedAt)) - startedAt
-          : 0;
+        assert.isTrue(yield* Deferred.isDone(totalsDiffStarted));
+        assert.isTrue(yield* Deferred.isDone(totalsDiffAbandonedAt));
+        const statusHeldForMs = (yield* Deferred.await(totalsDiffAbandonedAt)) - startedAt;
         assert.isBelow(statusHeldForMs, 5_000, "status waited on the Changes-totals diff");
+        assert.isUndefined(reported.branchChanges);
         assert.isTrue(reported.isRepo);
         assert.strictEqual(reported.branch, "main");
+      }).pipe(Effect.provide(layerServerConfig)),
+    );
+
+    it.effect("keeps branch totals when a committed repository takes longer than two seconds", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const totalsDiffStarted = yield* Deferred.make<void>();
+        const finishTotalsDiff = yield* Deferred.make<void>();
+        const spawner = ChildProcessSpawner.make((command) =>
+          ChildProcess.isStandardCommand(command) &&
+          command.args[0] === "diff" &&
+          command.args.includes("--find-renames") &&
+          command.args.includes("--numstat")
+            ? Deferred.succeed(totalsDiffStarted, undefined).pipe(
+                Effect.as(
+                  ChildProcessSpawner.makeHandle({
+                    ...makeSuccessfulHandle("3\t0\tfile.txt\0"),
+                    exitCode: Deferred.await(finishTotalsDiff).pipe(
+                      Effect.as(ChildProcessSpawner.ExitCode(0)),
+                    ),
+                  }),
+                ),
+              )
+            : delegate.spawn(command),
+        );
+        const driver = yield* makeGitVcsDriverCore().pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        );
+        const status = yield* driver
+          .statusDetailsLocal(cwd, { includeDivergence: false, includeBranchChanges: true })
+          .pipe(Effect.forkChild);
+        yield* Effect.raceFirst(Deferred.await(totalsDiffStarted), Fiber.await(status));
+        assert.isTrue(yield* Deferred.isDone(totalsDiffStarted));
+        yield* TestClock.adjust("3 seconds");
+        yield* Deferred.succeed(finishTotalsDiff, undefined);
+        const reported = yield* Fiber.join(status);
+        assert.strictEqual(reported.branchChanges?.insertions, 3);
+        assert.strictEqual(reported.branchChanges?.deletions, 0);
       }).pipe(Effect.provide(layerServerConfig)),
     );
 
