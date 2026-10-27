@@ -2905,8 +2905,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
 
   // Codex never closes an unsubscribed thread on its own, so its background
   // terminals outlive the settle unless unloading cleans them.
-  // Codex may report the killed command before or after it answers the clean.
-  it.effect.each(["before-clean-result", "after-unsubscribe"] as const)(
+  // Codex may report the killed command before or after it answers the clean,
+  // and an older Codex without the clean method still unsubscribes.
+  it.effect.each(["before-clean-result", "after-unsubscribe", "before-clean-failure"] as const)(
     "cleans the thread's background terminals when unloading it (completion %s)",
     (completionAt) =>
       Effect.gen(function* () {
@@ -2935,11 +2936,14 @@ describe("CodexAdapterV2 post-settle continuation", () => {
                 params: { threadId: BG_NATIVE_THREAD },
               },
             },
-            ...(completionAt === "before-clean-result" ? [cleanedCompletion] : []),
+            ...(completionAt === "after-unsubscribe" ? [] : [cleanedCompletion]),
             {
               type: "emit_inbound",
               label: "clean-background-terminals-result",
-              frame: { id: 4, result: {} },
+              frame:
+                completionAt === "before-clean-failure"
+                  ? { id: 4, error: { code: -32601, message: "method not found" } }
+                  : { id: 4, result: {} },
             },
             {
               type: "expect_outbound",
@@ -2977,7 +2981,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               ? [event.turnItem.status]
               : [],
           ),
-          ["running", "interrupted"],
+          completionAt === "after-unsubscribe"
+            ? ["running", "interrupted"]
+            : ["running", "completed"],
         );
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
         assert.equal(harness.continuationRequests.length, 0);
