@@ -214,7 +214,7 @@ it.effect("gives each Scratch thread its own folder, named from its message", ()
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const { projectId } = yield* scratch.ensureScratchProject;
-      const root = yield* requireRoot;
+      const root = yield* fileSystem.realPath(yield* requireRoot);
       const text = "Convert these PNGs to WebP, please!";
       const first = Option.getOrThrow(
         yield* scratch.folderForThread({
