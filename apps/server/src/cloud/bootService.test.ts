@@ -775,6 +775,24 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
     }),
   );
 
+  // regression: #17225 macOS privacy grants are keyed to the launch agent's program path
+  it.effect("keeps the launch agent program at one path across version updates", () =>
+    Effect.gen(function* () {
+      const { service, makeService, fs } = yield* makeHarness("darwin");
+      const plan = yield* service.install();
+      const program = BootService.bootServiceProgramOf(yield* fs.readFileString(plan.unitPath));
+
+      yield* (yield* makeService(undefined, "1.2.4")).install();
+      const updatedProgram = BootService.bootServiceProgramOf(
+        yield* fs.readFileString(plan.unitPath),
+      );
+
+      expect(updatedProgram).toBe(program);
+      expect(updatedProgram).not.toContain("/runtime/versions/");
+      expect(yield* fs.exists(updatedProgram ?? "")).toBe(true);
+    }),
+  );
+
   // regression: #8173 keep provider CLIs available in the macOS service
   it.effect("reconstructs a launch agent search path when the installer has no PATH", () =>
     Effect.gen(function* () {
