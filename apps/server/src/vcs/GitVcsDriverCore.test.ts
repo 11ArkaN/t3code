@@ -2509,6 +2509,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd);
+        yield* writeTextFile(cwd, "# branch.oid (initial)", "rename source\n");
+        yield* git(cwd, ["add", "--", "# branch.oid (initial)"]);
+        yield* git(cwd, ["commit", "-m", "add rename source"]);
+        yield* git(cwd, ["mv", "--", "# branch.oid (initial)", "renamed.txt"]);
         const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
         const totalsDiffStarted = yield* Deferred.make<void>();
         const finishTotalsDiff = yield* Deferred.make<void>();
