@@ -215,7 +215,7 @@ it("keeps ordinary PR links in the standalone view while a thread is active", as
 });
 
 it.each(["no route", "missing thread", "draft"])(
-  "keeps the normal fallback for a commit with %s",
+  "opens the PR view for a PR commit with %s",
   async (scenario) => {
     setup();
     state.projects = [project];
@@ -226,7 +226,8 @@ it.each(["no route", "missing thread", "draft"])(
     if (scenario === "draft") state.routeParams = { draftId: "draft" };
     appAtomRegistry.set(discoverySettled, true);
     await using _coordinator = await mount(commitUrl);
-    await vi.waitFor(() => expect(state.openScratchProject).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(state.navigate).toHaveBeenCalledExactlyOnceWith(pullRequestView));
+    expect(state.openScratchProject).not.toHaveBeenCalled();
     expect(state.preview).not.toHaveBeenCalled();
     expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
     expect(useRightPanelStore.getState().byThreadKey).toEqual({});

@@ -78,20 +78,24 @@ export function useOpenChangeRequestLink(
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
     const commit = sourceControlClients.parseCommitUrl(targetUrl)?.link;
-    if (commit !== undefined) {
-      const thread = resolvedThreadRef ? readThreadShell(resolvedThreadRef) : null;
-      if (!thread || !resolvedThreadRef) return false;
-      const project = readProject({
-        environmentId: resolvedThreadRef.environmentId,
-        projectId: thread.projectId,
-      });
-      const identity = project?.repositoryIdentity;
-      if (
-        project?.environmentId !== resolvedThreadRef.environmentId ||
-        identity?.provider !== "github" ||
-        identity.canonicalKey.toLowerCase() !== `${commit.host}/${commit.repository}`
-      )
-        return false;
+    const commitThread =
+      commit !== undefined && resolvedThreadRef ? readThreadShell(resolvedThreadRef) : null;
+    const commitProject =
+      commitThread && resolvedThreadRef
+        ? readProject({
+            environmentId: resolvedThreadRef.environmentId,
+            projectId: commitThread.projectId,
+          })
+        : null;
+    const identity = commitProject?.repositoryIdentity;
+    if (
+      commit !== undefined &&
+      commitThread &&
+      resolvedThreadRef &&
+      commitProject?.environmentId === resolvedThreadRef.environmentId &&
+      identity?.provider === "github" &&
+      identity.canonicalKey.toLowerCase() === `${commit.host}/${commit.repository}`
+    ) {
       event.preventDefault();
       event.stopPropagation();
       const userActionRevision = useRightPanelStore.getState().markUserAction(resolvedThreadRef);
@@ -103,7 +107,7 @@ export function useOpenChangeRequestLink(
       void readDiffPreview({
         environmentId: resolvedThreadRef.environmentId,
         input: {
-          cwd: thread.worktreePath ?? project.workspaceRoot,
+          cwd: commitThread.worktreePath ?? commitProject.workspaceRoot,
           ...(baseRef ? { baseRef } : {}),
           commitSha: commit.sha,
           ignoreWhitespace,

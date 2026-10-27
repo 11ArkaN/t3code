@@ -59,7 +59,13 @@ vi.mock("../browser/useOpenLink", () => ({ useOpenLink: () => state.openLink }))
 vi.mock("../state/environments", () => ({ usePrimaryEnvironmentId: () => "local" }));
 vi.mock("../rpc/atomRegistry", () => ({
   appAtomRegistry: {
-    get: () => new Map([["local", { environment: { capabilities: { pullRequests: true } } }]]),
+    get: () =>
+      new Map([
+        [
+          "local",
+          { environment: { capabilities: { pullRequests: true, threadPullRequests: true } } },
+        ],
+      ]),
   },
 }));
 vi.mock("../state/server", () => ({ environmentServerConfigsAtom: {}, serverEnvironment: {} }));
@@ -76,7 +82,11 @@ vi.mock("../state/entities", () => ({
 }));
 
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectActiveRightPanel,
+  selectActiveRightPanelSurface,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import { useOpenChangeRequestLink } from "./openPullRequestLink";
 
 const ref = scopeThreadRef(EnvironmentId.make("local"), ThreadId.make("thread"));
@@ -217,20 +227,37 @@ describe("commit link opening", () => {
     if (scenario === "wrong host") state.repositoryKey = "github.internal/pingdotgg/t3code";
     if (scenario === "wrong environment") state.projectEnvironmentId = "remote";
     const event = click();
-    expect(useOpenChangeRequestLink(ref)(event, commitUrl)).toBe(false);
+    expect(
+      useOpenChangeRequestLink(ref)(event, `https://github.com/pingdotgg/t3code/commit/${sha}`),
+    ).toBe(false);
     expect(event.defaultPrevented).toBe(false);
     expect(useRightPanelStore.getState().byThreadKey).toEqual({});
     expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
   });
 
-  it("does not use a synthetic PR panel or a matching project without a real thread", () => {
-    const event = click();
-    expect(useOpenChangeRequestLink(undefined, ref)(event, commitUrl)).toBe(false);
-    expect(event.defaultPrevented).toBe(false);
-    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
-    expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
-    expect(state.navigate).not.toHaveBeenCalled();
-  });
+  it.each(["outside thread", "missing thread", "another repository"])(
+    "opens a PR commit link in the PR panel for %s",
+    (scenario) => {
+      state.threadExists = scenario !== "missing thread";
+      const repository = scenario === "another repository" ? "pingdotgg/other" : "pingdotgg/t3code";
+      const url = `https://github.com/${repository}/pull/19941/commits/${sha}`;
+      const event = click();
+      expect(
+        useOpenChangeRequestLink(scenario === "outside thread" ? undefined : ref, ref)(event, url),
+      ).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(
+        selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref),
+      ).toMatchObject({
+        kind: "pull-request",
+        repository,
+        number: 19941,
+        url,
+      });
+      expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
+      expect(state.preview).not.toHaveBeenCalled();
+    },
+  );
 
   it("opens a matching real thread supplied by the desktop link handler", async () => {
     expect(useOpenChangeRequestLink()(click(), commitUrl, ref)).toBe(true);
