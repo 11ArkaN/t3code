@@ -56,6 +56,7 @@ public struct WorkspaceView: View {
     @State private var workspaceToolPath = NavigationPath()
     @State private var workspaceFileBrowser = FeatureFileBrowserState()
     @State private var workspaceToolSheetIsVisible = false
+    @State private var workspaceToolSheetID: FeatureThreadDestination?
     @State private var workspaceInspectorIsVisible = false
     @State private var sidebarBeforeInspector: NavigationSplitViewVisibility?
     @AppStorage("t3.swiftui.home.snoozedExpanded") private var isSnoozedExpanded = false
@@ -526,13 +527,15 @@ public struct WorkspaceView: View {
             set: { _ in }
         ), onDismiss: {
             workspaceToolSheetIsVisible = false
-            if !allowsInspector { setWorkspaceTool(nil) }
+            // A file link replaces the sheet item. Clear only the tool that closed.
+            if !allowsInspector, workspaceTool?.id == workspaceToolSheetID { setWorkspaceTool(nil) }
             finishWorkspaceDismissal()
         }) { surface in
             workspaceToolView(surface: surface, isInspector: false)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .onAppear {
+                    workspaceToolSheetID = surface.id
                     workspaceToolSheetIsVisible = true
                     workspacePresentationIsVisible = true
                 }
