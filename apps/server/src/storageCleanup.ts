@@ -734,17 +734,25 @@ const make = Effect.gen(function* () {
       canonicalPaths.set(resolved, key);
       return key;
     });
-    const hasTerminal = Effect.fnUntraced(function* (worktreeKey: string) {
+    // A cwd in a deleted folder cannot be resolved, so stored spellings are compared too.
+    const occupies = Effect.fnUntraced(function* (
+      worktreePaths: ReadonlyArray<string>,
+      target: string,
+    ) {
+      const targets = [path.resolve(target), yield* canonical(target)];
+      return worktreePaths.some((worktree) =>
+        targets.some((cwd) => pathKey(cwd) === pathKey(worktree) || inside(worktree, cwd)),
+      );
+    });
+    const hasTerminal = Effect.fnUntraced(function* (worktreePaths: ReadonlyArray<string>) {
       for (const terminal of [...liveTerminals.values()].flatMap((entries) => [
         ...entries.values(),
       ])) {
         if (terminal.status !== "starting" && terminal.status !== "running") continue;
-        const cwd = yield* canonical(terminal.cwd);
         if (
           (terminal.worktreePath !== null &&
-            (yield* canonical(terminal.worktreePath)) === worktreeKey) ||
-          cwd === worktreeKey ||
-          inside(worktreeKey, cwd)
+            (yield* occupies(worktreePaths, terminal.worktreePath))) ||
+          (yield* occupies(worktreePaths, terminal.cwd))
         )
           return true;
       }
@@ -781,6 +789,7 @@ const make = Effect.gen(function* () {
       if (!worktreeCleanupEnabled(settings)) continue;
       const worktreePath = path.resolve(thread.worktreePath!);
       const worktreeKey = yield* canonical(worktreePath);
+      const worktreePaths = [worktreePath, worktreeKey];
       const group = groups.get(worktreeKey) ?? [];
       const activityAt = Math.max(...group.map(storageCleanupActivityAt));
       const deleted = "workspaceRoot" in thread;
@@ -813,7 +822,7 @@ const make = Effect.gen(function* () {
           return keep("thread is running or has pending work");
         if (group.some((member) => member.branch !== thread.branch))
           return keep("a subagent thread's branch differs from this worktree's branch");
-        if (yield* hasTerminal(worktreeKey)) return keep("open terminal");
+        if (yield* hasTerminal(worktreePaths)) return keep("open terminal");
         // Compare canonical roots while allowing symlinked parents, never symlinked worktree directories.
         const realPath = yield* fs.realPath(worktreePath);
         const realParent = yield* fs.realPath(path.dirname(worktreePath));
@@ -821,9 +830,7 @@ const make = Effect.gen(function* () {
           return keep("worktree is a symbolic link");
         if (!roots.some((root) => inside(root, realPath)))
           return keep("outside the managed worktree folder");
-        if (
-          yield* containsProjectRoot([worktreePath, worktreeKey], [project, ...snapshot.projects])
-        )
+        if (yield* containsProjectRoot(worktreePaths, [project, ...snapshot.projects]))
           return keep("contains a project checkout");
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File")
           return keep("not a linked worktree");
@@ -941,14 +948,14 @@ const make = Effect.gen(function* () {
         // Re-read this path's threads and sessions so new activity cancels removal; full per-worktree snapshots take seconds.
         const blockedSinceCheck = Effect.fnUntraced(function* () {
           const latestProjects = yield* projectStore.listShells();
-          if (yield* containsProjectRoot([worktreePath, worktreeKey], [project, ...latestProjects]))
+          if (yield* containsProjectRoot(worktreePaths, [project, ...latestProjects]))
             return "contains a project checkout";
           const bindings = yield* projections.getThreadWorktreePaths({ includeArchived: true });
           const bindingKeys = yield* Effect.forEach(bindings, (binding) =>
             canonical(binding.worktreePath),
           );
           const latest = bindings.filter((_binding, index) => bindingKeys[index] === worktreeKey);
-          if (yield* hasTerminal(worktreeKey)) return "open terminal";
+          if (yield* hasTerminal(worktreePaths)) return "open terminal";
           if (deleted) {
             if (
               !resolveWorktreeCleanup(yield* settingsService.getSettings, thread.projectId)
@@ -998,9 +1005,8 @@ const make = Effect.gen(function* () {
           );
           // Ready persisted sessions may have released their runtime; only live sessions protect the path.
           for (const session of sessions) {
-            const cwd = yield* canonical(session.cwd);
             if (
-              (cwd === worktreeKey || inside(worktreeKey, cwd)) &&
+              (yield* occupies(worktreePaths, session.cwd)) &&
               (yield* providerSessions.isLive(session.id))
             )
               return "provider session is still open";

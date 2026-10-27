@@ -1591,6 +1591,23 @@ describe("storage cleanup reports and local file policies", () => {
       }),
     ),
   );
+  it.live("keeps a worktree for a live session in a missing folder under its stored alias", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const fixture = yield* cleanupFixture();
+        const linkedParent = `${yield* fixture.fs.makeTempDirectoryScoped({ prefix: "cleanup-link-" })}/worktrees`;
+        yield* fixture.fs.symlink(fixture.config.worktreesDir, linkedParent);
+        fixture.setThreads([shell({ branch: "feature", worktreePath: `${linkedParent}/feature` })]);
+        fixture.setOpenSessionCwd(`${linkedParent}/feature/removed-folder`);
+        const report = yield* fixture.service.runNow;
+        expect(report.entries[0]).toMatchObject({
+          outcome: "kept",
+          reason: "Provider session is still open",
+        });
+        expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
+      }),
+    ),
+  );
   it.live("compares the checked-out branch without a full status", () =>
     runCleanupTest(
       Effect.gen(function* () {
