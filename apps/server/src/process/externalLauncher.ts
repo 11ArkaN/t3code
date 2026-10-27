@@ -239,7 +239,7 @@ function fileManagerCommandForPlatform(
     case "darwin":
       return "open";
     case "win32":
-      return "explorer";
+      return resolvePowerShellPath(env);
     default:
       if (shouldUseWindowsHostFromWsl(platform, env)) {
         return env.WSL_DISTRO_NAME?.trim() ? "explorer.exe" : undefined;
@@ -327,7 +327,7 @@ const resolveUsableFileManagerCommand = Effect.fn(
   return undefined;
 });
 
-// Reveal uses PowerShell on Windows/WSL, so probe it separately from Explorer availability.
+// Reveal uses PowerShell on WSL, so probe it separately from Explorer availability.
 // Linux relies on the file-manager gate's handler probe; WSL re-probes because the gate may use Explorer.
 const fileManagerRevealKindForPlatform = Effect.fn(
   "externalLauncher.fileManagerRevealKindForPlatform",
@@ -513,6 +513,18 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* resolveFileManagerRevealLaunch(input.cwd, platform, env, command);
   }
 
+  // Spawning Explorer directly skips the default verb a replacement file manager registers.
+  if (platform === "win32") {
+    return {
+      ...powerShellFileManagerLaunch(
+        input.cwd,
+        `$ProgressPreference = 'SilentlyContinue'; Invoke-Item -LiteralPath ${escapePowerShellStringLiteral(normalizeWindowsFileManagerPath(input.cwd))}`,
+        command,
+      ),
+      detached: WINDOWS_POWERSHELL_DETACHED,
+    };
+  }
+
   return {
     editor: editorDef.id,
     target: input.cwd,
@@ -520,10 +532,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     args:
       command === "explorer.exe" && env.WSL_DISTRO_NAME !== undefined
         ? [resolveWslFileManagerPath(input.cwd, env.WSL_DISTRO_NAME)]
-        : platform === "win32"
-          ? // Explorer interprets / as a switch and silently opens a fallback folder.
-            [normalizeWindowsFileManagerPath(input.cwd)]
-          : [input.cwd],
+        : [input.cwd],
   };
 });
 
