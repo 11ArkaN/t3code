@@ -192,6 +192,28 @@ it("saves an edited draft when focus leaves its row", async () => {
   });
 });
 
+it("saves an age pasted over a held age once", async () => {
+  setup();
+  await using screen = await render(panel());
+  await userEvent.click(ruleSwitch(screen));
+  await userEvent.fill(daysInput(screen), "30");
+  await userEvent.tab();
+  await userEvent.tab({ shift: true });
+  const clipboardData = new DataTransfer();
+  clipboardData.setData("text/plain", "60");
+  await act(async () => {
+    daysInput(screen)
+      .element()
+      .dispatchEvent(
+        new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }),
+      );
+  });
+  await userEvent.click(screen.getByRole("heading", { name: rule }));
+  expect(state.update).toHaveBeenCalledExactlyOnceWith({
+    storageCleanup: { browserArtifactsAfterDays: 60 },
+  });
+});
+
 it("saves a stepped first age only once it is committed", async () => {
   setup();
   await using screen = await render(panel());

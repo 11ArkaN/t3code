@@ -188,8 +188,10 @@ function RetentionControl({
               autoFocus={value === null}
               size={new Intl.NumberFormat().format(draft ?? value ?? 8).length}
               className="field-sizing-content w-auto min-w-[1ch] grow-0 text-right"
-              // Any edit, even one NumberField cannot parse yet, replaces a held age.
+              // Any typed or pasted edit replaces a held age: NumberField commits it on blur itself,
+              // and text it cannot parse yet must not leave the held age to be saved.
               onChange={() => setHeld(false)}
+              onPaste={() => setHeld(false)}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (event.key === "Enter") {
