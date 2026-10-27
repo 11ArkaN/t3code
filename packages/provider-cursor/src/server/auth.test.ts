@@ -11,7 +11,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import { makeCursorAuth, type CursorAuthOptions } from "./auth.ts";
-import { InMemoryCredentialStore } from "./sdk.ts";
+import { AuthenticationError, InMemoryCredentialStore } from "./sdk.ts";
 
 const instanceId = ProviderInstanceId.make("cursor-personal");
 const owner = "owner-client";
@@ -212,6 +212,20 @@ it.layer(NodeServices.layer)("CursorAuth", (it) => {
       yield* harness.auth.controller.start(owner);
       yield* phase(harness.auth, "succeeded");
       expect(yield* harness.auth.requireApiKey).toBe("browser-key");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("shows the Cursor SDK's reason when browser login fails", () =>
+    Effect.gen(function* () {
+      const sdkMessage =
+        "Login succeeded, but creating an SDK API key failed: [permission_denied] user API keys are disabled for this team (your team's settings may restrict user API keys — ask a team admin, or pass an existing API key directly)";
+      const harness = yield* makeHarness({
+        login: () => Promise.reject(new AuthenticationError(sdkMessage)),
+      });
+      yield* harness.auth.controller.start(owner);
+      const failed = yield* phase(harness.auth, "failed");
+      expect(failed.message).toContain(sdkMessage);
+      expect(yield* harness.auth.readApiKey).toBeUndefined();
     }).pipe(Effect.scoped),
   );
 
