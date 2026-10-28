@@ -633,6 +633,7 @@ export function ServerBrowserSurface(props: {
 
   const resetInput = (textarea: HTMLTextAreaElement) => {
     keySentRef.current = false;
+    clipboardKeySentRef.current = false;
     textarea.value = INPUT_SENTINEL;
     textarea.setSelectionRange(INPUT_SENTINEL.length, INPUT_SENTINEL.length);
   };
@@ -649,7 +650,9 @@ export function ServerBrowserSurface(props: {
   const handleClipboard = (key: typeof COPY | typeof CUT, event: ClipboardEvent) => {
     // Keep the sentinel off the clipboard.
     event.preventDefault();
-    if (controlRef.current?.controller !== "you" || clipboardKeySentRef.current) return;
+    const keyWasSent = clipboardKeySentRef.current;
+    clipboardKeySentRef.current = false;
+    if (controlRef.current?.controller !== "you" || keyWasSent) return;
     sendKeyPress(key, CTRL);
   };
 
