@@ -26,6 +26,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
+import * as Deferred from "effect/Deferred";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -54,6 +55,8 @@ import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+// A subagent's own provider process is rarely reused once its task ends, so free it sooner.
+const SUBAGENT_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
 const RELEASE_SCOPE_CLOSE_TIMEOUT_MS = 30 * 1000;
 
@@ -182,6 +185,16 @@ export interface ProviderSessionManagerV2Shape {
   }) => Effect.Effect<void, ProviderSessionManagerV2Error>;
 }
 
+interface ReleaseEntryInput {
+  readonly providerSessionId: ProviderSessionId;
+  readonly reason: ProviderSessionReleaseReason;
+  readonly detail?: string;
+  readonly detachedThreadId?: ThreadId;
+  readonly cancelIdleFiber?: boolean;
+  readonly onlyIfIdleGeneration?: number;
+  readonly gracefulSubscribers?: boolean;
+}
+
 export class ProviderSessionManagerV2 extends Context.Service<
   ProviderSessionManagerV2,
   ProviderSessionManagerV2Shape
@@ -200,6 +213,7 @@ interface LiveSessionEntry {
   >;
   readonly requestEventPermit: Semaphore.Semaphore;
   readonly scope: Scope.Closeable;
+  readonly idleTimeoutMs: number;
   readonly idleGeneration: number;
   readonly busyTurns: ReadonlySet<string>;
   readonly idleFiber: Fiber.Fiber<void, never> | null;
@@ -374,6 +388,8 @@ export const layerWithOptions = (
           }),
       );
       const sessions = yield* Ref.make(new Map<string, LiveSessionEntry>());
+      // Released sessions whose scope (and provider process) is still closing.
+      const closingScopes = yield* Ref.make(new Map<string, Deferred.Deferred<void>>());
       // Retry per released entry; reusing ids must not lose cleanup for earlier threads.
       const releaseRecordRetries = yield* FiberSet.make();
       const nextSubscriberId = yield* Ref.make(0);
@@ -964,15 +980,26 @@ export const layerWithOptions = (
         return closeExit;
       });
 
-      const releaseEntry = (input: {
-        readonly providerSessionId: ProviderSessionId;
-        readonly reason: ProviderSessionReleaseReason;
-        readonly detail?: string;
-        readonly detachedThreadId?: ThreadId;
-        readonly cancelIdleFiber?: boolean;
-        readonly onlyIfIdleGeneration?: number;
-        readonly gracefulSubscribers?: boolean;
-      }) =>
+      const releaseEntry = Effect.fn("ProviderSessionManager.releaseEntry")(function* (
+        input: ReleaseEntryInput,
+      ) {
+        const key = sessionKey(input.providerSessionId);
+        const closed = yield* Deferred.make<void>();
+        const markClosed = Deferred.succeed(closed, undefined).pipe(
+          Effect.andThen(
+            Ref.update(closingScopes, (current) => {
+              if (current.get(key) !== closed) return current;
+              const next = new Map(current);
+              next.delete(key);
+              return next;
+            }),
+          ),
+        );
+        yield* Ref.update(closingScopes, (current) => new Map(current).set(key, closed));
+        return yield* releaseLiveEntry(input, markClosed).pipe(Effect.ensuring(markClosed));
+      });
+
+      const releaseLiveEntry = (input: ReleaseEntryInput, markClosed: Effect.Effect<void>) =>
         Effect.acquireUseRelease(
           removeLiveEntry(input),
           ([entry, releasedAt]) =>
@@ -1004,6 +1031,7 @@ export const layerWithOptions = (
                     providerSessionId: input.providerSessionId,
                     reason: input.reason,
                   });
+                  yield* markClosed;
                   const records = {
                     entry,
                     reason: input.reason,
@@ -1178,7 +1206,7 @@ export const layerWithOptions = (
 
         yield* cancelIdleFiber(entry.idleFiber);
         const generation = entry.idleGeneration + 1;
-        const idleFiber = yield* Effect.sleep(Duration.millis(idleTimeoutMs)).pipe(
+        const idleFiber = yield* Effect.sleep(Duration.millis(entry.idleTimeoutMs)).pipe(
           Effect.andThen(releaseIfStillIdle({ providerSessionId, generation })),
           Effect.forkIn(layerScope),
         );
@@ -2045,6 +2073,9 @@ export const layerWithOptions = (
                 }
               }
               const key = sessionKey(input.providerSessionId);
+              // A released process may still hold the native thread; let it exit first.
+              const closing = (yield* Ref.get(closingScopes)).get(key);
+              if (closing !== undefined) yield* Deferred.await(closing);
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {
                 const attached = existing.attachedThreadIds.has(input.threadId);
@@ -2143,6 +2174,15 @@ export const layerWithOptions = (
                 ReadonlyMap<number, Queue.Queue<ProviderSessionEventSignal, Cause.Done>>
               >(new Map());
               const exposedRuntime = decorateRuntime(runtime, eventSubscribers);
+              const supportsMultipleProviderThreads =
+                runtime.providerSession.capabilities.sessions
+                  .supportsMultipleProviderThreadsPerSession;
+              const subagentSession =
+                !supportsMultipleProviderThreads &&
+                (yield* projectionStore.getThread(input.threadId).pipe(
+                  Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
+                  Effect.orElseSucceed(() => false),
+                ));
               const entry: LiveSessionEntry = {
                 attachedThreadIds: new Set([input.threadId]),
                 loadedProviderThreadKeyByThread: new Map(),
@@ -2150,14 +2190,15 @@ export const layerWithOptions = (
                   mcpCredentialId === undefined
                     ? new Map()
                     : new Map([[input.threadId, mcpCredentialId]]),
-                supportsMultipleProviderThreads:
-                  runtime.providerSession.capabilities.sessions
-                    .supportsMultipleProviderThreadsPerSession,
+                supportsMultipleProviderThreads,
                 runtime,
                 exposedRuntime,
                 eventSubscribers,
                 requestEventPermit: yield* Semaphore.make(1),
                 scope: sessionScope,
+                idleTimeoutMs: subagentSession
+                  ? Math.min(idleTimeoutMs, SUBAGENT_IDLE_TIMEOUT_MS)
+                  : idleTimeoutMs,
                 idleGeneration: 0,
                 busyTurns: new Set(),
                 idleFiber: null,

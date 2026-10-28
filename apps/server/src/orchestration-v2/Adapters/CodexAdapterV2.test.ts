@@ -862,6 +862,47 @@ describe("CodexAdapterV2 process exit", () => {
   );
 });
 
+describe("CodexAdapterV2 thread writer", () => {
+  const writerError = (message: string) =>
+    CodexError.CodexAppServerRequestError.fromProtocolError(
+      { code: -32600, message },
+      "thread/resume",
+      "3",
+    );
+
+  it.effect("retries a request while another app-server still holds the thread's writer", () =>
+    Effect.gen(function* () {
+      let attempts = 0;
+      const request = Effect.suspend(() => {
+        attempts += 1;
+        return attempts === 1
+          ? Effect.fail(writerError("thread saved-thread already has an active writer"))
+          : Effect.succeed("resumed");
+      });
+      const fiber = yield* CodexAdapterV2.retryWhileWriterHeld(request).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      assert.equal(attempts, 1);
+      yield* TestClock.adjust("500 millis");
+      assert.equal(yield* Fiber.join(fiber), "resumed");
+      assert.equal(attempts, 2);
+    }),
+  );
+
+  it.effect("does not retry other request errors", () =>
+    Effect.gen(function* () {
+      let attempts = 0;
+      const request = Effect.suspend(() => {
+        attempts += 1;
+        return Effect.fail(writerError("thread not found: saved-thread"));
+      });
+      const error = yield* Effect.flip(CodexAdapterV2.retryWhileWriterHeld(request));
+      assert.nestedPropertyVal(error, "errorMessage", "thread not found: saved-thread");
+      assert.equal(attempts, 1);
+    }),
+  );
+});
+
 describe("CodexAdapterV2 session initialize", () => {
   const openReplaySession = (
     transcript: CodexReplay.CodexAppServerReplayTranscript,
