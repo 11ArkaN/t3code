@@ -17,7 +17,6 @@ const CODEX_EXPIRY_WINDOW_MS = 5 * 60_000;
 const CODEX_REFRESH_INTERVAL_MS = 8 * 24 * 60 * 60_000;
 const REFRESH_LEAD_MS = 10 * 60_000;
 const CHECK_INTERVAL = "5 minutes";
-const LOCK_WAIT = "20 seconds";
 const REFRESH_TIMEOUT = "15 seconds";
 const STARTUP_TIMEOUT = "15 seconds";
 
@@ -94,12 +93,11 @@ export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function*
       Option.exists(authJson, (json) => isCodexAuthRefreshDue(json, nowMs)),
     ),
   );
+  // Every holder is bounded by the start and refresh timeouts, so waiting here always ends.
   const gate = yield* Scope.fork(scope);
-  const holdsLock = yield* Effect.acquireRelease(
-    homeLock.take(1).pipe(Effect.timeoutOption(LOCK_WAIT), Effect.map(Option.isSome)),
-    (taken) => (taken ? homeLock.release(1) : Effect.void),
-    { interruptible: true },
-  ).pipe(Scope.provide(gate));
+  yield* Effect.acquireRelease(homeLock.take(1), () => homeLock.release(1), {
+    interruptible: true,
+  }).pipe(Scope.provide(gate));
 
   return {
     start: Effect.fn("CodexHomeStartup.start")(function* <E1, E2>(input: {
@@ -122,15 +120,13 @@ export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function*
           });
         }
       });
-      if (holdsLock) {
-        // A failed start surfaces on the session's first request.
-        yield* input.initialize.pipe(
-          Effect.timeout(STARTUP_TIMEOUT),
-          Effect.ignore,
-          Effect.andThen(refreshIfStillDue),
-          Effect.ensuring(Scope.close(gate, Exit.void)),
-        );
-      }
+      // A failed start surfaces on the session's first request.
+      yield* input.initialize.pipe(
+        Effect.timeout(STARTUP_TIMEOUT),
+        Effect.ignore,
+        Effect.andThen(refreshIfStillDue),
+        Effect.ensuring(Scope.close(gate, Exit.void)),
+      );
       yield* Effect.sleep(CHECK_INTERVAL).pipe(
         Effect.andThen(isDue),
         Effect.flatMap((due) => (due ? homeLock.withPermit(refreshIfStillDue) : Effect.void)),

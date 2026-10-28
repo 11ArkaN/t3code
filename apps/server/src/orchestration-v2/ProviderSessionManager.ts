@@ -26,7 +26,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
-import * as Deferred from "effect/Deferred";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -183,16 +182,6 @@ export interface ProviderSessionManagerV2Shape {
     readonly detail?: string;
     readonly revokeMcpCredential?: boolean;
   }) => Effect.Effect<void, ProviderSessionManagerV2Error>;
-}
-
-interface ReleaseEntryInput {
-  readonly providerSessionId: ProviderSessionId;
-  readonly reason: ProviderSessionReleaseReason;
-  readonly detail?: string;
-  readonly detachedThreadId?: ThreadId;
-  readonly cancelIdleFiber?: boolean;
-  readonly onlyIfIdleGeneration?: number;
-  readonly gracefulSubscribers?: boolean;
 }
 
 export class ProviderSessionManagerV2 extends Context.Service<
@@ -388,8 +377,6 @@ export const layerWithOptions = (
           }),
       );
       const sessions = yield* Ref.make(new Map<string, LiveSessionEntry>());
-      // Released sessions whose scope (and provider process) is still closing.
-      const closingScopes = yield* Ref.make(new Map<string, Deferred.Deferred<void>>());
       // Retry per released entry; reusing ids must not lose cleanup for earlier threads.
       const releaseRecordRetries = yield* FiberSet.make();
       const nextSubscriberId = yield* Ref.make(0);
@@ -980,26 +967,15 @@ export const layerWithOptions = (
         return closeExit;
       });
 
-      const releaseEntry = Effect.fn("ProviderSessionManager.releaseEntry")(function* (
-        input: ReleaseEntryInput,
-      ) {
-        const key = sessionKey(input.providerSessionId);
-        const closed = yield* Deferred.make<void>();
-        const markClosed = Deferred.succeed(closed, undefined).pipe(
-          Effect.andThen(
-            Ref.update(closingScopes, (current) => {
-              if (current.get(key) !== closed) return current;
-              const next = new Map(current);
-              next.delete(key);
-              return next;
-            }),
-          ),
-        );
-        yield* Ref.update(closingScopes, (current) => new Map(current).set(key, closed));
-        return yield* releaseLiveEntry(input, markClosed).pipe(Effect.ensuring(markClosed));
-      });
-
-      const releaseLiveEntry = (input: ReleaseEntryInput, markClosed: Effect.Effect<void>) =>
+      const releaseEntry = (input: {
+        readonly providerSessionId: ProviderSessionId;
+        readonly reason: ProviderSessionReleaseReason;
+        readonly detail?: string;
+        readonly detachedThreadId?: ThreadId;
+        readonly cancelIdleFiber?: boolean;
+        readonly onlyIfIdleGeneration?: number;
+        readonly gracefulSubscribers?: boolean;
+      }) =>
         Effect.acquireUseRelease(
           removeLiveEntry(input),
           ([entry, releasedAt]) =>
@@ -1031,7 +1007,6 @@ export const layerWithOptions = (
                     providerSessionId: input.providerSessionId,
                     reason: input.reason,
                   });
-                  yield* markClosed;
                   const records = {
                     entry,
                     reason: input.reason,
@@ -1149,7 +1124,7 @@ export const layerWithOptions = (
                 pinnedForMs: now - pinnedSinceMs,
               });
               // Recheck on this fiber; scheduleIdleReleaseInternal would interrupt it and self-deadlock.
-              yield* Effect.sleep(Duration.millis(idleTimeoutMs));
+              yield* Effect.sleep(Duration.millis(entry.idleTimeoutMs));
               return yield* releaseIfStillIdle(input);
             }
             yield* Effect.logWarning("orchestration-v2.driver-session.idle-release-pin-expired", {
@@ -2073,9 +2048,6 @@ export const layerWithOptions = (
                 }
               }
               const key = sessionKey(input.providerSessionId);
-              // A released process may still hold the native thread; let it exit first.
-              const closing = (yield* Ref.get(closingScopes)).get(key);
-              if (closing !== undefined) yield* Deferred.await(closing);
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {
                 const attached = existing.attachedThreadIds.has(input.threadId);

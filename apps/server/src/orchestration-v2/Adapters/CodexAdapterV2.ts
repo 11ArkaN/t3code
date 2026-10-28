@@ -155,8 +155,8 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 const CODEX_CAPACITY_MAX_RETRIES = 5;
 
-// Another app-server may still hold a thread's writer lock (one T3 just closed holds it until it
-// exits) or be writing its history while a fork reads it. Both clear within seconds.
+// Another app-server may still hold a thread's writer lock (until it exits; after a T3 restart
+// the old shared one can take ~10 s) or be writing its history while a fork reads it.
 const isThreadBusyElsewhere = (error: CodexErrors.CodexAppServerError) =>
   error._tag === "CodexAppServerRequestError" &&
   (error.errorMessage.includes("already has an active writer") ||
@@ -169,7 +169,7 @@ export const retryWhileThreadBusyElsewhere = <A, R>(
     Effect.retry({
       while: isThreadBusyElsewhere,
       schedule: Schedule.spaced("500 millis"),
-      times: 20,
+      times: 60,
     }),
   );
 export const CODEX_DRIVER_KIND = CODEX_PROVIDER;

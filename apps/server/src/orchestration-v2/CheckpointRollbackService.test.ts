@@ -649,7 +649,6 @@ it.effect.each([
       const scopeId = CheckpointScopeId.make("checkpoint-scope:rollback-shared-session");
       const sharedSessionId = IdAllocator.derive.providerSession({ providerInstanceId });
       const opened: Array<string> = [];
-      const detached: Array<string> = [];
       const persisted: Array<string | null> = [];
       const projection = {
         thread: {
@@ -717,10 +716,6 @@ it.effect.each([
                   opened.push(input.providerSessionId);
                   return {} as never;
                 }),
-              detach: (input) =>
-                Effect.sync(() => {
-                  detached.push(input.providerSessionId);
-                }),
             }),
             Layer.mock(RuntimePolicy.RuntimePolicyV2)({
               resolve: () => Effect.succeed({ cwd: process.cwd() } as never),
@@ -743,10 +738,8 @@ it.effect.each([
       assert.deepEqual(persisted, opened);
       if (movesSession) {
         assert.notEqual(opened[0], sharedSessionId);
-        assert.deepEqual(detached, [sharedSessionId]);
       } else {
         assert.deepEqual(opened, [sharedSessionId]);
-        assert.deepEqual(detached, []);
       }
     }),
 );

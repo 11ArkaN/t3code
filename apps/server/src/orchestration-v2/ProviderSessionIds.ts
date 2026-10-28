@@ -3,8 +3,6 @@ import type * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Effect from "effect/Effect";
 
-export const LEFT_SHARED_SESSION_REASON = "The provider now runs one session per thread.";
-
 /** Pooled providers share one session per instance; every other provider gets one per thread. */
 export const newProviderSessionId = (input: {
   readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];

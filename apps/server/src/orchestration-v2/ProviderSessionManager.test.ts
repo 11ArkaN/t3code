@@ -333,7 +333,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
     readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
     readonly backgroundTasksEndWithProcess?: boolean;
-    readonly hangSessionScopeClose?: boolean | "first";
+    readonly hangSessionScopeClose?: boolean;
     readonly startTurn?: Effect.Effect<void>;
     readonly beforeUnload?: Effect.Effect<void>;
     readonly spawnBeforeOpen?: boolean;
@@ -349,16 +349,11 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
     })).pipe(Effect.andThen(options.onScopeClose ?? Effect.void)),
   );
   // Register after countClose to wedge teardown before its finalizer, matching a provider stream that never yields.
-  let hungCloses = 0;
-  const hangClose = Effect.suspend(() =>
-    options.hangSessionScopeClose === "first" && hungCloses++ > 0
+  const hangClose = Effect.addFinalizer(() =>
+    (options.scopeCloseReached === undefined
       ? Effect.void
-      : Effect.addFinalizer(() =>
-          (options.scopeCloseReached === undefined
-            ? Effect.void
-            : Deferred.succeed(options.scopeCloseReached, undefined)
-          ).pipe(Effect.andThen(Effect.never)),
-        ),
+      : Deferred.succeed(options.scopeCloseReached, undefined)
+    ).pipe(Effect.andThen(Effect.never)),
   );
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: ProviderInstanceId.make("codex"),
@@ -369,8 +364,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
       Effect.gen(function* () {
         if (options.spawnBeforeOpen === true) {
           yield* countClose;
-          if (options.hangSessionScopeClose === true || options.hangSessionScopeClose === "first")
-            yield* hangClose;
+          if (options.hangSessionScopeClose === true) yield* hangClose;
         }
         if (options.mcpConfigs !== undefined && options.spawnBeforeOpen === true) {
           const mcpConfig = yield* mcpSessions.read(input.threadId);
@@ -401,8 +395,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
         });
         if (options.spawnBeforeOpen !== true) {
           yield* countClose;
-          if (options.hangSessionScopeClose === true || options.hangSessionScopeClose === "first")
-            yield* hangClose;
+          if (options.hangSessionScopeClose === true) yield* hangClose;
         }
 
         return {
@@ -488,7 +481,7 @@ function layerTest(input: {
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
   readonly backgroundTasksEndWithProcess?: boolean;
-  readonly hangSessionScopeClose?: boolean | "first";
+  readonly hangSessionScopeClose?: boolean;
   readonly startTurn?: Effect.Effect<void>;
   readonly beforeUnload?: Effect.Effect<void>;
   readonly spawnBeforeOpen?: boolean;
@@ -959,65 +952,6 @@ it.effect("ProviderSessionManagerV2 closes every live session for a provider ins
         layerTest({
           state,
           idleTimeoutMs: 60_000,
-        }),
-      ),
-    );
-  }),
-);
-
-it.effect("ProviderSessionManagerV2 reopens a released session only after its scope closes", () =>
-  Effect.gen(function* () {
-    const state = yield* Ref.make(emptyState);
-    const scopeCloseReached = yield* Deferred.make<void>();
-    const openedAtMillis = yield* Ref.make<ReadonlyArray<number>>([]);
-    const beforeOpen = () =>
-      Clock.currentTimeMillis.pipe(
-        Effect.flatMap((now) => Ref.update(openedAtMillis, (opened) => [...opened, now])),
-      );
-
-    const effect = Effect.gen(function* () {
-      const eventSink = yield* EventSink.EventSinkV2;
-      const idAllocator = yield* IdAllocator.IdAllocatorV2;
-      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
-      const now = yield* DateTime.now;
-      const threadId = ThreadId.make("thread-provider-session-manager-reopen-after-close");
-      const providerSessionId = yield* idAllocator.allocate.providerSession({
-        providerInstanceId: modelSelection.instanceId,
-        threadId,
-      });
-      const open = manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
-      yield* eventSink.write({
-        events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
-      });
-
-      yield* open;
-      const startedAt = yield* Clock.currentTimeMillis;
-      // The old process keeps the native thread until its scope closes, which here never
-      // finishes, so the release ends at its close timeout.
-      const release = yield* manager
-        .release({ providerSessionId, reason: "manual_shutdown" })
-        .pipe(Effect.forkScoped);
-      yield* Deferred.await(scopeCloseReached);
-      const reopen = yield* open.pipe(Effect.forkScoped);
-      yield* TestClock.adjust("30 seconds");
-      yield* Fiber.join(release);
-      yield* Fiber.join(reopen);
-
-      const opened = yield* Ref.get(openedAtMillis);
-      assert.lengthOf(opened, 2);
-      assert.isAtLeast(opened[1]! - startedAt, 30_000);
-    });
-
-    yield* effect.pipe(
-      Effect.provide(
-        layerTest({
-          state,
-          idleTimeoutMs: 60_000,
-          capabilities: ExclusiveCapabilities,
-          spawnBeforeOpen: true,
-          hangSessionScopeClose: "first",
-          scopeCloseReached,
-          beforeOpen,
         }),
       ),
     );

@@ -33,11 +33,7 @@ import { GIT_INDEX_LOCKED_DETAIL } from "../vcs/VcsProcess.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
-import {
-  LEFT_SHARED_SESSION_REASON,
-  newProviderSessionId,
-  reusableProviderSessionId,
-} from "./ProviderSessionIds.ts";
+import { newProviderSessionId, reusableProviderSessionId } from "./ProviderSessionIds.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
@@ -262,13 +258,6 @@ export const layer: Layer.Layer<
           providerInstanceId: providerThread.providerInstanceId,
           threadId: input.threadId,
         }));
-      if (providerSessionId !== providerThread.providerSessionId) {
-        yield* sessions.detach({
-          providerSessionId: providerThread.providerSessionId,
-          threadId: input.threadId,
-          detail: LEFT_SHARED_SESSION_REASON,
-        });
-      }
       const sessionProviderThread = { ...providerThread, providerSessionId };
       const existingSession =
         context.providerSession?.id === providerSessionId ? context.providerSession : undefined;

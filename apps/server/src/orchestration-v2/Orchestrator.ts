@@ -45,7 +45,6 @@ import {
   type OrchestrationV2DelegatedCompletionDelivery,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
-  type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RemoteTaskChild,
@@ -146,11 +145,7 @@ import {
   type ShellSnapshotOptions,
 } from "./ProjectionStore.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
-import {
-  LEFT_SHARED_SESSION_REASON,
-  newProviderSessionId,
-  reusableProviderSessionId,
-} from "./ProviderSessionIds.ts";
+import { newProviderSessionId, reusableProviderSessionId } from "./ProviderSessionIds.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
@@ -1072,58 +1067,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* Ref.update(events, (existing) => [...existing, withId]);
         return withId;
       });
-
-  // A thread that leaves its instance's shared session detaches from it there. Queued
-  // before the turn starts, so the shared app-server lets go of the native thread first.
-  const detachLeftSharedSession = Effect.fn("Orchestrator.detachLeftSharedSession")(
-    function* (input: {
-      readonly command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
-      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
-      readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
-      readonly providerSessions: ReadonlyArray<OrchestrationV2ProviderSession>;
-      readonly previousSessionId: ProviderSessionId | null | undefined;
-      readonly providerSessionId: ProviderSessionId;
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly now: DateTime.Utc;
-    }) {
-      const left = input.providerSessions.find(
-        (session) =>
-          session.id === input.previousSessionId &&
-          session.id !== input.providerSessionId &&
-          reusableProviderSessionId(idAllocator, input.providerInstanceId, session.id) ===
-            undefined &&
-          session.status !== "stopped" &&
-          session.status !== "error",
-      );
-      if (left === undefined) return;
-      yield* emit(
-        input.events,
-        input.command,
-      )({
-        type: "provider-session.detached",
-        threadId: input.command.threadId,
-        driver: left.driver,
-        providerInstanceId: left.providerInstanceId,
-        occurredAt: input.now,
-        payload: {
-          providerSessionId: left.id,
-          detachedAt: input.now,
-          reason: LEFT_SHARED_SESSION_REASON,
-        },
-      });
-      const detachEffect = {
-        id: `effect:${input.command.commandId}:provider-session.detach:${left.id}`,
-        commandId: input.command.commandId,
-        threadId: input.command.threadId,
-        request: {
-          type: "provider-session.detach",
-          providerSessionId: left.id,
-          detail: LEFT_SHARED_SESSION_REASON,
-        },
-      } satisfies PendingOrchestrationEffectV2;
-      yield* Ref.update(input.effects, (existing) => [...existing, detachEffect]);
-    },
-  );
 
   // Runs in every command transaction; avoid reading thousands of finished leaf nodes.
   const readCommandProjection = (threadId: ThreadId) =>
@@ -2050,21 +1993,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               },
             ]
           : [];
-      // A thread that leaves its instance's shared session detaches from it there.
-      const leftSharedSessionId =
-        storedProviderSessionId === undefined &&
-        queuedProviderThread.providerSessionId !== null &&
-        queuedProviderThread.providerSessionId !== providerSessionId
-          ? queuedProviderThread.providerSessionId
-          : undefined;
-      const detachReason = (session: { readonly id: ProviderSessionId }) =>
-        session.id === leftSharedSessionId
-          ? LEFT_SHARED_SESSION_REASON
-          : "Provider or model selection changed.";
       const sessionsToDetach = projection.providerSessions.filter(
         (session) =>
-          (switchPlan?.releaseProviderSessionIds.includes(session.id) ||
-            session.id === leftSharedSessionId) &&
+          switchPlan?.releaseProviderSessionIds.includes(session.id) &&
           session.status !== "stopped" &&
           session.status !== "error",
       );
@@ -2168,7 +2099,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: {
               providerSessionId: session.id,
               detachedAt: now,
-              reason: detachReason(session),
+              reason: "Provider or model selection changed.",
             },
           })),
           ...executionIdentityEvents,
@@ -2206,7 +2137,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             request: {
               type: "provider-session.detach" as const,
               providerSessionId: session.id,
-              detail: detachReason(session),
+              detail: "Provider or model selection changed.",
             },
           })),
           {
@@ -6144,16 +6075,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         occurredAt: now,
         payload: providerThread,
       });
-      yield* detachLeftSharedSession({
-        command,
-        events,
-        effects,
-        providerSessions: projection.providerSessions,
-        previousSessionId: activeProviderThread?.providerSessionId,
-        providerSessionId,
-        providerInstanceId: modelSelection.instanceId,
-        now,
-      });
       if (legacyImportHandoff !== null) {
         yield* emitEvent({
           type: "context-handoff.updated",
@@ -6939,16 +6860,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       providerInstanceId: modelSelection.instanceId,
       occurredAt: now,
       payload: providerThread,
-    });
-    yield* detachLeftSharedSession({
-      command,
-      events,
-      effects,
-      providerSessions: projection.providerSessions,
-      previousSessionId: targetProviderThread?.providerSessionId,
-      providerSessionId,
-      providerInstanceId: modelSelection.instanceId,
-      now,
     });
     if (portableForkHandoff !== null) {
       yield* emitEvent({

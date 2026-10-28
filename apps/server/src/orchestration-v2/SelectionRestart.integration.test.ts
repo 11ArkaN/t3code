@@ -526,10 +526,7 @@ it.live("moves a thread off its provider's shared session once sessions are per 
         const before = yield* sendAndComplete("first");
         capabilities = exclusiveCapabilities;
         const after = yield* sendAndComplete("second");
-        const attachedSessionIds = (yield* orchestrator.getThreadProjection(
-          threadId,
-        )).providerSessions.map((session) => session.id);
-        return { before, after, attachedSessionIds };
+        return { before, after };
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(
@@ -542,8 +539,6 @@ it.live("moves a thread off its provider's shared session once sessions are per 
       assert.equal(sessionIds.before, sharedSessionId);
       assert.isDefined(sessionIds.after);
       assert.notEqual(sessionIds.after, sharedSessionId);
-      // The thread no longer holds the shared session it left.
-      assert.notInclude(sessionIds.attachedSessionIds, sharedSessionId);
       // The new session resumes the thread's native conversation instead of starting over.
       assert.deepEqual(resumedNativeIds, [`native-thread:${threadId}`]);
       assert.lengthOf((yield* Ref.get(state)).opened, 2);

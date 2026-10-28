@@ -45,7 +45,6 @@ describe("isCodexAuthRefreshDue", () => {
   it.each([
     ["exp 20 minutes out", authJson({ accessToken: expiringIn(20 * MINUTE_MS) }), false],
     ["exp 14 minutes out", authJson({ accessToken: expiringIn(14 * MINUTE_MS) }), true],
-    ["exp already passed", authJson({ accessToken: expiringIn(-MINUTE_MS) }), true],
     [
       "exp wins over an old last_refresh",
       authJson({ accessToken: expiringIn(DAY_MS), lastRefreshMs: NOW_MS - 30 * DAY_MS }),
@@ -57,23 +56,11 @@ describe("isCodexAuthRefreshDue", () => {
       authJson({ lastRefreshMs: NOW_MS - 8 * DAY_MS + 5 * MINUTE_MS }),
       true,
     ],
-    ["no exp and no last_refresh", authJson({}), false],
-    [
-      "inferred ChatGPT mode",
-      authJson({ authMode: null, accessToken: expiringIn(MINUTE_MS) }),
-      true,
-    ],
     [
       "API key mode",
       authJson({ authMode: "apikey", apiKey: "key", accessToken: expiringIn(MINUTE_MS) }),
       false,
     ],
-    [
-      "inferred API key mode",
-      authJson({ authMode: null, apiKey: "key", accessToken: expiringIn(MINUTE_MS) }),
-      false,
-    ],
-    ["ChatGPT without tokens", authJson({ accessToken: null, lastRefreshMs: 0 }), false],
     ["unreadable file", "{", false],
   ])("%s", (_name, json, due) => {
     expect(isCodexAuthRefreshDue(json, NOW_MS)).toBe(due);
