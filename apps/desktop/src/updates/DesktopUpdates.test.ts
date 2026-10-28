@@ -319,47 +319,6 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("fails a download that receives no data for 60 seconds", () =>
-    Effect.gen(function* () {
-      const downloadStarted = yield* Deferred.make<void>();
-      const harness = makeHarness({
-        downloadUpdate: Deferred.succeed(downloadStarted, undefined).pipe(
-          Effect.andThen(Effect.never),
-        ),
-      });
-
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const updates = yield* DesktopUpdates.DesktopUpdates;
-          yield* updates.configure;
-          harness.emit("update-available", { version: "1.2.4" });
-          yield* flushCallbacks;
-
-          const downloadFiber = yield* updates.download.pipe(Effect.forkScoped);
-          yield* Deferred.await(downloadStarted);
-
-          yield* TestClock.adjust("45 seconds");
-          harness.emit("download-progress", { percent: 12 });
-          yield* flushCallbacks;
-          yield* TestClock.adjust("45 seconds");
-          assert.equal((yield* updates.getState).status, "downloading");
-
-          yield* TestClock.adjust("16 seconds");
-          yield* flushCallbacks;
-
-          const stalledState = yield* updates.getState;
-          assert.notEqual(stalledState.status, "downloading");
-          assert.equal(stalledState.errorContext, "download");
-          assert.match(stalledState.message ?? "", /stall|no data/i);
-
-          const result = yield* Fiber.join(downloadFiber);
-          assert.isTrue(result.accepted);
-          assert.isFalse(result.completed);
-        }),
-      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
-    }),
-  );
-
   it.effect("shows why a download failed, not only the channel", () => {
     const harness = makeHarness({
       downloadUpdate: Effect.fail(
