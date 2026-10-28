@@ -31,6 +31,7 @@ import {
   getSubagentMessages,
   query,
   resolveSettings as resolveClaudeSettings,
+  type ResolveSettingsOptions as ClaudeResolveSettingsOptions,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -540,6 +541,15 @@ class ClaudeMcpRegistrationTimeoutError extends Schema.TaggedError<ClaudeMcpRegi
 ) {
   override get message(): string {
     return "Claude timed out while registering its MCP tools. Retry the turn; if it keeps failing, check Claude and the server logs.";
+  }
+}
+
+class ClaudeProjectSettingsUnreadableError extends Schema.TaggedError<ClaudeProjectSettingsUnreadableError>()(
+  "ClaudeProjectSettingsUnreadableError",
+  { path: Schema.String },
+) {
+  override get message(): string {
+    return `Claude project settings at ${this.path} could not be read.`;
   }
 }
 
@@ -4328,6 +4338,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       Effect.flatMap(decodeClaudeBypassSettings),
       Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed({})),
     );
+  // The SDK reads <cwd>/.claude/settings{,.local}.json with sync fs on the main thread, where a
+  // blocked open() would freeze the server, so one the reader cannot read fails like an SDK error.
+  const resolveSdkSettings = Effect.fn("ClaudeAdapterV2.resolveSdkSettings")(function* (
+    cwd: string | null,
+    options: Omit<ClaudeResolveSettingsOptions, "cwd">,
+  ) {
+    if (cwd !== null) {
+      yield* Effect.forEach(
+        ["settings.json", "settings.local.json"],
+        Effect.fnUntraced(function* (name) {
+          const filePath = path.join(path.resolve(cwd), ".claude", name);
+          const exists = Option.isSome(yield* fileSystem.stat(filePath).pipe(Effect.option));
+          if (exists && (yield* projectFiles.readFileString(filePath)) === undefined) {
+            return yield* new ClaudeProjectSettingsUnreadableError({ path: filePath });
+          }
+        }),
+        { concurrency: "unbounded", discard: true },
+      );
+    }
+    return yield* Effect.tryPromise(() =>
+      resolveClaudeSettings({ ...(cwd === null ? {} : { cwd }), ...options }),
+    );
+  });
   const resolveBypassAvailability = Effect.fn("ClaudeAdapterV2.resolveBypassAvailability")(
     function* (cwd: string | null) {
       // resolveSettings does not initialize remote-cache eligibility in the SDK host.
@@ -4336,13 +4369,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       const home = customHome
         ? yield* readBypassSettings(path.join(homePath, "settings.json"))
         : {};
-      const resolved = yield* Effect.tryPromise(() =>
-        resolveClaudeSettings({
-          ...(cwd === null ? {} : { cwd }),
-          settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
-          serverManagedSettings: remote,
-        }),
-      );
+      const resolved = yield* resolveSdkSettings(cwd, {
+        settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
+        serverManagedSettings: remote,
+      });
       const launchArgSettings = yield* readClaudeLaunchArgSettings({
         settings: adapterOptions.settings,
         cwd,
@@ -4366,12 +4396,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         adapterOptions.environment.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL,
       );
       if (Option.isSome(fromEnvironment)) return fromEnvironment.value;
-      const resolved = yield* Effect.tryPromise(() =>
-        resolveClaudeSettings({
-          ...(cwd === null ? {} : { cwd }),
-          settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
-        }),
-      ).pipe(Effect.orElseSucceed(() => undefined));
+      const resolved = yield* resolveSdkSettings(cwd, {
+        settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
+      }).pipe(Effect.orElseSucceed(() => undefined));
       const home = customHome
         ? yield* fileSystem.readFileString(path.join(homePath, "settings.json")).pipe(
             Effect.flatMap(decodeClaudeSubagentCacheSettings),

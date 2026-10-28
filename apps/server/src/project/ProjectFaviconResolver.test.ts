@@ -307,7 +307,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "ProjectFaviconResolver with an icon source open() that never returns",
   () => {
     it.live(
-      "resolves every project and leaves the libuv pool free when public/index.html is a FIFO",
+      "resolves every project and leaves the libuv pool free when t3.json and public/index.html are FIFOs",
       () =>
         Effect.gen(function* () {
           const fileSystem = yield* FileSystem.FileSystem;
@@ -320,9 +320,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
             yield* fileSystem.makeDirectory(path.join(cwd, "public")).pipe(Effect.orDie);
             const sourcePath = path.join(cwd, "public", "index.html");
             yield* makeOpenGate(sourcePath);
+            yield* makeOpenGate(path.join(cwd, "t3.json"));
             expect(
               yield* awaitWithinDeadline(resolver.resolvePath(cwd)),
-              `project ${attempt} of ${attempts} hung reading ${sourcePath}`,
+              `project ${attempt} of ${attempts} hung reading t3.json or ${sourcePath}`,
             ).toEqual(Option.some(null));
           }
           const unrelatedCwd = yield* makeTempDir;

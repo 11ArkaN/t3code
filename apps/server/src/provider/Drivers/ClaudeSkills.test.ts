@@ -918,7 +918,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "discoverClaudeSkills with a project settings open() that never returns",
   () => {
     it.live(
-      "completes every discovery and leaves the libuv pool free when settings.local.json is a FIFO",
+      "completes every discovery and leaves the libuv pool free when settings.local.json and a project plugin manifest are FIFOs",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
@@ -930,6 +930,26 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           yield* writeSkill(path.join(workspace, ".claude", "skills"), "review", "# Review");
           const settingsPath = path.join(workspace, ".claude", "settings.local.json");
           yield* makeOpenGate(settingsPath);
+          const pluginInstall = path.join(workspace, ".claude", "plugins", "local");
+          yield* writeSkill(path.join(pluginInstall, "skills"), "lint", "# Lint");
+          yield* fs.makeDirectory(path.join(pluginInstall, ".claude-plugin"));
+          const manifestPath = path.join(pluginInstall, ".claude-plugin", "plugin.json");
+          yield* makeOpenGate(manifestPath);
+          yield* fs.makeDirectory(path.join(configDir, "plugins"), { recursive: true });
+          yield* fs.writeFileString(
+            path.join(configDir, "plugins", "installed_plugins.json"),
+            JSON.stringify({
+              plugins: {
+                "local@shop": [
+                  { scope: "local", projectPath: workspace, installPath: pluginInstall },
+                ],
+              },
+            }),
+          );
+          yield* fs.writeFileString(
+            path.join(configDir, "settings.json"),
+            '{"enabledPlugins":{"local@shop":true}}',
+          );
 
           const attempts = LIBUV_POOL_SIZE + 1;
           for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -938,8 +958,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
             );
             assert.deepEqual(
               Option.map(skills, (found) => found.map((skill) => skill.name)),
-              Option.some(["review"]),
-              `discovery ${attempt} of ${attempts} hung reading ${settingsPath}`,
+              Option.some(["local:lint", "review"]),
+              `discovery ${attempt} of ${attempts} hung reading ${settingsPath} or ${manifestPath}`,
             );
           }
           assert.isTrue(

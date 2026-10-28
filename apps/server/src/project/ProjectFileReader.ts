@@ -62,7 +62,12 @@ export const make = Effect.gen(function* () {
         maxOutputBytes: MAX_READ_BYTES,
         outputMode: "truncate",
       })
-      .pipe(Effect.option);
+      .pipe(
+        Effect.tapErrorTag("ProcessSpawnError", (cause) =>
+          Effect.logWarning("could not start a project file read", { path: filePath, cause }),
+        ),
+        Effect.option,
+      );
     if (Option.isNone(result)) return undefined;
     if (result.value.timedOut) {
       if (blockedPaths.size >= MAX_BLOCKED_PATHS) {

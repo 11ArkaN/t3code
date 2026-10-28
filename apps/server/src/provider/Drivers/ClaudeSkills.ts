@@ -239,14 +239,25 @@ function parseSkillOverride(value: typeof SkillOverrideValue.Type): SkillOverrid
   }
 }
 
+/** Undefined when the file is missing or unreadable. */
+const readClaudeFile = Effect.fn("readClaudeFile")(function* (
+  filePath: string,
+  projectControlled: boolean,
+) {
+  if (projectControlled) {
+    const projectFiles = yield* ProjectFileReader.ProjectFileReader;
+    return yield* projectFiles.readFileString(filePath);
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.readFileString(filePath).pipe(Effect.orElseSucceed(() => undefined));
+});
+
 const readSkillSettings = Effect.fn("readSkillSettings")(function* (
   configDirPath: string,
   cwd: string | undefined,
   environment: NodeJS.ProcessEnv,
 ) {
-  const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const projectFiles = yield* ProjectFileReader.ProjectFileReader;
   const platform = yield* HostProcess.Platform;
   const overridesByName = new Map<string, SkillOverride>();
   const enabledPlugins = new Map<string, boolean>();
@@ -260,9 +271,7 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
     environment,
     repositoryRoot,
   )) {
-    const contents = projectControlled
-      ? yield* projectFiles.readFileString(settingsPath)
-      : yield* fileSystem.readFileString(settingsPath).pipe(Effect.orElseSucceed(() => undefined));
+    const contents = yield* readClaudeFile(settingsPath, projectControlled);
     if (contents === undefined) {
       continue;
     }
@@ -308,6 +317,7 @@ const PluginManifest = Schema.fromJsonString(
     skills: Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
   }),
 );
+const decodePluginManifest = Schema.decodeEffect(PluginManifest);
 
 function isInsideDirectory(path: Path.Path, directory: string, candidate: string): boolean {
   const relative = path.relative(directory, candidate);
@@ -371,12 +381,14 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     const projectControlled = [cwd, workspace, repositoryRoot].some(
       (directory) => directory !== undefined && isInsideDirectory(path, directory, installPath),
     );
-    const manifest = yield* fileSystem
-      .readFileString(path.join(installPath, ".claude-plugin", "plugin.json"))
-      .pipe(
-        Effect.flatMap(Schema.decodeUnknownEffect(PluginManifest)),
-        Effect.orElseSucceed(() => undefined),
-      );
+    const manifestContents = yield* readClaudeFile(
+      path.join(installPath, ".claude-plugin", "plugin.json"),
+      projectControlled,
+    );
+    const manifest =
+      manifestContents === undefined
+        ? undefined
+        : yield* decodePluginManifest(manifestContents).pipe(Effect.orElseSucceed(() => undefined));
     const prefix = manifest?.name ?? key.split("@")[0];
     if (!prefix) continue;
 
@@ -448,7 +460,6 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
 > {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const projectFiles = yield* ProjectFileReader.ProjectFileReader;
   const configDirPath = yield* resolveClaudeConfigDirPath(config, environment ?? process.env, cwd);
   const { skillOverrides, enabledPlugins } = yield* readSkillSettings(
     configDirPath,
@@ -508,22 +519,18 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         const skillPath = singleSkill
           ? path.join(root.directory, "SKILL.md")
           : path.join(root.directory, entry, "SKILL.md");
-        const read = root.projectControlled
-          ? projectFiles.readFileString(skillPath)
-          : fileSystem.readFileString(skillPath).pipe(Effect.orElseSucceed(() => undefined));
-        return Effect.map(read, (contents) => ({ entry, skillPath, contents }));
+        return Effect.map(readClaudeFile(skillPath, root.projectControlled), (contents) => ({
+          entry,
+          skillPath,
+          frontmatter: contents === undefined ? undefined : parseSkillFrontmatter(contents),
+        }));
       },
       // Project reads each spawn a child; overlap them rather than paying for each in turn.
       { concurrency: root.projectControlled ? 8 : 1 },
     );
 
-    for (const { entry, skillPath, contents } of skillFiles) {
-      if (contents === undefined) {
-        continue;
-      }
-
-      const frontmatter = parseSkillFrontmatter(contents);
-      if (frontmatter.kind === "malformed") {
+    for (const { entry, skillPath, frontmatter } of skillFiles) {
+      if (frontmatter === undefined || frontmatter.kind === "malformed") {
         continue;
       }
 

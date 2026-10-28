@@ -34,6 +34,22 @@ const makeBlockedReader = () => {
   return { reads, layer };
 };
 
+/** The real runner, with a stub `cat` from binDir first on the child's PATH. */
+const layerWithCatFrom = (binDir: string) =>
+  Layer.effect(ProjectFileReader.ProjectFileReader, ProjectFileReader.make).pipe(
+    Layer.provide(
+      Layer.effect(
+        ProcessRunner.ProcessRunner,
+        Effect.map(ProcessRunner.make(), (runner) =>
+          ProcessRunner.ProcessRunner.of({
+            run: (input) =>
+              runner.run({ ...input, env: { PATH: `${binDir}:${process.env.PATH ?? ""}` } }),
+          }),
+        ),
+      ),
+    ),
+  );
+
 describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("ProjectFileReader", () => {
   it.layer(NodeServices.layer)("readFileString", (it) => {
     it.effect("skips a path whose read timed out until the retry window passes", () =>
@@ -75,4 +91,33 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("ProjectFileRea
       }),
     );
   });
+
+  it.live("kills a cat that outlives the deadline and skips the path afterwards", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-project-file-" });
+      const settingsPath = path.join(tempDir, "settings.local.json");
+      yield* fileSystem.writeFileString(settingsPath, "{}");
+      const binDir = path.join(tempDir, "bin");
+      const pidsPath = path.join(tempDir, "cat-pids");
+      yield* fileSystem.makeDirectory(binDir);
+      // Like cat stuck in an open() that waits on a privacy prompt.
+      yield* fileSystem.writeFileString(
+        path.join(binDir, "cat"),
+        `#!/bin/sh\necho $$ >> '${pidsPath}'\nexec sleep 1000\n`,
+      );
+      yield* fileSystem.chmod(path.join(binDir, "cat"), 0o755);
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ProjectFileReader.ProjectFileReader;
+        assert.isUndefined(yield* reader.readFileString(settingsPath));
+        assert.isUndefined(yield* reader.readFileString(settingsPath));
+      }).pipe(Effect.provide(layerWithCatFrom(binDir)));
+
+      const pids = (yield* fileSystem.readFileString(pidsPath)).trim().split("\n");
+      assert.lengthOf(pids, 1);
+      assert.throws(() => process.kill(Number(pids[0]), 0), /ESRCH/);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

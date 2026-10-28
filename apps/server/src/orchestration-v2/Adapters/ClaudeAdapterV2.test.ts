@@ -3332,6 +3332,58 @@ describe("ClaudeAdapterV2 background wake turns", () => {
   );
 
   describe("Claude settings restrictions", () => {
+    it.effect(
+      "disables bypass without resolving settings when project settings cannot be read",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const cwd = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-blocked-cwd-",
+          });
+          yield* fileSystem.makeDirectory(path.join(cwd, ".claude"));
+          yield* fileSystem.writeFileString(path.join(cwd, ".claude", "settings.local.json"), "{}");
+          const harness = yield* makeWakeHarnessWithOptions();
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("attempt-blocked-project-settings"),
+              text: "Run git status.",
+              attachments: [],
+              runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                cwd,
+              }),
+            }),
+          );
+          assert.equal(harness.getOpenedOptions()?.permissionMode, "auto");
+          assert.isUndefined(harness.getOpenedOptions()?.allowDangerouslySkipPermissions);
+          assert.equal(vi.mocked(ClaudeSdk.resolveSettings).mock.calls.length, 0);
+          yield* harness.offerAndWait(
+            makeResultFrame({ uuid: "blocked-settings-result", result: "Done." }),
+          );
+          yield* Queue.take(harness.terminalReceipts);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              // Every project read outlives its deadline, like an open() behind a privacy prompt.
+              Layer.succeed(
+                ProjectFileReader.ProjectFileReader,
+                ProjectFileReader.ProjectFileReader.of({
+                  readFileString: () => Effect.undefined,
+                }),
+              ),
+              NodeServices.layer,
+            ),
+          ),
+        ),
+    );
+
     it.effect("resolves cached managed policy from the configured home through the real SDK", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
