@@ -35,19 +35,14 @@ function createStorageStub(initial: Record<string, string> = {}): Storage {
 async function bootWithFailingMainChunk(storage: Storage) {
   vi.resetModules();
   mocks.showBootError.mockClear();
-  let resolve!: () => void;
-  const settled = new Promise<void>((done) => {
-    resolve = done;
-  });
-  const reload = vi.fn(() => resolve()).mockName("location.reload");
-  mocks.showBootError.mockImplementation(() => resolve());
+  const reload = vi.fn().mockName("location.reload");
   vi.stubGlobal(
     "window",
     Object.assign(new EventTarget(), { sessionStorage: storage, location: { reload } }),
   );
   try {
-    await import("./bootstrap");
-    await settled;
+    const { boot } = await import("./bootstrap");
+    await boot;
     return { reload, showBootError: mocks.showBootError };
   } finally {
     vi.unstubAllGlobals();
