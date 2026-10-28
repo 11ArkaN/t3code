@@ -3,7 +3,7 @@ import { Pressable, View } from "react-native";
 import { withUniwind } from "uniwind";
 
 import { cn } from "../../lib/cn";
-import { useLargeText } from "../../lib/useLargeText";
+import { CHROME_MAX_FONT_SCALE } from "../../lib/layout";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { AppText } from "./AppText";
 import { SymbolView, type AppSymbolName } from "./AppSymbol";
@@ -26,9 +26,6 @@ export function Chip(props: {
   readonly disabled?: boolean;
 }) {
   const small = props.size === "small";
-  const largeText = useLargeText();
-  // A fixed width cap would cut a label to a few letters at accessibility sizes; let it wrap.
-  const capped = !small && !largeText;
   const layout = cn(
     "flex-row items-center gap-1.5 rounded-2xl px-3",
     small ? "py-1" : "min-h-8 py-1.5",
@@ -41,10 +38,11 @@ export function Chip(props: {
       ) : null}
       <AppText
         textRole={small ? "caption" : "footnote"}
-        numberOfLines={capped ? 1 : undefined}
+        numberOfLines={small ? undefined : 1}
+        maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
         className={cn(
           "shrink",
-          capped && "max-w-[180px]",
+          !small && "max-w-[180px]",
           !small && "font-t3-medium",
           props.selected ? "text-primary-foreground" : "text-foreground-muted",
         )}

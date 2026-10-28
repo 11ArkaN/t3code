@@ -24,6 +24,8 @@ export const WorkspaceTabsContext = createContext<{
   readonly dispatch: Dispatch<WorkspaceTabsAction>;
   readonly isTabActive: (tab: WorkspaceTab) => boolean;
   readonly bottomClearance: number;
+  /** Content the list ends with, such as the iOS footer when it cannot keep one fixed row. */
+  readonly listFooter?: ReactNode;
   readonly settingsOpen: boolean;
   readonly getScrollOffset: (tab: WorkspaceSearchTab) => number;
   readonly recordScrollOffset: (tab: WorkspaceSearchTab, offset: number) => void;

@@ -20,6 +20,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { cn } from "../../lib/cn";
+import { CHROME_MAX_FONT_SCALE } from "../../lib/layout";
 import { useLargeText } from "../../lib/useLargeText";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -174,10 +175,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
             "font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary",
             largeText && "shrink",
           )}
+          maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
         >
           User input needed
         </Text>
-        <Text className={cn("font-sans text-xs text-foreground-muted", largeText && "shrink")}>
+        <Text
+          className={cn("font-sans text-xs text-foreground-muted", largeText && "shrink")}
+          maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+        >
           {questionCount} question{questionCount === 1 ? "" : "s"}
         </Text>
         <View className="flex-1" />
@@ -287,11 +292,18 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         onPress={props.onToggleCollapsed}
         className="flex-row items-center gap-2"
       >
-        <Text className="min-w-0 flex-1 font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
+        {/* Card chrome stops at xxxLarge so the header stays one line above the question. */}
+        <Text
+          className="min-w-0 flex-1 font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary"
+          maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+        >
           {question?.header.trim() || "User input needed"}
         </Text>
         {questionCount > 1 ? (
-          <Text className="font-sans text-xs text-foreground-muted">
+          <Text
+            className="shrink font-sans text-xs text-foreground-muted"
+            maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
+          >
             {page.index + 1} of {questionCount} · {page.answeredCount} answered
           </Text>
         ) : null}

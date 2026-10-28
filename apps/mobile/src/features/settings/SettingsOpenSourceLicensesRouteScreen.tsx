@@ -22,7 +22,7 @@ import { SettingsScreen } from "./components/SettingsScreen";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   createNativeMailSearchToolbarItem,
-  NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET,
+  useNativeMailSearchToolbarContentInset,
 } from "../layout/native-mail-search-toolbar";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 
@@ -59,6 +59,7 @@ export function SettingsOpenSourceLicensesRouteScreen() {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const usesNativeMailSearchToolbar = useNativeMailSearchToolbar();
+  const searchToolbarInset = useNativeMailSearchToolbarContentInset();
   const manifest = useMobileThirdPartyLicenses();
   const entries = manifest?.entries ?? [];
   const filteredEntries = filterThirdPartyLicenseEntries(entries, query);
@@ -126,7 +127,7 @@ export function SettingsOpenSourceLicensesRouteScreen() {
         className="flex-1"
         contentContainerStyle={{
           paddingBottom: usesNativeMailSearchToolbar
-            ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET + 18
+            ? searchToolbarInset + 18
             : Platform.OS === "ios"
               ? 18
               : Math.max(insets.bottom, 18) + 18,

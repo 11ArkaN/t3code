@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   alignListPaneToHinge,
   approvalActionsFitOneRow,
+  breaksInsideWord,
   CHAT_CONTENT_MAX_WIDTH,
   deriveCenteredContentHorizontalPadding,
   deriveLayout,
@@ -151,6 +152,18 @@ describe("thread content column", () => {
       }),
     ).toBe(false);
     expect(approvalActionsFitOneRow({ width: 0, labels, fontScale: 1 })).toBe(false);
+  });
+});
+
+describe("breaksInsideWord", () => {
+  it("tells a word split across lines from wrapping between words", () => {
+    expect(breaksInsideWord(["Environme", "nts"])).toBe(true);
+    // Packed lines hide the split in a multi-word label.
+    expect(breaksInsideWord(["Schedule", "d tasks"])).toBe(true);
+    expect(breaksInsideWord(["Scheduled ", "tasks"])).toBe(false);
+    expect(breaksInsideWord(["Scheduled\n", "tasks"])).toBe(false);
+    expect(breaksInsideWord(["Auto-", "settle"])).toBe(false);
+    expect(breaksInsideWord(["Environments"])).toBe(false);
   });
 });
 

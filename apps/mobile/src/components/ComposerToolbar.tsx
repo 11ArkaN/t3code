@@ -15,6 +15,7 @@ import {
 import Animated, { FadeIn } from "react-native-reanimated";
 
 import { cn } from "../lib/cn";
+import { CHROME_MAX_FONT_SCALE } from "../lib/layout";
 import { AppText as Text } from "./ui/AppText";
 import { SymbolView } from "./ui/AppSymbol";
 import { useAndroidControlSizing } from "./ui/useAndroidControlSizing";
@@ -93,6 +94,7 @@ export function ComposerInlineControl(props: {
                 props.emphasized || props.selected ? "text-foreground" : "text-foreground-muted",
               )}
               numberOfLines={1}
+              maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
             >
               {props.label}
             </Text>

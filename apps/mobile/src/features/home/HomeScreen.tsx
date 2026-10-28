@@ -696,6 +696,7 @@ export function HomeScreen(props: HomeScreenProps) {
                 <AppActivityIndicator colorClassName="accent-icon-muted" />
               </View>
             ) : null}
+            {workspace?.listFooter}
           </View>
         </View>
       </View>
@@ -791,20 +792,23 @@ export function HomeScreen(props: HomeScreenProps) {
               extraData={v2ExtraData}
               ListHeaderComponent={v2ListHeader}
               ListFooterComponent={
-                settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
-                  <ThreadListV2ShowMoreRow
-                    hiddenCount={threadListV2Layout.hiddenSettledCount}
-                    {...(olderSettledShelf.loading
-                      ? { state: "loading" as const }
-                      : olderSettledShelf.failed
-                        ? { state: "failed" as const }
-                        : {})}
-                    onPress={() => {
-                      olderSettledShelf.retry();
-                      showMoreSettled();
-                    }}
-                  />
-                ) : null
+                <>
+                  {settledShelfExpanded && threadListV2Layout.hiddenSettledCount > 0 ? (
+                    <ThreadListV2ShowMoreRow
+                      hiddenCount={threadListV2Layout.hiddenSettledCount}
+                      {...(olderSettledShelf.loading
+                        ? { state: "loading" as const }
+                        : olderSettledShelf.failed
+                          ? { state: "failed" as const }
+                          : {})}
+                      onPress={() => {
+                        olderSettledShelf.retry();
+                        showMoreSettled();
+                      }}
+                    />
+                  ) : null}
+                  {workspace?.listFooter}
+                </>
               }
               ListEmptyComponent={v2ListEmpty}
               style={{ flex: 1 }}

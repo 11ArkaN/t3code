@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Platform,
   Text as RNText,
@@ -7,7 +8,9 @@ import {
   type TextProps as RNTextProps,
 } from "react-native";
 
+import { breaksInsideWord } from "../../lib/layout";
 import { MOBILE_TEXT_CLASSES } from "../../lib/typography";
+import { useLargeText } from "../../lib/useLargeText";
 
 import { cn } from "../../lib/cn";
 
@@ -27,6 +30,38 @@ export function AppText({ className, textRole, ...props }: AppTextProps) {
       selectionColorClassName={Platform.OS === "android" ? "accent-focus/32" : undefined}
       {...props}
     />
+  );
+}
+
+/**
+ * A short label, such as a row or section name, that wraps only between words. At accessibility
+ * sizes a word wider than its line shrinks the label instead of breaking ("Environme/nts").
+ */
+export function LabelText({ children, ...props }: AppTextProps & { readonly children: string }) {
+  const largeText = useLargeText();
+  // The label whose packed lines split a word; it then gets one word per line, so the split
+  // word overflows the line count and shrinks.
+  const [splitLabel, setSplitLabel] = useState<string | null>(null);
+  if (!largeText) return <AppText {...props}>{children}</AppText>;
+  const words = children.trim().split(/\s+/);
+  const oneWordPerLine = splitLabel === children;
+  return (
+    <AppText
+      {...props}
+      adjustsFontSizeToFit
+      numberOfLines={words.length}
+      onTextLayout={
+        words.length > 1 && !oneWordPerLine
+          ? (event) => {
+              if (breaksInsideWord(event.nativeEvent.lines.map((line) => line.text))) {
+                setSplitLabel(children);
+              }
+            }
+          : undefined
+      }
+    >
+      {oneWordPerLine ? words.join("\n") : children}
+    </AppText>
   );
 }
 

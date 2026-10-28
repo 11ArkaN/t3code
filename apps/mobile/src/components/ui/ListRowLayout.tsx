@@ -3,7 +3,7 @@ import { Platform, View } from "react-native";
 
 import { cn } from "../../lib/cn";
 import { useLargeText } from "../../lib/useLargeText";
-import { AppText } from "./AppText";
+import { AppText, LabelText } from "./AppText";
 import { SymbolView, type AppSymbolName } from "./AppSymbol";
 
 export interface ListRowContentProps {
@@ -44,12 +44,12 @@ export function ListRowLayout({
         </View>
       ) : null}
       <View className="min-w-0 flex-1 gap-1">
-        <AppText
+        <LabelText
           textRole="body"
           className={tone === "danger" ? "text-danger-foreground" : "text-foreground"}
         >
           {label}
-        </AppText>
+        </LabelText>
         {description ? (
           <AppText textRole="footnote" className="text-foreground-muted">
             {description}

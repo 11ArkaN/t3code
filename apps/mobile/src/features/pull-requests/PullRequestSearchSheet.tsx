@@ -10,7 +10,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 import {
   createNativeMailSearchToolbarItem,
-  NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET,
+  useNativeMailSearchToolbarContentInset,
 } from "../layout/native-mail-search-toolbar";
 
 /**
@@ -30,9 +30,10 @@ export function PullRequestSearchSheet(props: {
 }) {
   const navigation = useNavigation();
   const integratedSearch = useNativeMailSearchToolbar();
+  const searchToolbarInset = useNativeMailSearchToolbarContentInset();
   const searchRef = useRef<TextInputInstance>(null);
   const list = props.children({
-    paddingBottom: integratedSearch ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET + 16 : 16,
+    paddingBottom: integratedSearch ? searchToolbarInset + 16 : 16,
   });
   if (Platform.OS === "android") {
     return (

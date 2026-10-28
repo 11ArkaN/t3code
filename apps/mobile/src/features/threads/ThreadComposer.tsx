@@ -763,7 +763,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     reportedSelection: props.reportedModelSelection,
     prompt: draftMessage,
   });
-  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const runtimeModeChoices = runtimeModeChoicesForSupportedModes(
     currentModelOption?.supportedRuntimeModes,
   );
@@ -776,7 +776,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     ? resolveComposerControlsPresentation({
         // Until the row lays out, the window decides, so wide screens do not flash portrait chips.
         width: compactRowWidth > 0 ? compactRowWidth : windowWidth,
-        fontScale,
         modelName: composerModelName(currentModelOption, currentModelSelection),
         traitsLabel: traits.label,
         runtimeMode,
@@ -1186,11 +1185,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 {editor}
               </View>
               <ComposerDictationDraftContent
-                className={
-                  controls?.wraps
-                    ? "flex-row flex-wrap items-center px-1.5"
-                    : "flex-row items-center px-1.5"
-                }
+                className="flex-row items-center px-1.5"
                 compact
                 hidden={showsCompactDictation}
               >

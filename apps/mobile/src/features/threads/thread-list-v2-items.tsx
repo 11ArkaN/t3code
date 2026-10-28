@@ -43,7 +43,7 @@ import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIcon";
 import { useNowAfter } from "../../lib/clock";
 import { cn } from "../../lib/cn";
-import { LARGE_TEXT_FONT_SCALE } from "../../lib/layout";
+import { CHROME_MAX_FONT_SCALE, LARGE_TEXT_FONT_SCALE } from "../../lib/layout";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { copyThreadReference } from "../../lib/copyThreadReference";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
@@ -618,10 +618,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const { width: windowWidth, fontScale } = useWindowDimensions();
   const titleTypography = useScaledTextRole("body");
   const metadataTypography = useScaledTextRole("label");
-  const projectIconSize = titleTypography.fontSize * 1.25 * fontScale;
-  const machineIconSize = metadataTypography.fontSize * fontScale;
+  // Titles keep scaling; icons, status and metadata stop at xxxLarge so a row stays compact.
+  const chromeScale = Math.min(fontScale, CHROME_MAX_FONT_SCALE);
+  const projectIconSize = titleTypography.fontSize * 1.25 * chromeScale;
+  const machineIconSize = metadataTypography.fontSize * chromeScale;
   const titleLineHeight = titleTypography.lineHeight * fontScale;
-  // Accessibility sizes give the title the row's width: status and time move under it.
+  // Accessibility sizes give the title the row's width: status and time join the machine line.
   const largeText = fontScale >= LARGE_TEXT_FONT_SCALE;
   const {
     thread,
@@ -1033,8 +1035,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     timeLabel !== "";
   const rowStatus = (
     <View
-      className={cn("flex-row items-center gap-1.5", largeText && "mt-1")}
-      style={largeText ? { paddingLeft: titleTextInset } : { minHeight: titleLineHeight }}
+      className="flex-row items-center gap-1.5"
+      style={largeText ? undefined : { minHeight: titleLineHeight }}
     >
       {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
       {pinnedRow ? (
@@ -1068,6 +1070,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               "text-xs font-t3-bold",
               selected ? selectedThreadRowColors.foregroundClassName : "text-warning-foreground",
             )}
+            maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
           >
             Woke
           </Text>
@@ -1089,6 +1092,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               (status === "working" || status === "waiting") && "tabular-nums",
               selected ? selectedThreadRowColors.foregroundClassName : statusLabel.className,
             )}
+            maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
           >
             {statusLabel.label}
             {status === "working" ? (
@@ -1106,6 +1110,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               ? selectedThreadRowColors.foregroundClassName
               : rowAppearance.tertiaryForegroundClassName,
           )}
+          maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
         >
           {timeLabel}
         </Text>
@@ -1141,7 +1146,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         </Text>
         {largeText ? null : rowStatus}
       </View>
-      {largeText && hasRowStatus ? rowStatus : null}
       {props.searchMatch ? (
         <View className="mt-1" style={{ paddingLeft: titleTextInset }}>
           <ThreadSearchMatchExcerpt
@@ -1164,6 +1168,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   : "text-danger-foreground",
             )}
             numberOfLines={1}
+            maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
           >
             {thread.runtime.lastError}
           </Text>
@@ -1188,6 +1193,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   : rowAppearance.tertiaryForegroundClassName,
               )}
               numberOfLines={1}
+              maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
             >
               {props.environmentLabel}
             </Text>
@@ -1195,6 +1201,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : (
           <View className="flex-1" />
         )}
+        {largeText && hasRowStatus ? rowStatus : null}
         {pr ? (
           <Pressable
             // Padding cancelled by negative margin grows the touch target into
@@ -1230,6 +1237,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               accessibilityLabel={pr.accessibilityLabel}
               className={cn("text-xs", pr.textClassName)}
               style={{ fontFamily: MONO_FONT }}
+              maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
             >
               {pr.label}
             </Text>
@@ -1275,6 +1283,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             : rowAppearance.tertiaryForegroundClassName,
       )}
       style={{ fontFamily: MONO_FONT }}
+      maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
     >
       {slimTimeLabel}
     </Text>

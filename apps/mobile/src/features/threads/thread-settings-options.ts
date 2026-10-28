@@ -8,7 +8,6 @@ import type {
   RuntimeMode,
 } from "@t3tools/contracts";
 
-import { LARGE_TEXT_FONT_SCALE } from "../../lib/layout";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 
 export const RUNTIME_MODE_CHOICES: ReadonlyArray<{
@@ -98,20 +97,16 @@ const WIDE_COMPOSER_MIN_WIDTH = 520;
 /** The iOS composer's chips: model first, then Traits and Mode, in desktop order. */
 export function resolveComposerControlsPresentation(input: {
   readonly width: number;
-  readonly fontScale: number;
   readonly modelName: string;
   readonly traitsLabel: string;
   readonly runtimeMode: RuntimeMode;
   readonly defaultRuntimeMode: RuntimeMode;
 }) {
   const wide = input.width >= WIDE_COMPOSER_MIN_WIDTH;
-  const largeText = input.fontScale >= LARGE_TEXT_FONT_SCALE;
   return {
-    // Large text wraps the row, and drops the folded effort, so the model name keeps its room.
-    wraps: largeText,
     // One string: when it truncates, the effort at its tail goes before the model name.
     modelLabel:
-      !wide && !largeText && input.traitsLabel.length > 0
+      !wide && input.traitsLabel.length > 0
         ? `${input.modelName} · ${input.traitsLabel}`
         : input.modelName,
     showsTraits: wide && input.traitsLabel.length > 0,

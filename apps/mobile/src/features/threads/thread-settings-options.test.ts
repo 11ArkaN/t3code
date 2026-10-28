@@ -131,7 +131,6 @@ describe("resolveTraitPick", () => {
 describe("resolveComposerControlsPresentation", () => {
   const phone = {
     width: 360,
-    fontScale: 1,
     modelName: "Opus 5.5",
     traitsLabel: "High",
     runtimeMode: "full-access",
@@ -140,13 +139,11 @@ describe("resolveComposerControlsPresentation", () => {
 
   it("folds effort into the model chip on a phone and splits it out on wide screens", () => {
     expect(resolveComposerControlsPresentation(phone)).toEqual({
-      wraps: false,
       modelLabel: "Opus 5.5 · High",
       showsTraits: false,
       showsMode: false,
     });
     expect(resolveComposerControlsPresentation({ ...phone, width: 700 })).toEqual({
-      wraps: false,
       modelLabel: "Opus 5.5",
       showsTraits: true,
       showsMode: true,
@@ -167,12 +164,5 @@ describe("resolveComposerControlsPresentation", () => {
         defaultRuntimeMode: "approval-required",
       }).showsMode,
     ).toBe(false);
-  });
-
-  it("wraps at accessibility text sizes and keeps the whole model name", () => {
-    expect(resolveComposerControlsPresentation({ ...phone, fontScale: 3.5 })).toMatchObject({
-      wraps: true,
-      modelLabel: "Opus 5.5",
-    });
   });
 });

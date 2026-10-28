@@ -13,7 +13,6 @@ import {
   useNativeLayoutMetrics,
 } from "../../native/native-layout-metrics";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useLargeText } from "../../lib/useLargeText";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
@@ -24,7 +23,12 @@ import { openSettings } from "../settings/settings-navigation";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { useSidebarWorkspaceTabs } from "./useSystemWorkspaceTabBar";
 import { useWorkspaceSurface } from "./useWorkspaceSurface";
-import { WORKSPACE_SIDEBAR_FOOTER_HEIGHT, WorkspaceSidebarFooter } from "./WorkspaceSidebarFooter";
+import {
+  WORKSPACE_SIDEBAR_FOOTER_HEIGHT,
+  WorkspaceSidebarFooter,
+  workspaceSidebarFooterFits,
+  type WorkspaceSidebarFooterWidths,
+} from "./WorkspaceSidebarFooter";
 import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { WorkspaceToolbar } from "./WorkspaceToolbar.ios";
 
@@ -97,12 +101,29 @@ export function WorkspaceRootScreen() {
   const width = columnMetrics?.width ?? windowWidth;
   // UIKit insets a column's lists by the column's safe area, which this context can report as 0.
   const bottomInset = Math.max(insets.bottom, columnMetrics?.safeArea.bottom ?? 0);
+  const back = section !== "threads";
+  const [footerWidths, setFooterWidths] = useState<WorkspaceSidebarFooterWidths>({});
+  // A footer that cannot keep one row ends the thread list instead of stacking over it.
+  const footerInList = !back && !workspaceSidebarFooterFits(footerWidths, width);
   // The soft keyboard covers the footer, so it steps aside while typing.
-  const footer = page === null && keyboardHeight === 0;
-  const largeText = useLargeText();
-  const [stackedFooterHeight, setStackedFooterHeight] = useState(WORKSPACE_SIDEBAR_FOOTER_HEIGHT);
-  const footerHeight = largeText ? stackedFooterHeight : WORKSPACE_SIDEBAR_FOOTER_HEIGHT;
-  const bottomClearance = Math.max(bottomInset, keyboardHeight) + (footer ? footerHeight : 0) + 16;
+  const footer = page === null && keyboardHeight === 0 && !footerInList;
+  const bottomClearance =
+    Math.max(bottomInset, keyboardHeight) + (footer ? WORKSPACE_SIDEBAR_FOOTER_HEIGHT : 0) + 16;
+  const renderFooter = (placement: "fixed" | "list") => (
+    <WorkspaceSidebarFooter
+      back={back}
+      placement={placement}
+      bottomInset={bottomInset}
+      surfaceClassName={surfaceClassName}
+      widths={footerWidths}
+      onMeasureItem={(tab, itemWidth) =>
+        setFooterWidths((current) =>
+          current[tab] === itemWidth ? current : { ...current, [tab]: itemWidth },
+        )
+      }
+      onSelect={selectTab}
+    />
+  );
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
       columnWidth={width}
@@ -110,7 +131,11 @@ export function WorkspaceRootScreen() {
       onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
     />
   );
-  const context = { ...workspace, bottomClearance };
+  const context = {
+    ...workspace,
+    bottomClearance,
+    listFooter: page === null && footerInList ? renderFooter("list") : null,
+  };
 
   return (
     <WorkspaceTabsContext value={context}>
@@ -144,15 +169,7 @@ export function WorkspaceRootScreen() {
           )}
         </SafeAreaInsetsContext>
         <WorkspaceToolbar section={section} sidebar={sidebarNavigation} onNewTask={startNewTask} />
-        {footer ? (
-          <WorkspaceSidebarFooter
-            back={section !== "threads"}
-            bottomInset={bottomInset}
-            surfaceClassName={surfaceClassName}
-            onSelect={selectTab}
-            onStackedHeightChange={setStackedFooterHeight}
-          />
-        ) : null}
+        {footer ? renderFooter("fixed") : null}
       </View>
     </WorkspaceTabsContext>
   );

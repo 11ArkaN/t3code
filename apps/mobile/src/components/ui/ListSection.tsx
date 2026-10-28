@@ -2,7 +2,7 @@ import { MOBILE_SHAPE } from "../../lib/designTokens";
 import type { ReactNode } from "react";
 import { Platform, View } from "react-native";
 
-import { AppText as Text } from "./AppText";
+import { AppText as Text, LabelText } from "./AppText";
 
 export function ListSection(props: {
   readonly title?: string;
@@ -23,9 +23,9 @@ export function ListSection(props: {
             }
           >
             {props.titleIcon}
-            <Text textRole="footnote" className="shrink font-t3-medium text-foreground-muted">
+            <LabelText textRole="footnote" className="shrink font-t3-medium text-foreground-muted">
               {props.title}
-            </Text>
+            </LabelText>
           </View>
           {props.trailing}
         </View>

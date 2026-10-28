@@ -102,7 +102,7 @@ import {
 } from "./provider-catalog-refresh";
 import {
   createNativeMailSearchToolbarItem,
-  NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET,
+  useNativeMailSearchToolbarContentInset,
 } from "../layout/native-mail-search-toolbar";
 import { useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
@@ -790,7 +790,8 @@ function ThreadSettingsOptionsItem(props: {
         ?.providers.find((provider) => provider.instanceId === session.providerInstanceId) ?? null)
     : null;
   // Both iOS search layouts float a bottom toolbar over the list's last rows.
-  const bottomToolbarInset = Platform.OS === "ios" ? NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET : 0;
+  const searchToolbarInset = useNativeMailSearchToolbarContentInset();
+  const bottomToolbarInset = Platform.OS === "ios" ? searchToolbarInset : 0;
 
   return (
     <View style={{ paddingBottom: insets.bottom + bottomToolbarInset + 12 }}>

@@ -6,6 +6,7 @@ import {
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
+import { CHROME_MAX_FONT_SCALE } from "../lib/layout";
 import { composerModelName, type ModelOption } from "../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../lib/providerOptions";
 import { AppText as Text } from "./ui/AppText";
@@ -100,6 +101,7 @@ export function ComposerModelControl(props: {
                 : "text-xs text-foreground-muted"
             }
             numberOfLines={1}
+            maxFontSizeMultiplier={CHROME_MAX_FONT_SCALE}
           >
             {props.traitsLabel}
           </Text>
