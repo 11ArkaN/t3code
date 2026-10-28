@@ -94,8 +94,9 @@ or that recovery closed on the cut turn. Message-capable questions stay answerab
 they do not block. Delivery also stops after three consecutive continuations in one
 `restartContinuationOfRunId` chain, so a turn that crashes the server cannot loop. Stable
 command and message IDs prevent duplicate submissions after an outbox retry. A cut turn
-with no assistant reply or provider item may never have reached the provider, so its
-continuation resends the original request. Codex resumes natively, without provider
+with no assistant reply or provider item other than a compaction (Codex compacts before
+it records the request) may never have reached the provider, so its continuation resends
+the original request. Codex resumes natively, without provider
 prompt text, only when the cut turn reached the provider and lost no background work;
 other adapters receive the continuation message through their normal turn path.
 

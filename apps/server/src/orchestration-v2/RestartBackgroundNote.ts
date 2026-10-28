@@ -221,17 +221,21 @@ export function restartContinuationNote(
   return { work, settled: isRestartNoteSource(current, providerTurns) };
 }
 
-/** Without a provider item or reply, the provider may never have recorded the run's request. */
+/** Without a provider item or reply, the provider may never have recorded the run's request. Codex compacts before it records the request. */
 export function restartRunReachedProvider(
   runId: OrchestrationV2Run["id"],
   records: {
     readonly messages: ReadonlyArray<Pick<OrchestrationV2ConversationMessage, "runId" | "role">>;
-    readonly turnItems: ReadonlyArray<Pick<OrchestrationV2TurnItem, "runId" | "nativeItemRef">>;
+    readonly turnItems: ReadonlyArray<
+      Pick<OrchestrationV2TurnItem, "runId" | "type" | "nativeItemRef">
+    >;
   },
 ): boolean {
   return (
     records.messages.some((message) => message.runId === runId && message.role === "assistant") ||
-    records.turnItems.some((item) => item.runId === runId && item.nativeItemRef !== null)
+    records.turnItems.some(
+      (item) => item.runId === runId && item.type !== "compaction" && item.nativeItemRef !== null,
+    )
   );
 }
 

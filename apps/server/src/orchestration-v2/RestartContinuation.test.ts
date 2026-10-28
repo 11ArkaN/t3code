@@ -505,6 +505,16 @@ it.effect("resends the original request when the cut turn never reached the prov
       runs: [{ ...base.runs[0]!, status: "cancelled", userMessageId }],
       providerTurns: [{ ...base.providerTurns[0]!, status: "cancelled" }],
       messages: [{ id: userMessageId, threadId, runId, role: "user", text: request, attachments }],
+      turnItems: [
+        { id: "item:user-message", threadId, runId, type: "user_message", nativeItemRef: null },
+        {
+          id: "item:compaction",
+          threadId,
+          runId,
+          type: "compaction",
+          nativeItemRef: { driver: "codex", nativeId: "native-compaction" },
+        },
+      ],
     } as unknown as OrchestrationV2ThreadProjection;
     const continuation = Effect.fn(function* (projection: OrchestrationV2ThreadProjection) {
       const commands: Parameters<
@@ -549,6 +559,7 @@ it.effect("resends the original request when the cut turn never reached the prov
     const providerItem = {
       ...cut,
       turnItems: [
+        ...cut.turnItems,
         {
           id: "item:reasoning",
           threadId,
