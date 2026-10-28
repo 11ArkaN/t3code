@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vite-plus/test";
 
 import { START_PICK_CHANNEL } from "./GuestProtocol.ts";
+import "./PickPreload.ts";
 
 const ipcListeners = vi.hoisted(() => new Map<string, Array<(...args: unknown[]) => void>>());
 
@@ -17,7 +18,7 @@ vi.mock("electron", () => ({
 
 vi.mock("react-grab/primitives", () => ({ getElementContext: async () => null }));
 
-const startAnnotation = async (): Promise<ShadowRoot> => {
+const startAnnotation = (): ShadowRoot => {
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -25,7 +26,6 @@ const startAnnotation = async (): Promise<ShadowRoot> => {
       disconnect() {}
     },
   );
-  await import("./PickPreload.ts");
   using attachShadow = vi.spyOn(Element.prototype, "attachShadow");
   for (const listener of ipcListeners.get(START_PICK_CHANNEL) ?? []) listener({}, undefined, false);
   const shadowRoot = attachShadow.mock.results[0]?.value;
@@ -33,8 +33,8 @@ const startAnnotation = async (): Promise<ShadowRoot> => {
   return shadowRoot;
 };
 
-it("switches tools from the keyboard after a toolbar button is clicked", async () => {
-  const shadowRoot = await startAnnotation();
+it("switches tools from the keyboard after a toolbar button is clicked", () => {
+  const shadowRoot = startAnnotation();
   const region = Array.from(shadowRoot.querySelectorAll("button")).find(
     (button) => button.textContent === "Region",
   );
@@ -52,8 +52,8 @@ it("switches tools from the keyboard after a toolbar button is clicked", async (
   ).toBe("select");
 });
 
-it("keeps the tool while typing a tool key in the comment", async () => {
-  const shadowRoot = await startAnnotation();
+it("keeps the tool while typing a tool key in the comment", () => {
+  const shadowRoot = startAnnotation();
   const comment = shadowRoot.querySelector("textarea");
   if (!comment) throw new Error("comment textarea not found");
 
