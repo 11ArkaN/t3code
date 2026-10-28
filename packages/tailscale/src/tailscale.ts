@@ -288,7 +288,7 @@ export const readTailscaleStatus = readTailscaleOutput("status", ["status", "--j
   Effect.flatMap(parseTailscaleStatus),
 );
 
-const TailscaleExitNodeJson = Schema.Struct({
+const TailscalePeersJson = Schema.Struct({
   ExitNodeStatus: Schema.optional(Schema.Struct({ Online: Schema.optional(Schema.Unknown) })),
   Peer: Schema.optional(
     Schema.Record(
@@ -297,14 +297,13 @@ const TailscaleExitNodeJson = Schema.Struct({
         ExitNode: Schema.optional(Schema.Unknown),
         HostName: Schema.optional(Schema.Unknown),
         DNSName: Schema.optional(Schema.Unknown),
+        TailscaleIPs: Schema.optional(Schema.Unknown),
       }),
     ),
   ),
 });
 
-const decodeTailscaleExitNodeJson = Schema.decodeEffect(
-  Schema.fromJsonString(TailscaleExitNodeJson),
-);
+const decodeTailscalePeersJson = Schema.decodeEffect(Schema.fromJsonString(TailscalePeersJson));
 
 export interface TailscaleExitNode {
   readonly name: string | null;
@@ -318,7 +317,7 @@ export interface TailscaleExitNode {
 export const parseTailscaleExitNode = (
   rawStatusJson: string,
 ): Effect.Effect<TailscaleExitNode | null, TailscaleStatusParseError> =>
-  decodeTailscaleExitNodeJson(rawStatusJson).pipe(
+  decodeTailscalePeersJson(rawStatusJson).pipe(
     Effect.mapError((cause) => new TailscaleStatusParseError({ cause })),
     Effect.map((parsed) => {
       if (parsed.ExitNodeStatus === undefined) return null;
@@ -337,6 +336,25 @@ export const parseTailscaleExitNode = (
 
 export const readTailscaleExitNode = readTailscaleOutput("status", ["status", "--json"]).pipe(
   Effect.flatMap(parseTailscaleExitNode),
+);
+
+/** The addresses of the other machines on this machine's tailnet. */
+export const readTailscalePeerAddresses = readTailscaleOutput("status", ["status", "--json"]).pipe(
+  Effect.flatMap((rawStatusJson) =>
+    decodeTailscalePeersJson(rawStatusJson).pipe(
+      Effect.mapError((cause) => new TailscaleStatusParseError({ cause })),
+    ),
+  ),
+  Effect.map(
+    (parsed) =>
+      new Set(
+        Object.values(parsed.Peer ?? {}).flatMap((peer) =>
+          Array.isArray(peer.TailscaleIPs)
+            ? peer.TailscaleIPs.filter((address): address is string => typeof address === "string")
+            : [],
+        ),
+      ),
+  ),
 );
 
 const TailscalePrefsJson = Schema.Struct({
