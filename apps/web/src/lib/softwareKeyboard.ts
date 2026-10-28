@@ -81,3 +81,8 @@ export function createSoftwareKeyboardStore(win: KeyboardWindow | undefined, isD
 
   return { getSnapshot, subscribe };
 }
+
+/** Focusing an editor during a tap on these devices raises the on-screen keyboard. */
+export function isTouchPrimaryDevice(): boolean {
+  return window.matchMedia("(pointer: coarse) and (hover: none)").matches;
+}

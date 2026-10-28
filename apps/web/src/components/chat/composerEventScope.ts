@@ -1,4 +1,5 @@
 import { useComposerHandleContext } from "../../composerHandleContext";
+import { isTouchPrimaryDevice } from "../../lib/softwareKeyboard";
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-composer-drawer-layer="true"]',
@@ -20,6 +21,7 @@ export function useComposerMenuProps() {
           if (activeElement !== document.body && !isInsideComposerFloatingLayer(activeElement)) {
             return false;
           }
+          if (isTouchPrimaryDevice()) return true;
           composerRef.current?.focusAtEnd();
           return false;
         }
