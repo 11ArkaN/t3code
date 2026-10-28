@@ -1,5 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - realpathSync.native resolves Windows 8.3 short names, which the Effect realPath does not.
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodeURL from "node:url";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it, describe } from "@effect/vitest";
@@ -1378,6 +1380,93 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
   });
 
   describe("review diff previews", () => {
+    it.effect("rejects shallow boundary commits whose first parent is missing", () =>
+      Effect.gen(function* () {
+        const upstream = yield* makeTmpDir();
+        yield* initRepoWithCommit(upstream);
+        const parent = yield* git(upstream, ["rev-parse", "HEAD"]);
+        yield* writeTextFile(upstream, "README.md", "# boundary\n");
+        yield* git(upstream, ["commit", "-am", "boundary"]);
+        const sha = yield* git(upstream, ["rev-parse", "HEAD"]);
+        const cwd = yield* makeTmpDir();
+        yield* git(upstream, ["clone", "--depth=1", NodeURL.pathToFileURL(upstream).href, cwd], {
+          GIT_CONFIG_GLOBAL: NodeOS.devNull,
+          GIT_CONFIG_NOSYSTEM: "1",
+        });
+        assert.equal(yield* git(cwd, ["rev-parse", "--is-shallow-repository"]), "true");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const missing = yield* driver.execute({
+          operation: "GitVcsDriver.test.missingParent",
+          cwd,
+          args: ["cat-file", "-e", parent],
+          allowNonZeroExit: true,
+        });
+        assert.notEqual(missing.exitCode, 0);
+        for (const request of [
+          driver.getReviewDiffPreview({ cwd, commitSha: sha }),
+          driver.getReviewDiffPreview({
+            cwd,
+            commitSha: sha,
+            file: { path: "README.md", previousPath: null, sourceKind: "commit" },
+          }),
+          driver.getReviewDiffFileContents(
+            makeReviewDiffFileContentsInput(cwd, {
+              sourceKind: "commit",
+              changeType: "new",
+              headRef: sha,
+              baseRef: yield* git(cwd, ["hash-object", "-t", "tree", NodeOS.devNull]),
+            }),
+          ),
+          driver.getReviewCommitDescriptionContext({ cwd, shas: [sha] }),
+          driver.resolveReviewCommits({ cwd, shas: [sha] }),
+        ]) {
+          const error = yield* Effect.asVoid<unknown, GitCommandError, never>(request).pipe(
+            Effect.flip,
+          );
+          assert.equal(error._tag, "GitCommandError");
+          assert.include(error.detail, "parent");
+        }
+      }),
+    );
+
+    it.effect("previews a true root commit against the empty tree", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const sha = yield* git(cwd, ["rev-parse", "HEAD"]);
+        const preview = yield* driver.getReviewDiffPreview({ cwd, commitSha: sha });
+        const source = preview.sources[0]!;
+        assert.equal(
+          source.baseRef,
+          yield* git(cwd, ["hash-object", "-t", "tree", NodeOS.devNull]),
+        );
+        assert.include(source.diff, "+# test");
+        assert.deepStrictEqual(
+          yield* driver.getReviewDiffFileContents(
+            makeReviewDiffFileContentsInput(cwd, {
+              sourceKind: "commit",
+              changeType: "new",
+              baseRef: source.baseRef,
+              headRef: sha,
+            }),
+          ),
+          { oldContents: "", newContents: "# test\n" },
+        );
+        const context = yield* driver.getReviewCommitDescriptionContext({ cwd, shas: [sha] });
+        assert.deepStrictEqual(context.commits[0]?.files, ["README.md"]);
+        yield* git(cwd, ["commit", "--allow-empty", "-m", "unreachable"]);
+        const unreachable = yield* git(cwd, ["rev-parse", "HEAD"]);
+        yield* git(cwd, ["checkout", "--detach", sha]);
+        for (const invalid of [sha.slice(0, 12), unreachable]) {
+          const error = yield* driver
+            .resolveReviewCommits({ cwd, shas: [invalid] })
+            .pipe(Effect.flip);
+          assert.include(error.detail, "Selected commit is invalid");
+        }
+      }),
+    );
+
     it.effect("lists the branch's commits newest first, at most 100, and flags the rest", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

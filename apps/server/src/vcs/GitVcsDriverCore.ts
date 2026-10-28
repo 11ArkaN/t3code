@@ -3103,7 +3103,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const reviewCommitError = (cwd: string, detail: string) =>
     new GitCommandError({
       operation: "GitVcsDriver.reviewCommit",
-      command: "git rev-list",
+      command: "git show",
       cwd,
       detail,
     });
@@ -3124,16 +3124,29 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (reachable.exitCode !== 0) {
       return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
     }
-    const parents = yield* runGitStdout("GitVcsDriver.reviewCommit.parents", cwd, [
-      "rev-list",
-      "--parents",
-      "-n",
-      "1",
-      sha,
-    ]);
-    const [resolvedSha, firstParent] = parents.trim().split(" ");
-    if (resolvedSha?.toLowerCase() !== sha.toLowerCase()) {
+    const metadata = yield* executeGit(
+      "GitVcsDriver.reviewCommit.parents",
+      cwd,
+      ["show", "--no-patch", "--no-notes", "--no-show-signature", "--format=raw", sha],
+      { appendTruncationMarker: true, env: { GIT_NO_LAZY_FETCH: "1" } },
+    );
+    const headerEnd = metadata.stdout.indexOf("\n\n");
+    const headers = metadata.stdout.slice(0, headerEnd).split("\n");
+    const resolvedSha = headers[0]?.split(" ")[1];
+    if (headerEnd < 0 || resolvedSha?.toLowerCase() !== sha.toLowerCase()) {
       return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
+    }
+    const firstParent = headers.find((line) => line.startsWith("parent "))?.slice(7);
+    if (firstParent !== undefined) {
+      const parent = yield* executeGit(
+        "GitVcsDriver.reviewCommit.parent",
+        cwd,
+        ["cat-file", "-e", `${firstParent}^{commit}`],
+        { allowNonZeroExit: true, env: { GIT_NO_LAZY_FETCH: "1" } },
+      );
+      if (parent.exitCode !== 0) {
+        return yield* reviewCommitError(cwd, "Selected commit's parent is not available locally.");
+      }
     }
     return { sha: resolvedSha, parent: firstParent ?? (yield* readEmptyTreeHash(cwd)) };
   });
