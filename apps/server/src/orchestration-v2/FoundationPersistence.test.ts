@@ -2508,6 +2508,73 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
     }),
   );
 
+  it.effect("starts a provider turn while slow title generations are running", () =>
+    Effect.gen(function* () {
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const commandId = CommandId.make("command:foundation-title-starvation");
+      const titleThreads = ["a", "b", "c"].map((suffix) =>
+        ThreadId.make(`thread:foundation-title-starvation:${suffix}`),
+      );
+      const turnStarted = yield* Deferred.make<void>();
+      const releaseTitles = yield* Deferred.make<void>();
+      const layerWorker = EffectWorker.layerWithOptions({
+        workerId: "title-starvation-worker",
+      }).pipe(
+        Layer.provide(
+          Layer.merge(
+            Layer.succeed(EffectOutbox.EffectOutboxV2, outbox),
+            Layer.succeed(
+              EffectWorker.OrchestrationEffectExecutorV2,
+              EffectWorker.OrchestrationEffectExecutorV2.of({
+                execute: (effect) =>
+                  effect.request.type === "thread-title.generate"
+                    ? Deferred.await(releaseTitles)
+                    : Deferred.succeed(turnStarted, undefined).pipe(Effect.asVoid),
+              }),
+            ),
+          ),
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        yield* EffectWorker.runDaemonWithOptions({ concurrency: 2 }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        yield* outbox.enqueue([
+          ...titleThreads.map((threadId, index) => ({
+            id: `effect:foundation-title-starvation:${index}-title`,
+            commandId,
+            threadId,
+            request: {
+              type: "thread-title.generate" as const,
+              kind: { type: "regenerate" as const },
+            },
+          })),
+          {
+            id: "effect:foundation-title-starvation:turn-start",
+            commandId,
+            threadId: titleThreads[0]!,
+            request: {
+              type: "provider-turn.start",
+              runId: RunId.make("run:foundation-title-starvation"),
+            },
+          },
+        ]);
+        yield* outbox.notifyAvailable(titleThreads.length + 1);
+
+        const started = yield* Deferred.await(turnStarted).pipe(
+          Effect.timeoutOption(Duration.seconds(1)),
+          Effect.forkScoped,
+        );
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.isTrue(
+          Option.isSome(yield* Fiber.join(started)),
+          "provider-turn.start was never claimed: thread title generations occupied every effect worker",
+        );
+        assert.isFalse(yield* Deferred.isDone(releaseTitles));
+      }).pipe(Effect.provide(layerWorker), Effect.scoped);
+    }),
+  );
+
   it.effect("does not reclaim a running effect after its process-local lease expires", () =>
     Effect.gen(function* () {
       const outbox = yield* EffectOutbox.EffectOutboxV2;
