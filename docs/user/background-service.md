@@ -121,6 +121,23 @@ that session open.
 | `service-disabled` or `service-stopped` | Read the log and `systemctl --user status t3code.service`, then use the repair command printed by T3 Code.                     |
 | `restart-pending`                       | A newer version is installed but the service still runs the previous one. Run `t3 service restart`.                            |
 
+If the service is enabled but did not start after a reboot, and
+`systemctl --user show default.target -p Wants` does not list `t3code.service`,
+your home directory was mounted after your user's service manager started. Some
+NAS systems, such as UGREEN UGOS, mount `/home` late. The service is installed in
+your home directory, so it cannot start before that mount. Run
+`t3 service install` to start it now. To make it start at every boot, an
+administrator can have your service manager wait for your home directory:
+
+```sh
+sudo mkdir -p "/etc/systemd/system/user@$(id -u).service.d"
+printf '%s\n' '[Service]' \
+  "ExecStartPre=/bin/sh -c 'until [ -d \"\$HOME\" ]; do sleep 1; done'" \
+  'TimeoutStartSec=5min' |
+  sudo tee "/etc/systemd/system/user@$(id -u).service.d/wait-for-home.conf"
+sudo systemctl daemon-reload
+```
+
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
 Downloads, it may need Full Disk Access for the `t3` executable listed in
