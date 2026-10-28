@@ -102,7 +102,8 @@ export const renderCliShim = (input: {
     "trap 'exit 130' INT TERM",
     "mount=",
     'while kill -0 "$mounter" 2>/dev/null; do',
-    '  mount=$(head -n 1 "$work/mount")',
+    // The mounter may not have created the file yet; the loop just tries again.
+    '  mount=$(head -n 1 "$work/mount" 2>/dev/null)',
     '  [ -d "$mount" ] && break',
     "  mount=",
     "  sleep 0.05",
