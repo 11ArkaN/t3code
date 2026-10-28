@@ -2,6 +2,9 @@ import { type PointerEvent as ReactPointerEvent } from "react";
 import { type SensorProps } from "@dnd-kit/core";
 import { getOwnerDocument, getWindow } from "@dnd-kit/utilities";
 
+// Chromium's max_stylus_move_in_pixels_for_click (ui/events/gesture_detection/gesture_configuration.h).
+const PEN_CLICK_SLOP = 20;
+
 type Options = {
   distance: number;
   onAttach: (sensor: SidebarPointerSensor) => void;
@@ -25,11 +28,16 @@ export class SidebarPointerSensor {
   private readonly pointer: PointerEvent;
   private readonly document: Document;
   private readonly window: Window;
+  private readonly distance: number;
 
   constructor(private readonly props: Omit<SensorProps<Options>, "activeNode" | "context">) {
     this.pointer = props.event as PointerEvent;
     this.document = getOwnerDocument(this.pointer.target);
     this.window = getWindow(this.pointer.target);
+    this.distance =
+      this.pointer.pointerType === "pen"
+        ? Math.max(props.options.distance, PEN_CLICK_SLOP)
+        : props.options.distance;
     this.document.addEventListener("pointermove", this.move, { passive: false, capture: true });
     this.document.addEventListener("pointerup", this.end, { capture: true });
     this.document.addEventListener("pointercancel", this.pointerCancel, { capture: true });
@@ -41,7 +49,7 @@ export class SidebarPointerSensor {
     this.document.addEventListener("dragstart", this.preventDefault);
     this.document.addEventListener("contextmenu", this.preventDefault);
     props.options.onAttach(this);
-    props.onPending(props.active, { distance: props.options.distance }, this.coordinates());
+    props.onPending(props.active, { distance: this.distance }, this.coordinates());
   }
 
   private coordinates = () => ({ x: this.pointer.clientX, y: this.pointer.clientY });
@@ -69,10 +77,10 @@ export class SidebarPointerSensor {
         x: event.clientX - this.pointer.clientX,
         y: event.clientY - this.pointer.clientY,
       };
-      if (Math.hypot(offset.x, offset.y) <= this.props.options.distance) {
+      if (Math.hypot(offset.x, offset.y) <= this.distance) {
         this.props.onPending(
           this.props.active,
-          { distance: this.props.options.distance },
+          { distance: this.distance },
           this.coordinates(),
           offset,
         );
