@@ -25,6 +25,7 @@ import {
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
+  COMPACT_SLASH_COMMAND,
   DEFAULT_TIMEOUT_MS,
   isCommandMissingCause,
   parseGenericCliVersion,
@@ -87,6 +88,8 @@ const snapshot = (
     enabled: settings.enabled,
     checkedAt,
     models: kiroModels(settings, listed, agents),
+    // `/compact` runs `_kiro/session/compact`; see compactKiroSession.
+    slashCommands: [COMPACT_SLASH_COMMAND],
     probe,
   });
 

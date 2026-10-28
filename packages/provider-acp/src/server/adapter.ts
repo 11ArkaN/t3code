@@ -344,6 +344,11 @@ export interface AcpAdapterV2Flavor {
   ) => Effect.Effect<void>;
   readonly subagentsIdleOnTurnCompletion?: boolean;
   readonly supportsCompaction?: boolean;
+  /** Compacts with the agent's own request, for agents that answer a `/compact` prompt as chat. */
+  readonly compactSession?: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+  ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   readonly runtimeHarness?: string;
   readonly registerExtensions?: (
     context: AcpAdapterV2ExtensionContext,
@@ -600,6 +605,10 @@ export const AcpProviderCapabilitiesV2 = {
     enforcement: "client-boundary",
   },
 } satisfies OrchestrationV2ProviderCapabilities;
+
+function isCompactionMessage(message: ProviderAdapter.ProviderAdapterV2TurnMessage): boolean {
+  return message.text.trim() === "/compact" && message.attachments.length === 0;
+}
 
 function negotiatedCapabilities(
   base: OrchestrationV2ProviderCapabilities,
@@ -7150,9 +7159,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           const now = yield* DateTime.now;
           if (
-            flavor.supportsCompaction === true &&
-            context.input.message.text.trim() === "/compact" &&
-            context.input.message.attachments.length === 0 &&
+            (flavor.supportsCompaction === true || flavor.compactSession !== undefined) &&
+            isCompactionMessage(context.input.message) &&
             settledStatus === "completed"
           ) {
             const nativeItemId = `${context.nativeTurnId}:compaction`;
@@ -7738,10 +7746,22 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const promptGeneration = yield* Ref.get(runtimeCallbackGeneration);
             const promptOptions = { dispatched: context.promptDispatched };
             context.promptSentAt = yield* Clock.currentTimeMillis;
-            yield* runtime.prompt({ prompt: promptParts!.prompt }, promptOptions).pipe(
+            const compactSession = isCompactionMessage(turnInput.message)
+              ? flavor.compactSession
+              : undefined;
+            yield* (
+              compactSession === undefined
+                ? runtime.prompt({ prompt: promptParts!.prompt }, promptOptions)
+                : Deferred.succeed(context.promptDispatched, undefined).pipe(
+                    Effect.andThen(compactSession(runtime, requestedSessionId)),
+                    Effect.as({ stopReason: "end_turn" } satisfies EffectAcpSchema.PromptResponse),
+                  )
+            ).pipe(
               Effect.tap(() =>
                 Ref.update(promptInstructionStates, (current) => {
-                  if (promptParts?.instructionState === undefined) return current;
+                  // Native compaction sends no prompt, so no instructions reached the agent.
+                  if (promptParts?.instructionState === undefined || compactSession !== undefined)
+                    return current;
                   const updated = new Map(current);
                   updated.set(requestedSessionId, promptParts.instructionState);
                   return updated;
@@ -8112,7 +8132,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               ),
           ),
           startTurn,
-          ...(flavor.supportsCompaction === true
+          ...(flavor.supportsCompaction === true || flavor.compactSession !== undefined
             ? {
                 compactThread: (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) =>
                   startTurn({

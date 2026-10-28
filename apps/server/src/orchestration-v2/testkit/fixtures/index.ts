@@ -37,6 +37,8 @@ import { assertClaudeMcpToolPresentationOutput } from "./claude_mcp_tool_present
 import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
 import { assertClaudeResultIsErrorOutput } from "./claude_result_is_error/output.ts";
 import { grokAutoBlockedCommandInput } from "./grok_auto_blocked_command/input.ts";
+import { kiroCompactionInput } from "./kiro_compaction/input.ts";
+import { assertKiroCompactionOutput } from "./kiro_compaction/output.ts";
 import { KIRO_EFFORT_LEVEL, KIRO_EFFORT_MODEL, kiroEffortInput } from "./kiro_effort/input.ts";
 import { assertKiroEffortOutput } from "./kiro_effort/output.ts";
 import { kiroModelSwitchInput } from "./kiro_model_switch/input.ts";
@@ -541,6 +543,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: KIRO_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertToolCallReadOnlyOnRequestKiroOutput,
+      },
+    ],
+  },
+  {
+    name: "kiro_compaction",
+    buildInput: kiroCompactionInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("kiro"),
+        transcriptFile: new URL("./kiro_compaction/kiro_transcript.ndjson", import.meta.url),
+        modelSelection: KIRO_MODEL_SELECTION,
+        assertOutput: assertKiroCompactionOutput,
       },
     ],
   },

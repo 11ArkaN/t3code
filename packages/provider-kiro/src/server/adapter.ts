@@ -54,6 +54,7 @@ import {
 export const KIRO_PROVIDER = ProviderDriverKind.make("kiro");
 /** T3's slug for "Kiro default", and Kiro's documented default model id. */
 const KIRO_DEFAULT_MODEL = "default";
+const KIRO_COMPACT_METHOD = "_kiro/session/compact";
 const KIRO_FALLBACK_DEFAULT_MODEL = "auto";
 const DEFAULT_KIRO_SETTINGS = Schema.decodeSync(KiroSettings)({});
 
@@ -73,6 +74,29 @@ const KiroProviderCapabilitiesV2 = {
     emitsSubagentLifecycle: true,
   },
 } satisfies OrchestrationV2ProviderCapabilities;
+
+const KiroCompactResult = Schema.Struct({ success: Schema.Boolean });
+const decodeKiroCompactResult = Schema.decodeUnknownOption(KiroCompactResult);
+
+/** Kiro answers a `/compact` prompt as chat, so T3 compacts with Kiro's own request. */
+const compactKiroSession = (
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  sessionId: string,
+) =>
+  runtime.request(KIRO_COMPACT_METHOD, { sessionId }).pipe(
+    Effect.flatMap((result) =>
+      Option.exists(decodeKiroCompactResult(result), (decoded) => decoded.success)
+        ? Effect.void
+        : Effect.fail(
+            new EffectAcpErrors.AcpRequestError({
+              code: -32603,
+              errorMessage: "Kiro could not compact the conversation.",
+              method: KIRO_COMPACT_METHOD,
+              data: result,
+            }),
+          ),
+    ),
+  );
 
 export interface KiroAdapterV2Options {
   readonly instanceId: Parameters<typeof makeAcpAdapterV2>[0]["instanceId"];
@@ -387,6 +411,7 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
     cancelAfterPromptStarts: { isStart: isKiroPromptActivity, bound: KIRO_CANCEL_HOLD_BOUND },
     permissionDisposition: kiroPermissionDisposition,
     approvalOptions: kiroApprovalOptions,
+    compactSession: compactKiroSession,
     // Kiro V3 advertises `promptCapabilities.image`; the shared adapter reads it.
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
