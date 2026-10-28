@@ -462,7 +462,7 @@ it.effect("rejects arguments a tool does not declare instead of dropping them", 
   }).pipe(Effect.provide(layerRecordingTools(calls)));
 });
 
-it.effect("still drops nested keys the merged advertised schema shows", () => {
+it.effect("accepts a nested key the merged advertised schema shows", () => {
   const calls: Array<unknown> = [];
   return Effect.gen(function* () {
     yield* Effect.exit(
