@@ -993,30 +993,46 @@ effectIt.effect.each([
 );
 
 effectIt.effect.each([
-  { text: "Reply with exactly the word DURIAN-26384.", nativeResume: false },
-  { text: "Continue where you left off.", nativeResume: true },
-])("sends a restart continuation's text unless it is bare: %j", ({ text, nativeResume }) =>
-  Effect.gen(function* () {
-    const harness = makeLocalCommandHarness({
-      text,
-      previousTurn: { runStatus: "completed", turnStatus: "completed" },
-    });
-    const [source, continuation] = harness.projection().runs;
-    harness.setProjection({
-      ...harness.projection(),
-      runs: [source!, { ...continuation!, restartContinuationOfRunId: source!.id }],
-    });
+  { text: "Reply with exactly the word DURIAN-26384.", sourceReplied: false, nativeResume: false },
+  { text: "Continue where you left off.", sourceReplied: false, nativeResume: false },
+  { text: "Continue where you left off.", sourceReplied: true, nativeResume: true },
+])(
+  "resumes a restart continuation natively only once its source reached the provider: %j",
+  ({ text, sourceReplied, nativeResume }) =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text,
+        previousTurn: { runStatus: "completed", turnStatus: "completed" },
+      });
+      const projection = harness.projection();
+      const [source, continuation] = projection.runs;
+      harness.setProjection({
+        ...projection,
+        runs: [source!, { ...continuation!, restartContinuationOfRunId: source!.id }],
+        messages: sourceReplied
+          ? [
+              ...projection.messages,
+              {
+                ...projection.messages[0]!,
+                id: MessageId.make("message-source-reply"),
+                runId: source!.id,
+                role: "assistant",
+                text: "Partial reply",
+              },
+            ]
+          : projection.messages,
+      });
 
-    yield* harness.start;
-    yield* harness.startRootRun.mock.calls[0]![0].session.startTurn({
-      restartContinuationOfRunId: source!.id,
-      message: { text, attachments: [] },
-    } as never);
+      yield* harness.start;
+      yield* harness.startRootRun.mock.calls[0]![0].session.startTurn({
+        restartContinuationOfRunId: source!.id,
+        message: { text, attachments: [] },
+      } as never);
 
-    const sent = harness.startTurn.mock.calls[0]![0];
-    expect(sent.message.text).toBe(text);
-    expect(sent.restartContinuationOfRunId).toBe(nativeResume ? source!.id : undefined);
-  }),
+      const sent = harness.startTurn.mock.calls[0]![0];
+      expect(sent.message.text).toBe(text);
+      expect(sent.restartContinuationOfRunId).toBe(nativeResume ? source!.id : undefined);
+    }),
 );
 
 effectIt.effect("does not start another turn when abandoned-turn cleanup fails", () =>

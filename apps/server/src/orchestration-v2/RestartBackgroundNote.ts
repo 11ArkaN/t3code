@@ -221,15 +221,6 @@ export function restartContinuationNote(
   return { work, settled: isRestartNoteSource(current, providerTurns) };
 }
 
-export const RESTART_CONTINUE_PROMPT = "Continue where you left off.";
-
-/** Codex resumes a bare continuation natively; a note or resent request must reach the provider as prompt text. */
-export function isBareRestartContinuation(
-  message: Pick<OrchestrationV2ConversationMessage, "text" | "attachments">,
-): boolean {
-  return message.text === RESTART_CONTINUE_PROMPT && message.attachments.length === 0;
-}
-
 /** Without a provider item or reply, the provider may never have recorded the run's request. */
 export function restartRunReachedProvider(
   runId: OrchestrationV2Run["id"],

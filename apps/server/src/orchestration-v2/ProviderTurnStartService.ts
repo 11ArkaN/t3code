@@ -56,9 +56,10 @@ import {
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import {
-  isBareRestartContinuation,
+  isRestartNoteContinuation,
   pendingRestartCancelledBackgroundWork,
   restartCancelledBackgroundWorkNote,
+  restartRunReachedProvider,
 } from "./RestartBackgroundNote.ts";
 
 export class ProviderTurnStartError extends Schema.TaggedError<ProviderTurnStartError>()(
@@ -764,9 +765,23 @@ export const layer: Layer.Layer<
       // Codex and Claude parse /goal from the prompt, so it goes verbatim and history waits a turn.
       const goalDriver = session.driver === "codex" || session.driver === "claudeAgent";
       const goalCommand = goalDriver && parseGoalCommand(message) !== null;
-      // The provider turn marks cancellation work delivered; only bare restart continuations resume natively.
+      // The provider turn marks cancellation work delivered; restart continuations resume natively unless they carry a note or a request the provider never saw.
       const promptedContinuation =
-        run.restartContinuationOfRunId !== undefined && !isBareRestartContinuation(message);
+        isRestartNoteContinuation(
+          run,
+          projection.runs,
+          projection.providerTurns,
+          projection.attempts,
+        ) ||
+        (run.restartContinuationOfRunId !== undefined &&
+          !restartRunReachedProvider(
+            run.restartContinuationOfRunId,
+            yield* projectionStore.getThreadRecords(input.threadId, ["messages", "turnItems"], {
+              messageRunIds: [run.restartContinuationOfRunId],
+              messageRoles: ["assistant"],
+              turnItemRunIds: [run.restartContinuationOfRunId],
+            }),
+          ));
       const restartCancelledWork = pendingRestartCancelledBackgroundWork({
         runs: projection.runs,
         providerTurns: projection.providerTurns,

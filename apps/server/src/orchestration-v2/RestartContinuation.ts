@@ -24,11 +24,12 @@ import {
   cancelledBeforeStart,
   isRestartNoteSource,
   neverStarted,
-  RESTART_CONTINUE_PROMPT,
   restartCancelledBackgroundWorkNote,
   restartContinuationNote,
   restartRunReachedProvider,
 } from "./RestartBackgroundNote.ts";
+
+const CONTINUE_PROMPT = "Continue where you left off.";
 
 const MAX_CONTINUATION_CHAIN = 3;
 const CONTINUATION_LOOP_WINDOW_MS = 5 * 60 * 1_000;
@@ -281,7 +282,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     const noteText =
       note.work.length === 0 ? undefined : restartCancelledBackgroundWorkNote(note.work);
     // A resent continuation's text already carries its chain's note.
-    const request = resent?.text ?? RESTART_CONTINUE_PROMPT;
+    const request = resent?.text ?? CONTINUE_PROMPT;
     const text =
       noteText === undefined ||
       (resent !== undefined && source.restartContinuationOfRunId !== undefined)

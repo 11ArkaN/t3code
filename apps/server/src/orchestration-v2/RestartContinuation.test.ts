@@ -491,15 +491,22 @@ it.effect("resends the original request when the cut turn never reached the prov
     const base = makeProjection();
     const userMessageId = MessageId.make("message:durian");
     const request = "Reply with exactly the word DURIAN-26384 and nothing else.";
+    const attachments = [
+      {
+        type: "image",
+        id: "attachment:durian",
+        name: "durian.png",
+        mimeType: "image/png",
+        sizeBytes: 1,
+      },
+    ];
     const cut = {
       ...base,
       runs: [{ ...base.runs[0]!, status: "cancelled", userMessageId }],
       providerTurns: [{ ...base.providerTurns[0]!, status: "cancelled" }],
-      messages: [
-        { id: userMessageId, threadId, runId, role: "user", text: request, attachments: [] },
-      ],
+      messages: [{ id: userMessageId, threadId, runId, role: "user", text: request, attachments }],
     } as unknown as OrchestrationV2ThreadProjection;
-    const continuationText = Effect.fn(function* (projection: OrchestrationV2ThreadProjection) {
+    const continuation = Effect.fn(function* (projection: OrchestrationV2ThreadProjection) {
       const commands: Parameters<
         ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
       >[0][] = [];
@@ -521,24 +528,42 @@ it.effect("resends the original request when the cut turn never reached the prov
       assert.lengthOf(commands, 1);
       const command = commands[0]!;
       assert.equal(command.type, "message.dispatch");
-      return command.type === "message.dispatch" ? command.text : "";
+      return command.type === "message.dispatch"
+        ? { text: command.text, attachments: command.attachments }
+        : { text: "", attachments: [] };
     });
 
-    assert.include(
-      yield* continuationText(cut),
-      request,
+    assert.deepEqual(
+      yield* continuation(cut),
+      { text: request, attachments },
       "the provider never saw the cut turn's request, so the continuation must carry it",
     );
 
-    const answered = {
+    const replied = {
       ...cut,
       messages: [
         ...cut.messages,
         { id: MessageId.make("message:partial"), threadId, runId, role: "assistant", text: "DUR" },
       ],
-      turnItems: [{ id: "item:partial", threadId, runId, type: "assistant_message" }],
     } as unknown as OrchestrationV2ThreadProjection;
-    assert.notInclude(yield* continuationText(answered), request);
+    const providerItem = {
+      ...cut,
+      turnItems: [
+        {
+          id: "item:reasoning",
+          threadId,
+          runId,
+          type: "reasoning",
+          nativeItemRef: { driver: "codex", nativeId: "native-reasoning" },
+        },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+    for (const reached of [replied, providerItem]) {
+      assert.deepEqual(yield* continuation(reached), {
+        text: "Continue where you left off.",
+        attachments: [],
+      });
+    }
   }),
 );
 
