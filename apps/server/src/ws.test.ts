@@ -759,14 +759,13 @@ it.effect("server.getSettings returns the client-redacted server settings", () =
       ),
     );
     const updated = yield* settings.updateSettings({ defaultAutoPull: true });
-    const getSettingsTag: string = "server.getSettings";
     yield* server.write(0, {
       _tag: "Request",
       id: RpcMessage.RequestId("settings"),
-      tag: getSettingsTag,
+      tag: "server.getSettings",
       payload: {},
       headers: Headers.empty,
-    } as RpcMessage.FromClient<RpcGroup.Rpcs<typeof WsRpcGroup>>);
+    });
     assert.deepEqual(
       yield* Queue.take(exits),
       Exit.succeed(ServerSettings.redactServerSettingsForClient(updated)),
