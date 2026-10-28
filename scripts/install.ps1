@@ -219,7 +219,8 @@ $shim = Join-Path $binDir "t3.cmd"
 # Replace only a shim that runs a version in this home; never the desktop app's or another t3.
 if (Test-Path $shim) {
   $existingTarget = ""
-  foreach ($line in Get-Content $shim) {
+  # The shim is UTF-8 without a BOM; Windows PowerShell 5.1 reads files as ANSI by default.
+  foreach ($line in [System.IO.File]::ReadAllLines($shim, [System.Text.Encoding]::UTF8)) {
     if ($line -match '^"([^"]+)"') { $existingTarget = $Matches[1]; break }
   }
   $ownedPrefix = $versionsDir.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
