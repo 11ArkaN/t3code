@@ -174,7 +174,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
 
       await NodeFSP.rm(link);
       await NodeFSP.symlink(NodePath.join(home, "bin/t3"), link);
-      const overDesktop = await installOver({ script: "install.sh", home, binDir });
+      const overDesktop = await installOver({
+        script: "install.sh",
+        home: `${home}//`,
+        binDir: `${binDir}/`,
+      });
       expect(overDesktop.code, overDesktop.output).toBe(0);
       expect(await NodeFSP.readlink(link)).toBe(NodePath.join(home, "runtime/versions/1.2.3/t3"));
     } finally {
