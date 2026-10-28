@@ -147,7 +147,8 @@ final class T3NativeFilePresentation: NSObject, QLPreviewControllerDataSource,
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int { items.count }
 
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    items[index]
+    // A failed sibling can shrink the gallery before Quick Look's current index is moved back.
+    items[min(index, items.count - 1)]
   }
 
   private func sourceView(for item: QLPreviewItem) -> UIView? {
