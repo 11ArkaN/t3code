@@ -80,7 +80,7 @@ it("leaves focus off the composer after tapping another thread on a touch-primar
   await expect.element(lastAnswer(B)).toBeVisible();
   await expect.element(row).toHaveFocus();
   // The thread switch focuses the composer one frame after it renders.
-  act(() => {
+  await act(() => {
     vi.advanceTimersToNextFrame();
   });
 
@@ -88,5 +88,24 @@ it("leaves focus off the composer after tapping another thread on a touch-primar
   expect(
     document.activeElement?.closest('[data-testid="composer-editor"]'),
     "a touch thread switch focused the composer editor",
+  ).toBeNull();
+});
+
+it("leaves focus off the composer after picking an access mode on a touch-primary device", async () => {
+  await using _touch = await emulateTouchPrimaryDevice();
+  await using _app = await mountApp(A);
+
+  await userEvent.click(page.getByRole("button", { name: "Permissions: Full access" }));
+  using _timers = fakeTimers();
+  await userEvent.click(page.getByRole("menuitemradio", { name: "Supervised" }));
+  await expect.element(page.getByRole("button", { name: "Permissions: Supervised" })).toBeVisible();
+  // The pick schedules a composer focus for the next frame.
+  await act(() => {
+    vi.advanceTimersToNextFrame();
+  });
+
+  expect(
+    document.activeElement?.closest('[data-testid="composer-editor"]'),
+    "a touch access-mode pick focused the composer editor",
   ).toBeNull();
 });
