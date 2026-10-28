@@ -4,36 +4,35 @@ import { KeyboardController, KeyboardEvents } from "react-native-keyboard-contro
 // repairs a nonanimated IME change with didHide then didShow alone: that didHide must
 // not hide the accessory (it would clear the terminal's focus), but the didShow after
 // it starts a new show so a dismissed accessory comes back.
+const subscribers = new Set<() => void>();
 let showEpoch = 1;
 let keyboardShowing = KeyboardController.isVisible();
-let hiddenWithoutWillHide = false;
+let hiddenSinceShow = !keyboardShowing;
+
+const notify = () => {
+  for (const subscriber of subscribers) subscriber();
+};
+const show = () => {
+  if (hiddenSinceShow) showEpoch += 1;
+  hiddenSinceShow = false;
+  keyboardShowing = true;
+  notify();
+};
+KeyboardEvents.addListener("keyboardWillShow", show);
+KeyboardEvents.addListener("keyboardDidShow", show);
+KeyboardEvents.addListener("keyboardWillHide", () => {
+  keyboardShowing = false;
+  hiddenSinceShow = true;
+  notify();
+});
+KeyboardEvents.addListener("keyboardDidHide", () => {
+  hiddenSinceShow = true;
+});
 
 export function subscribeKeyboardShowing(onChange: () => void) {
-  keyboardShowing = KeyboardController.isVisible();
-  hiddenWithoutWillHide = false;
-  const show = () => {
-    const repaired = hiddenWithoutWillHide;
-    hiddenWithoutWillHide = false;
-    if (!keyboardShowing || repaired) {
-      keyboardShowing = true;
-      showEpoch += 1;
-    }
-    onChange();
-  };
-  const willShow = KeyboardEvents.addListener("keyboardWillShow", show);
-  const didShow = KeyboardEvents.addListener("keyboardDidShow", show);
-  const willHide = KeyboardEvents.addListener("keyboardWillHide", () => {
-    keyboardShowing = false;
-    onChange();
-  });
-  const didHide = KeyboardEvents.addListener("keyboardDidHide", () => {
-    hiddenWithoutWillHide = keyboardShowing;
-  });
+  subscribers.add(onChange);
   return () => {
-    willShow.remove();
-    didShow.remove();
-    willHide.remove();
-    didHide.remove();
+    subscribers.delete(onChange);
   };
 }
 
