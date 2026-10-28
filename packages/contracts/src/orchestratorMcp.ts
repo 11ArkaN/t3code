@@ -42,11 +42,11 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 
 const OrchestratorMcpPrompt = TrimmedNonEmptyString.check(Schema.isMaxLength(120_000));
 const OrchestratorMcpTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(512));
-const OrchestratorMcpClientRequestId = TrimmedNonEmptyString.check(Schema.isMaxLength(256)).pipe(
-  Schema.annotateEncoded({
-    description: "Reuse it to retry the same call. A new call gets a new key.",
-  }),
-);
+const OrchestratorMcpClientRequestId = Schema.optional(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+).annotate({
+  description: "Reuse it to retry the same call. A new call gets a new key.",
+});
 
 // OpenCode 1.15 serializes nested MCP union objects as JSON strings; decode that form at the boundary.
 const OrchestratorMcpScheduleFromJsonString = Schema.fromJsonString(
@@ -162,7 +162,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   timeoutMs: Schema.optional(Schema.Finite).annotate({
     description: "Mode 'wait' only. Default 10 min. A timeout does not cancel the child.",
   }),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
   runtimeMode: Schema.optional(
     OrchestratorMcpRuntimeMode.annotate({
       description:
@@ -220,7 +220,7 @@ export type OrchestratorMcpTaskStatusInput = typeof OrchestratorMcpTaskStatusInp
 export const OrchestratorMcpTaskCancelInput = Schema.Struct({
   taskId: NodeId,
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(2_000))),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
 });
 export type OrchestratorMcpTaskCancelInput = typeof OrchestratorMcpTaskCancelInput.Type;
 
@@ -244,7 +244,7 @@ export const OrchestratorMcpCreateThreadsInput = Schema.Struct({
     Schema.isMinLength(1),
     Schema.isMaxLength(20),
   ),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
 });
 export type OrchestratorMcpCreateThreadsInput = typeof OrchestratorMcpCreateThreadsInput.Type;
 
@@ -455,7 +455,7 @@ export const OrchestratorMcpThreadSendInput = Schema.Struct({
   threadId: ThreadId,
   message: OrchestratorMcpPrompt,
   mode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
 });
 export type OrchestratorMcpThreadSendInput = typeof OrchestratorMcpThreadSendInput.Type;
 
@@ -490,7 +490,7 @@ export const OrchestratorMcpThreadInterruptInput = Schema.Struct({
   threadId: ThreadId,
   runId: Schema.optional(RunId),
   reason: Schema.optional(Schema.String.check(Schema.isMaxLength(2_000))),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
 });
 export type OrchestratorMcpThreadInterruptInput = typeof OrchestratorMcpThreadInterruptInput.Type;
 
@@ -572,7 +572,7 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
       description: "Default true: runs post in this thread. False: new thread per run.",
     }),
   ),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
+  clientRequestId: OrchestratorMcpClientRequestId,
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
 
@@ -651,7 +651,7 @@ export const OrchestratorMcpRequestSecretInput = Schema.Struct({
   timeoutMs: Schema.optional(
     Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 60 * 60 * 1_000 })),
   ).annotate({ description: "Default 10 min." }),
-  clientRequestId: Schema.optional(OrchestratorMcpClientRequestId).annotate({
+  clientRequestId: OrchestratorMcpClientRequestId.annotate({
     description: "Retry key for this ask. New key after a timeout or cancel.",
   }),
 });

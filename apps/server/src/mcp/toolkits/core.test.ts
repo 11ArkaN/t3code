@@ -903,9 +903,6 @@ interface ParameterSchema {
   readonly items?: ParameterSchema;
 }
 
-const parameterDescription = (schema: ParameterSchema): string | undefined =>
-  schema.description ?? schema.anyOf?.map(parameterDescription).find(Boolean);
-
 const parameterFields = (schema: ParameterSchema, field: string): ParameterSchema[] => [
   ...(schema.properties?.[field] ? [schema.properties[field]] : []),
   ...(schema.anyOf ?? []).flatMap((member) => parameterFields(member, field)),
@@ -952,7 +949,7 @@ it("advertises existing string parameter guidance to MCP clients", () => {
       );
     expect(fields.length, name + "." + path).toBeGreaterThan(0);
     for (const field of fields) {
-      expect(parameterDescription(field), name + "." + path).toEqual(expect.any(String));
+      expect(field.description, name + "." + path).toEqual(expect.any(String));
     }
   }
 });
