@@ -9170,95 +9170,122 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
-  it.effect("leaves buffered wake messages for the continuation queued behind a user turn", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const harness = yield* makeWakeHarness;
-        const now = yield* DateTime.now;
+  it.effect.each([true, false])(
+    "leaves buffered wake messages for the continuation queued behind a user turn, buffered result=%s",
+    (bufferedResult) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarness;
+          const now = yield* DateTime.now;
 
-        yield* harness.runtime.startTurn(
-          makeClaudeTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-claude-wake-4a"),
-            text: "Run the build in the background.",
-            attachments: [],
-          }),
-        );
-        yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
-        yield* Queue.offer(harness.sdkMessages, turnOneResult);
-        yield* harness.awaitTerminal(1);
-        yield* Queue.offer(harness.sdkMessages, wakeNotification);
-        yield* Queue.offer(harness.sdkMessages, wakeResult);
-        yield* harness.awaitContinuation(1);
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-wake-4a"),
+              text: "Run the build in the background.",
+              attachments: [],
+            }),
+          );
+          yield* Queue.offer(harness.sdkMessages, wakeTaskStarted);
+          yield* Queue.offer(harness.sdkMessages, turnOneResult);
+          yield* harness.awaitTerminal(1);
+          yield* Queue.offer(harness.sdkMessages, wakeNotification);
+          yield* Queue.offer(harness.sdkMessages, bufferedResult ? wakeResult : wakeTurnInit);
+          yield* harness.awaitContinuation(1);
 
-        yield* harness.runtime.startTurn(
-          makeClaudeTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-claude-wake-4b"),
-            text: "How is the build going?",
-            attachments: [],
-            providerTurnOrdinal: 2,
-          }),
-        );
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-wake-4b"),
+              text: "How is the build going?",
+              attachments: [],
+              providerTurnOrdinal: 2,
+            }),
+          );
 
-        yield* harness.until(() => harness.offeredMessages.length === 2);
-        assert.lengthOf(harness.terminalEvents(), 1);
-        assert.isTrue(yield* harness.hasPendingBackgroundWork);
+          yield* harness.until(() => harness.offeredMessages.length === 2);
+          assert.lengthOf(harness.terminalEvents(), 1);
+          assert.equal(yield* harness.hasPendingBackgroundWork, bufferedResult);
 
-        yield* Queue.offer(
-          harness.sdkMessages,
-          makeResultFrame({
-            uuid: "00000000-0000-4000-8000-000000000105",
-            result: "The build passed; nothing else pending.",
-          }),
-        );
-        yield* harness.awaitTerminal(2);
-        assert.equal(harness.terminalEvents()[1]?.status, "completed");
-        assert.isFalse(
-          harness.events.some(
-            (event) => event.type === "message.updated" && event.message.text === WAKE_RESULT_TEXT,
+          yield* Queue.offer(
+            harness.sdkMessages,
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000105",
+              result: "The build passed; nothing else pending.",
+            }),
+          );
+          yield* harness.awaitTerminal(2);
+          assert.equal(harness.terminalEvents()[1]?.status, "completed");
+          assert.isFalse(
+            harness.events.some(
+              (event) =>
+                event.type === "message.updated" && event.message.text === WAKE_RESULT_TEXT,
+            ),
+          );
+
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-wake-4c"),
+              text: "Background task completed.",
+              attachments: [],
+              providerTurnOrdinal: 3,
+              messageCreatedBy: "agent",
+              messageCreationSource: "provider",
+            }),
+          );
+          yield* TestClock.adjust("8 hours");
+          assert.lengthOf(harness.terminalEvents(), 3);
+          yield* harness.awaitTerminal(3);
+          assert.equal(harness.terminalEvents()[2]?.status, "completed");
+          assert.lengthOf(harness.offeredMessages, 2);
+          assert.equal(
+            harness.events.some(
+              (event) =>
+                event.type === "message.updated" && event.message.text === WAKE_RESULT_TEXT,
+            ),
+            bufferedResult,
+          );
+          assert.isFalse(
+            harness.events.some(
+              (event) =>
+                event.type !== "provider_thread.updated" &&
+                JSON.stringify(event).includes(WAKE_TASK_ID),
+            ),
+          );
+          assert.isFalse(yield* harness.hasPendingBackgroundWork);
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-wake-4d"),
+              text: "Continue with the next task.",
+              attachments: [],
+              providerTurnOrdinal: 4,
+            }),
+          );
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000106",
+              result: "The next task completed.",
+            }),
+          );
+          yield* harness.awaitTerminal(4);
+          assert.equal(harness.terminalEvents()[3]?.status, "completed");
+          assert.lengthOf(harness.offeredMessages, 3);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
           ),
-        );
-
-        yield* harness.runtime.startTurn(
-          makeClaudeTestTurnInput({
-            threadId: harness.threadId,
-            providerThread: harness.providerThread,
-            now,
-            attemptId: RunAttemptId.make("attempt-claude-wake-4c"),
-            text: "Background task completed.",
-            attachments: [],
-            providerTurnOrdinal: 3,
-            messageCreatedBy: "agent",
-            messageCreationSource: "provider",
-          }),
-        );
-        yield* harness.awaitTerminal(3);
-        assert.equal(harness.terminalEvents()[2]?.status, "completed");
-        assert.lengthOf(harness.offeredMessages, 2);
-        assert.isTrue(
-          harness.events.some(
-            (event) => event.type === "message.updated" && event.message.text === WAKE_RESULT_TEXT,
-          ),
-        );
-        assert.isFalse(
-          harness.events.some(
-            (event) =>
-              event.type !== "provider_thread.updated" &&
-              JSON.stringify(event).includes(WAKE_TASK_ID),
-          ),
-        );
-        assert.isFalse(yield* harness.hasPendingBackgroundWork);
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
         ),
       ),
-    ),
   );
 
   it.effect("ignores a zero-turn task-notification origin result during a normal user turn", () =>

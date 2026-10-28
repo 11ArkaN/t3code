@@ -4632,6 +4632,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             { readonly messages: ReadonlyArray<SDKMessage>; readonly detail: string | null }
           >(),
         );
+        // Buffered root frames that a later live result closed; replaying them must not open a wake.
+        const endedWakeTurnFrames = new WeakSet<SDKMessage>();
         // Wake results lack task ids and can follow queued prompts; retain reports for one user turn.
         // Keep report stamps atomic with turn changes.
         const wakeReportsByNativeThread = yield* Ref.make<{
@@ -9205,10 +9207,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const message = input.message;
           const context = yield* Ref.get(activeTurn);
           const liveQuery = yield* Ref.get(queryContext);
+          if (message.type === "result" && liveQuery?.query === input.query) {
+            for (const buffered of (yield* Ref.get(wakeBuffers)).get(liveQuery.nativeThreadId)
+              ?.messages ?? []) {
+              if (isClaudeRootTurnFrame(buffered)) endedWakeTurnFrames.add(buffered);
+            }
+          }
           if (
             context?.promptUuid === null &&
             liveQuery?.query === input.query &&
-            isClaudeRootTurnFrame(message)
+            isClaudeRootTurnFrame(message) &&
+            !endedWakeTurnFrames.has(message)
           ) {
             context.nativeWakeStarted = true;
           }
