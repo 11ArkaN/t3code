@@ -1002,6 +1002,35 @@ describe("rejected git refs", () => {
 });
 
 it.layer(layerTest)("GitVcsDriver core integration", (it) => {
+  // regression: #26577 a timed-out git that outlives its timeout holds a process permit
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "kills a timed-out git command that ignores SIGTERM",
+    () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const markerPath = pathService.join(yield* makeTmpDir(), "outlived-timeout");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const error = yield* TestClock.withLive(
+          driver.execute({
+            operation: "GitVcsDriver.test.ignoresSigterm",
+            cwd,
+            args: ["-c", `alias.hang=!trap '' TERM; sleep 3; touch '${markerPath}'`, "hang"],
+            timeoutMs: 200,
+          }),
+        ).pipe(Effect.flip);
+
+        assert.equal(error.detail, "Git command timed out.");
+        assert.isFalse(
+          yield* fileSystem.exists(markerPath),
+          "the timed-out git command kept running until it finished on its own",
+        );
+      }),
+  );
+
   describe("structured errors", () => {
     it.effect("does not retain git arguments or stderr in command failures", () =>
       Effect.gen(function* () {
