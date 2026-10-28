@@ -599,6 +599,7 @@ export default defineConfig({
       },
       {
         files: [
+          "apps/mobile/src/components/ScreenFade.tsx",
           "apps/mobile/src/features/archive/ArchivedThreadsScreen.tsx",
           "apps/mobile/src/features/connection/ConnectionsNewRouteScreen.tsx",
           "apps/mobile/src/features/files/FileMarkdownPreview.tsx",

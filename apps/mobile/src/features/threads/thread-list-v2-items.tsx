@@ -168,7 +168,6 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
 function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
-  readonly tone?: "default" | "snoozed";
   readonly disclosure?: {
     readonly expanded: boolean;
     readonly disabled?: boolean;
@@ -177,7 +176,6 @@ function ThreadListV2Section(props: {
     readonly accessibilityHint: string;
   };
 }) {
-  const snoozed = props.tone === "snoozed";
   const sidebarPane = props.pane === "sidebar";
   const className = cn(
     "mb-1.5 mt-4 flex-row items-center gap-2.5",
@@ -188,31 +186,18 @@ function ThreadListV2Section(props: {
       <Text
         className={cn(
           "text-xs font-t3-medium",
-          sidebarPane
-            ? "text-drawer-foreground-muted"
-            : snoozed
-              ? "text-foreground-secondary"
-              : "text-foreground-tertiary",
+          sidebarPane ? "text-drawer-foreground-muted" : "text-foreground-tertiary",
         )}
       >
         {props.label}
       </Text>
-      <View
-        className={cn(
-          "h-px flex-1",
-          snoozed ? "bg-primary/20" : sidebarPane ? "bg-drawer-border" : "bg-border",
-        )}
-      />
+      <View className={cn("h-px flex-1", sidebarPane ? "bg-drawer-border" : "bg-border")} />
       {props.disclosure ? (
         <SymbolView
           name="chevron.down"
           size={10}
           tintColorClassName={
-            sidebarPane
-              ? "accent-drawer-foreground-muted"
-              : snoozed
-                ? "accent-icon-muted"
-                : "accent-foreground-muted"
+            sidebarPane ? "accent-drawer-foreground-muted" : "accent-foreground-muted"
           }
           type="monochrome"
           style={{ transform: [{ rotate: props.disclosure.expanded ? "180deg" : "0deg" }] }}
@@ -267,7 +252,6 @@ function ThreadListV2ShelfHeader(
     <ThreadListV2Section
       label={props.expanded ? label : `${label} (${props.count})`}
       pane={props.pane}
-      tone={props.kind === "snoozed" ? "snoozed" : "default"}
       disclosure={{
         expanded: props.expanded,
         disabled: props.disabled,

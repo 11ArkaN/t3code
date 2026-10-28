@@ -146,15 +146,20 @@ function BackgroundWorkList(props: {
     reportFailure: false,
   });
   const [stopping, setStopping] = useState(false);
+  // An accepted interrupt can leave tasks running a moment longer: "Stopping..." holds until they
+  // change, and stays tappable for a retry.
+  const workKey = presentation?.items.map((item) => item.taskId).join(",") ?? "";
+  const [stoppedWorkKey, setStoppedWorkKey] = useState<string | null>(null);
   // Desktop's Stop: interrupting the turn ends its background commands and subagents.
   const stop = async () => {
     setStopping(true);
+    const requestWorkKey = workKey;
     const result = await interruptThreadTurn({
       environmentId: target.environmentId,
       input: { threadId: target.threadId },
     });
-    // An accepted interrupt can leave tasks running a moment longer; allow a retry.
     setStopping(false);
+    if (result._tag === "Success") setStoppedWorkKey(requestWorkKey);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       Dialog.alert(
@@ -178,7 +183,7 @@ function BackgroundWorkList(props: {
       ))}
       <View className="pt-4">
         <Button
-          label={stopping ? "Stopping..." : "Stop"}
+          label={stopping || stoppedWorkKey === workKey ? "Stopping..." : "Stop"}
           accessibilityLabel="Stop background work"
           tone="danger"
           fullWidth

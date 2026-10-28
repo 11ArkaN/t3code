@@ -94,18 +94,10 @@ const ESTIMATED_ROW_HEIGHT = 42;
 
 function PopoverSurface(props: { readonly children: React.ReactNode }) {
   // iOS opens this over the moving transcript; a see-through surface makes both unreadable.
-  // The fade lets messages above dissolve into the screen instead of being cut by the edge.
   if (Platform.OS === "ios") {
     return (
-      <View>
-        <View
-          pointerEvents="none"
-          className="absolute bottom-full h-6 bg-linear-to-b from-screen/0 to-screen"
-          style={{ left: -12, right: -12 }}
-        />
-        <View className="overflow-hidden rounded-xl border border-border bg-card">
-          {props.children}
-        </View>
+      <View className="overflow-hidden rounded-xl border border-border bg-card">
+        {props.children}
       </View>
     );
   }

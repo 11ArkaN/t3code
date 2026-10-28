@@ -213,7 +213,7 @@ function StatusSegment(props: {
         <SymbolView
           name={icon}
           size={13}
-          tintColorClassName="accent-foreground-muted"
+          tintColorClassName={statusTint(status)}
           type="monochrome"
         />
       ) : null}
@@ -299,7 +299,7 @@ function PreviewButton(props: {
 function statusIcon(status: FloatingWorkingStatus): AppSymbolName | null {
   switch (status.kind) {
     case "working":
-      return null;
+      return "circle.dashed";
     case "syncing":
     case "connection":
       return "arrow.clockwise";
@@ -315,6 +315,24 @@ function statusIcon(status: FloatingWorkingStatus): AppSymbolName | null {
       return "target";
     case "preparing":
       return "arrow.triangle.branch";
+  }
+}
+
+/** The thread list's status colors: working runs in sky, input in indigo, settled in emerald. */
+function statusTint(status: FloatingWorkingStatus): string {
+  switch (status.kind) {
+    case "working":
+      return "accent-adaptive-sky-600-400";
+    case "background":
+      return status.waiting ? "accent-foreground-muted" : "accent-adaptive-sky-600-400";
+    case "child-input":
+      return "accent-adaptive-indigo-600-300";
+    case "lifecycle":
+      return status.state === "settled"
+        ? "accent-adaptive-emerald-700-300"
+        : "accent-foreground-muted";
+    default:
+      return "accent-foreground-muted";
   }
 }
 

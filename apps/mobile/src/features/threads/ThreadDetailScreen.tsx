@@ -127,6 +127,7 @@ import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
 import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
+import { ScreenFade } from "../../components/ScreenFade";
 import {
   ANDROID_READING_MAX_WIDTH,
   CHAT_CONTENT_MAX_WIDTH,
@@ -575,9 +576,16 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     lastVisitedAt: props.selectedThread.lastVisitedAt,
     latestRunCompletedAt: props.selectedThread.latestRun?.completedAt ?? null,
   });
+  // Like desktop, Stop does not ask first. Acceptance does not end the tasks at once, so the row
+  // keeps reading "Stopping..." until these tasks change; it stays tappable for a retry.
+  const backgroundWorkKey = `${selectedThreadKey}:${props.selectedThread.pendingBackgroundTasks
+    .map((task) => task.taskId)
+    .join(",")}`;
+  const [stoppedWorkKey, setStoppedWorkKey] = useState<string | null>(null);
   const runStatusAction = async (action: "stop" | "wake" | "unsettle" | "dismiss") => {
     if (statusPending || !props.canOperateThread) return;
     const request = { threadKey: selectedThreadKey };
+    const workKey = backgroundWorkKey;
     setStatusRequest(request);
     const target = {
       environmentId: props.environmentId,
@@ -612,8 +620,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                 ...target,
                 input: { ...target.input, visitedAt: wokeAt ?? lifecycleNow },
               });
-    // An accepted interrupt can leave tasks running. Release the action for retry.
     setStatusRequest((current) => (current === request ? null : current));
+    if (action === "stop" && result._tag === "Success") setStoppedWorkKey(workKey);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       const error = squashAtomCommandFailure(result);
       Dialog.alert(
@@ -685,7 +693,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
           });
         },
         action: {
-          label: statusPending ? "Stopping..." : "Stop",
+          label: statusPending || stoppedWorkKey === backgroundWorkKey ? "Stopping..." : "Stop",
           accessibilityLabel: "Stop background work",
           disabled: !props.canOperateThread || statusPending,
           onPress: () => void runStatusAction("stop"),
@@ -1037,6 +1045,13 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       ),
     [userInputCoverageApplies],
   );
+  const composerBackdropStyle = useAnimatedStyle(() => ({ top: -runStatusLift.value }));
+  // Keyed by thread so a switch never inherits the last thread's scroll position.
+  const [contentUnderHeader, setContentUnderHeader] = useState<string | null>(null);
+  const handleHeaderMaterialVisibilityChange = (visible: boolean) => {
+    setContentUnderHeader(visible ? selectedThreadKey : null);
+    props.onHeaderMaterialVisibilityChange?.(visible);
+  };
   const handleEndFollowEnabledChange = (enabled: boolean) => {
     endFollowEnabledRef.current = enabled;
     setEndFollowEnabled(enabled);
@@ -1391,12 +1406,28 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
               contentSideInsets={nativeMetrics?.safeArea}
               layoutVariant={layoutVariant}
               usesAutomaticContentInsets={props.usesAutomaticContentInsets}
-              onHeaderMaterialVisibilityChange={props.onHeaderMaterialVisibilityChange}
+              onHeaderMaterialVisibilityChange={handleHeaderMaterialVisibilityChange}
               onEndFollowEnabledChange={handleEndFollowEnabledChange}
               skills={selectedProviderSkills}
               onUseArtifactTemplate={handleUseArtifactTemplate}
             />
           </RenderErrorBoundary>
+          {Platform.OS === "ios" && props.usesAutomaticContentInsets === true ? (
+            // UIKit's edge effect lets scrolled code read through the iPad status bar and header.
+            // An opaque band does not; scrolled, a fade under it replaces the hard cut.
+            <View
+              pointerEvents="none"
+              className="absolute inset-x-0 top-0 bg-screen"
+              style={{ height: navigationHeaderHeight }}
+            >
+              {contentUnderHeader === selectedThreadKey ? (
+                <ScreenFade
+                  opaqueEdge="top"
+                  style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 24 }}
+                />
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : (
         <View className="flex-1" />
@@ -1441,19 +1472,35 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                 composerWidthStyle,
               ]}
             >
-              {Platform.OS === "ios" ? (
-                // Plain View: Reanimated drops experimental_backgroundImage. Reaches the screen
-                // edge so scrolled text never shows crisp under or below the composer.
-                <View
+              {Platform.OS === "ios" && !props.draftMode ? (
+                // Opaque from the block (or its lifted run status) past the screen edge, so no
+                // scrolled text reads beside, under or below the composer. Scrolled up, a fade
+                // above it also sits under the scroll-to-end button.
+                <Animated.View
                   pointerEvents="none"
-                  className="absolute bg-linear-to-b from-screen/0 via-screen/85 to-screen"
-                  style={{
-                    top: -24,
-                    bottom: -(controlInsets.bottom + 120),
-                    left: -controlInsets.left,
-                    right: -controlInsets.right,
-                  }}
-                />
+                  className="absolute bg-screen"
+                  style={[
+                    {
+                      bottom: -(controlInsets.bottom + 120),
+                      left: -controlInsets.left,
+                      right: -controlInsets.right,
+                    },
+                    composerBackdropStyle,
+                  ]}
+                >
+                  {showScrollToEndButton ? (
+                    <ScreenFade
+                      opaqueEdge="bottom"
+                      style={{
+                        position: "absolute",
+                        bottom: "100%",
+                        left: 0,
+                        right: 0,
+                        height: COMPOSER_STATUS_ROW_HEIGHT,
+                      }}
+                    />
+                  ) : null}
+                </Animated.View>
               ) : null}
               {/* No paddingTop here: the overlay's measured height becomes the
                 list's bottom inset, so any padding above the pill/composer

@@ -1258,7 +1258,7 @@ describe("buildThreadFeed", () => {
     expect(pendingApprovalPresentation(approval, subject)).toEqual({
       title: "Command approval",
       code: "rm -rf apps/mobile/.expo",
-      description: "Delete cached Metro bundles.",
+      description: undefined,
     });
     expect(pendingApprovalPresentation(approval)).toEqual({
       title: "Command approval",

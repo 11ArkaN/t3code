@@ -2158,13 +2158,16 @@ export function pendingApprovalSubject(
   return target?.type === "file_change" ? target.fileName : undefined;
 }
 
-/** The code line names what the user allows; the provider's prompt reads as prose below it. */
+/**
+ * The code line names what the user allows. The provider's prompt reads as prose below it, unless
+ * a subject came from the feed: the request's row there already shows that prompt.
+ */
 export function pendingApprovalPresentation(approval: PendingApproval, subject?: string) {
   const code = subject ?? approval.appName ?? approval.detail;
   return {
     title: APPROVAL_TITLES[approval.requestKind],
     code,
-    description: approval.detail !== code ? approval.detail : undefined,
+    description: subject === undefined && approval.detail !== code ? approval.detail : undefined,
   };
 }
 

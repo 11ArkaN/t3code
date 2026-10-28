@@ -23,6 +23,11 @@ are unchanged. Skipping compilation would lose new classes; invalidating every
 consumer for unchanged output makes an ordinary component edit refresh the whole
 app. The fingerprint is recorded only after initialization succeeds.
 
+Uniwind's `bg-linear-*` gradient classes draw nothing on native. Its compiled
+gradient stops have two spaces after each comma, its runtime parser splits on one,
+and every stop reaches React Native without a color. Build gradients as an
+`experimental_backgroundImage` style from theme colors, as `ScreenFade` does.
+
 The native modules under `apps/mobile/modules/` are `file:` dependencies, and pnpm
 copies those into its virtual store instead of linking them. Metro bundles the copy,
 so an edit to a module's TypeScript is invisible to a running dev client until

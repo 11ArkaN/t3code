@@ -1116,15 +1116,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
           Platform.OS === "android" ? themeColorWithAlpha(composerPanel, 1) : undefined,
       }}
     >
-      {/* Use a plain View: Reanimated Animated.View drops experimental_backgroundImage on Android. */}
-      <View
-        className={
-          Platform.OS === "android"
-            ? "hidden"
-            : "absolute inset-0 bg-linear-to-b from-screen/0 via-screen/60 to-screen/90"
-        }
-        pointerEvents="none"
-      />
       <Animated.View
         className="relative w-full self-center"
         style={{ maxWidth: props.contentMaxWidth }}
