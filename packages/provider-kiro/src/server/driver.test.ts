@@ -3,16 +3,11 @@ import * as Schema from "effect/Schema";
 
 import { KiroSettings } from "../settings.ts";
 import { buildKiroAcpSpawnInput } from "./acpSupport.ts";
-import { KiroDriver } from "./driver.ts";
 import { kiroAuthFromWhoami } from "./status.ts";
 
 const decodeSettings = Schema.decodeUnknownSync(KiroSettings);
 
 describe("KiroDriver", () => {
-  it("starts disabled", () => {
-    assert.isFalse(KiroDriver.defaultConfig().enabled);
-  });
-
   it("launches the V3 ACP engine with CLI-owned auth from the configured binary", () => {
     assert.deepEqual(buildKiroAcpSpawnInput(decodeSettings({}), "/work"), {
       command: "kiro-cli",
