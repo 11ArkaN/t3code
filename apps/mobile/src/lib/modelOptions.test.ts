@@ -738,16 +738,16 @@ describe("composerModelName", () => {
     return composerModelName(option ?? null, selection);
   };
 
-  it("drops the family a provider icon already shows, and nothing a bare name needs", () => {
-    expect(nameFor("claudeAgent", "claude-opus-5-5", config)).toBe("Opus 5.5");
+  it("uses the picker's name, so the chip and the picker match", () => {
+    expect(nameFor("claudeAgent", "claude-opus-5-5", config)).toBe("Claude Opus 5.5");
     expect(nameFor("codex", "gpt-6.1", config)).toBe("GPT-6.1");
-    expect(nameFor("codex", "gpt-6.1-sol", config)).toBe("6.1 Sol");
+    expect(nameFor("codex", "gpt-6.1-sol", config)).toBe("GPT-6.1-Sol");
     expect(nameFor("cursor", "composer-2", config)).toBe("Composer 2");
   });
 
   it("reads the slug, not the raw id, while the catalog has not loaded", () => {
-    expect(nameFor("claudeAgent", "claude-opus-5-5", null)).toBe("Opus 5.5");
-    expect(nameFor("codex", "gpt-6.1-sol", null)).toBe("6.1 Sol");
+    expect(nameFor("claudeAgent", "claude-opus-5-5", null)).toBe("Claude Opus 5.5");
+    expect(nameFor("codex", "gpt-6.1-sol", null)).toBe("GPT-6.1-Sol");
     expect(nameFor("my_gateway", "my-model", null)).toBe("my-model");
   });
 });

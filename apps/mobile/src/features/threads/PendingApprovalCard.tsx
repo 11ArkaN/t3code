@@ -12,12 +12,16 @@ import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { useLargeText } from "../../lib/useLargeText";
 import { pendingApprovalPresentation, type PendingApproval } from "../../lib/threadActivity";
 
 export interface PendingApprovalCardProps {
   readonly canOperateThread: boolean;
   readonly approval: PendingApproval;
   readonly subject: string | undefined;
+  /** Where the agent runs the command: the machine and the thread's folder. */
+  readonly environmentLabel: string | null;
+  readonly cwd: string | null;
   readonly respondingApprovalId: RuntimeRequestId | null;
   readonly onRespond: (
     requestId: RuntimeRequestId,
@@ -39,8 +43,10 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   const [explanationOpen, setExplanationOpen] = useState(false);
   const presentation = pendingApprovalPresentation(props.approval, props.subject);
+  const largeText = useLargeText();
+  const location = [props.environmentLabel, props.cwd].filter(Boolean).join(" · ");
   return (
-    <View className="gap-2.5 rounded-[20px] border border-border bg-card-alt p-4">
+    <View className="gap-2.5 rounded-2xl border border-border bg-card-alt p-4">
       <Text accessibilityRole="header" className="font-t3-bold text-base text-foreground">
         {presentation.title}
       </Text>
@@ -59,6 +65,15 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
             {presentation.code}
           </Text>
         </ScrollView>
+      ) : null}
+      {location ? (
+        <Text
+          className="font-sans text-xs text-foreground-muted"
+          numberOfLines={largeText ? undefined : 1}
+          ellipsizeMode="middle"
+        >
+          {location}
+        </Text>
       ) : null}
       {presentation.description ? (
         <Text className="font-sans text-sm leading-normal text-foreground-secondary">
@@ -95,10 +110,12 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
       {warning ? (
         <Text className="font-sans text-xs leading-normal text-warning-foreground">{warning}</Text>
       ) : null}
-      <View className="flex-row flex-wrap gap-2.5">
+      {/* One action per row: provider labels run long ("Allow all edits this session"). */}
+      <View className="gap-2">
         {options.map((option) => (
           <Button
             key={option.decision}
+            fullWidth
             label={option.label}
             tone={
               option.decision === "accept"

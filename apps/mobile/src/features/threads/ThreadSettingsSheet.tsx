@@ -25,7 +25,6 @@ import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import {
   getProviderOptionCurrentLabel,
   getProviderOptionCurrentValue,
-  getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import {
   useNavigation,
@@ -36,15 +35,7 @@ import {
 import { type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Haptics from "expo-haptics";
 import { AsyncResult } from "effect/reactivity";
-import {
-  createContext,
-  use,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, use, useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -111,11 +102,10 @@ import {
   selectableChoices,
 } from "./thread-settings-options";
 import {
-  canCommitPendingModel,
+  canSelectModel,
   favoritesFirst,
   modelFavoriteKey,
   modelMatchesCatalogQuery,
-  pendingModelAfterPress,
   providerSectionIsCollapsed,
 } from "./thread-settings-sheet-state";
 import { formatProviderUpdateRequiredNotice } from "@t3tools/client-runtime/providerUpdateRequiredModels";
@@ -314,21 +304,19 @@ type ThreadSettingsSessionValue = {
   readonly runtimeMode: RuntimeMode;
   readonly runtimeModeChoices: ReturnType<typeof runtimeModeChoicesForSupportedModes>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+  readonly optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly promptTraits: ReturnType<typeof getPromptControlledTraits>;
-  readonly displayedModelSelection: ModelSelection | null;
+  readonly selectedModel: ModelSelection | null;
   readonly reportedModelSelection: ModelSelection | null;
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
-  readonly pendingModel: ModelOption | null;
   readonly providerFilter: string | null;
   readonly searchQuery: string;
   readonly showLegacy: boolean;
   readonly applyOptionChange: (id: string, value: string | boolean) => void;
-  readonly commitPendingModel: () => boolean;
   readonly isApplied: (option: ModelOption) => boolean;
-  readonly isDisplayed: (option: ModelOption) => boolean;
-  readonly pressModel: (option: ModelOption) => void;
+  /** Applies the pick. False when the model cannot be used, so the sheet stays open. */
+  readonly selectModel: (option: ModelOption) => boolean;
   readonly setProviderFilter: (providerKey: string | null) => void;
   readonly setSearchQuery: (query: string) => void;
   readonly setShowLegacy: (showLegacy: boolean) => void;
@@ -496,31 +484,16 @@ function ThreadSettingsSessionProvider(
   const [providerExpansionOverrides, setProviderExpansionOverrides] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [pendingModel, setPendingModel] = useState<ModelOption | null>(null);
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const displayedPrompt = pendingModel ? (pendingPrompt ?? props.prompt) : props.prompt;
-
   const isApplied = (option: ModelOption) =>
     option.selection.instanceId === props.selectedModel?.instanceId &&
     option.selection.model === props.selectedModel.model;
-  const isDisplayed = (option: ModelOption) =>
-    pendingModel ? option.key === pendingModel.key : isApplied(option);
 
-  const displayedDescriptors = pendingModel
-    ? pendingModel.capabilities
-      ? getProviderOptionDescriptors({
-          caps: pendingModel.capabilities,
-          selections: pendingModel.selection.options,
-        })
-      : []
-    : props.optionDescriptors;
-  const promptTraits = getPromptControlledTraits(displayedDescriptors, displayedPrompt);
-  const displayedModel =
-    pendingModel ??
+  const promptTraits = getPromptControlledTraits(props.optionDescriptors, props.prompt);
+  const appliedModel =
     props.providerGroups.flatMap((group) => group.models).find((option) => isApplied(option)) ??
     null;
   const runtimeModeChoices = runtimeModeChoicesForSupportedModes(
-    displayedModel?.supportedRuntimeModes,
+    appliedModel?.supportedRuntimeModes,
   );
   const compatibleRuntimeMode = compatibleRuntimeModeForChoices(
     props.runtimeMode,
@@ -530,52 +503,35 @@ function ThreadSettingsSessionProvider(
   const hasLegacyModels = props.providerGroups.some((group) =>
     group.models.some((model) => model.isLegacy),
   );
-  const commitPendingModel = () => {
-    if (pendingModel) {
-      if (!canCommitPendingModel(pendingModel, props.providerGroups)) {
-        Dialog.alert(
-          "Model unavailable",
-          "Set up this provider on web or desktop, or select another model.",
-        );
-        return false;
-      }
-      void Haptics.selectionAsync();
-      props.onSelectModel(pendingModel);
-      if (pendingPrompt !== null && pendingPrompt !== props.prompt) {
-        props.onPromptChange(pendingPrompt);
-      }
+  // Like desktop's picker, a pick applies at once; the draft carries it to the next send.
+  const selectModel = (option: ModelOption) => {
+    if (isApplied(option)) return true;
+    if (!canSelectModel(option, props.providerGroups)) {
+      Dialog.alert(
+        "Model unavailable",
+        "Set up this provider on web or desktop, or select another model.",
+      );
+      return false;
     }
+    void Haptics.selectionAsync();
+    props.onSelectModel(
+      props.restoreSelection
+        ? { ...option, selection: props.restoreSelection(option.selection) }
+        : option,
+    );
     return true;
   };
 
   const applyOptionChange = (id: string, value: string | boolean) => {
     const pick = resolveTraitPick({
-      descriptors: displayedDescriptors,
-      prompt: displayedPrompt,
+      descriptors: props.optionDescriptors,
+      prompt: props.prompt,
       id,
       value,
     });
     if (!pick) return;
-    if (pick.prompt !== displayedPrompt) {
-      if (pendingModel) {
-        setPendingPrompt(pick.prompt);
-      } else {
-        props.onPromptChange(pick.prompt);
-      }
-    }
-    const next = pick.options;
-    if (!next) {
-      return;
-    }
-    if (pendingModel) {
-      rememberModelOptions(pendingModel.selection.instanceId, pendingModel.selection.model, next);
-      setPendingModel({
-        ...pendingModel,
-        selection: { ...pendingModel.selection, options: next },
-      });
-    } else {
-      props.onUpdateOptionSelections(next);
-    }
+    if (pick.prompt !== props.prompt) props.onPromptChange(pick.prompt);
+    if (pick.options) props.onUpdateOptionSelections(pick.options);
   };
 
   const toggleProvider = (providerKey: string) => {
@@ -586,21 +542,6 @@ function ThreadSettingsSessionProvider(
       }
       return next;
     });
-  };
-
-  const pressModel = (option: ModelOption) => {
-    void Haptics.selectionAsync();
-    if (isApplied(option) || option.key !== pendingModel?.key) {
-      setPendingPrompt(null);
-    }
-    setPendingModel((current) =>
-      pendingModelAfterPress({
-        current,
-        pressed: option,
-        pressedIsApplied: isApplied(option),
-        restoreSelection: props.restoreSelection,
-      }),
-    );
   };
 
   const value = {
@@ -614,23 +555,20 @@ function ThreadSettingsSessionProvider(
     runtimeMode: compatibleRuntimeMode,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-    displayedDescriptors,
+    optionDescriptors: props.optionDescriptors,
     promptTraits,
-    displayedModelSelection: pendingModel?.selection ?? props.selectedModel,
-    reportedModelSelection: pendingModel ? null : (props.reportedModelSelection ?? null),
+    selectedModel: props.selectedModel,
+    reportedModelSelection: props.reportedModelSelection ?? null,
     favoriteKeys,
     favoritesLoaded,
     providerExpansionOverrides,
     hasLegacyModels,
-    pendingModel,
     providerFilter,
     searchQuery,
     showLegacy: showLegacyToggle,
     applyOptionChange,
-    commitPendingModel,
     isApplied,
-    isDisplayed,
-    pressModel,
+    selectModel,
     setProviderFilter,
     setSearchQuery,
     setShowLegacy: setShowLegacyToggle,
@@ -697,7 +635,10 @@ function ThreadSettingsModelListRow(props: {
   readonly isLast: boolean;
 }) {
   const session = useThreadSettingsSession();
-  const onPress = () => session.pressModel(props.option);
+  const presentation = useThreadSettingsPickerPresentation();
+  const onPress = () => {
+    if (session.selectModel(props.option)) presentation.onClose();
+  };
 
   return (
     <ModelRow
@@ -714,7 +655,7 @@ function ThreadSettingsModelListRow(props: {
       }
       hiddenUpdatePending={session.pendingHiddenKeys.has(props.option.key)}
       option={props.option}
-      selected={session.isDisplayed(props.option)}
+      selected={session.isApplied(props.option)}
     />
   );
 }
@@ -757,7 +698,7 @@ function buildThreadSettingsCatalogItems(
         ? group.models
         : group.models.filter(
             (model) =>
-              !model.isLegacy || session.isDisplayed(model) || session.favoriteKeys.has(model.key),
+              !model.isLegacy || session.isApplied(model) || session.favoriteKeys.has(model.key),
           );
     const visibleModels = favoritesFirst(
       catalogModels.filter(
@@ -847,7 +788,7 @@ function ThreadSettingsOptionsItem(props: {
         className="mx-4 overflow-hidden rounded-2xl bg-grouped-card"
         layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}
       >
-        {session.displayedDescriptors.map((descriptor) => {
+        {session.optionDescriptors.map((descriptor) => {
           if (descriptor.type === "select") {
             return (
               <Animated.View
@@ -866,7 +807,7 @@ function ThreadSettingsOptionsItem(props: {
                       ? "Ultrathink"
                       : getProviderOptionCurrentLabel(
                           descriptor,
-                          session.displayedModelSelection,
+                          session.selectedModel,
                           session.reportedModelSelection,
                         )
                   }
@@ -1085,7 +1026,7 @@ function ThreadSettingsChoiceContent(props: {
 
   const activeDescriptor =
     descriptorId !== null
-      ? session.displayedDescriptors.find(
+      ? session.optionDescriptors.find(
           (descriptor) => descriptor.type === "select" && descriptor.id === descriptorId,
         )
       : undefined;
@@ -1118,7 +1059,7 @@ function ThreadSettingsChoiceContent(props: {
                   ? "ultrathink"
                   : getProviderOptionCurrentValue(
                       activeDescriptor,
-                      session.displayedModelSelection,
+                      session.selectedModel,
                       session.reportedModelSelection,
                     )),
               onPress: () => {
@@ -1211,10 +1152,6 @@ function ThreadSettingsModelsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ThreadSettingsPickerStackParams>>();
   const usesNativeMailSearchToolbar = useThreadSettingsMailSearchToolbar();
   const hasCustomCatalogFilter = session.providerFilter !== null || session.showLegacy;
-  const commitAndClose = useEffectEvent(() => {
-    if (!session.commitPendingModel()) return;
-    presentation.onClose();
-  });
   const providerFilters = [
     { id: "all-providers", title: "All providers", value: null },
     { id: "favorites", title: "Favorites", value: FAVORITES_PROVIDER_FILTER },
@@ -1298,9 +1235,8 @@ function ThreadSettingsModelsScreen() {
               </AndroidAnchoredMenu>
             </View>
           }
-          onCancel={presentation.onClose}
+          onClose={presentation.onClose}
           title="Thread settings"
-          confirm={session.pendingModel ? { label: "Save", onPress: commitAndClose } : undefined}
         />
       ) : null}
       <NativeStackScreenOptions
@@ -1346,7 +1282,7 @@ function ThreadSettingsModelsScreen() {
             const title =
               submenu.kind === "runtime"
                 ? "Runtime"
-                : (session.displayedDescriptors.find(
+                : (session.optionDescriptors.find(
                     (descriptor) => descriptor.type === "select" && descriptor.id === submenu.id,
                   )?.label ?? "Option");
             navigation.navigate("ThreadSettingsChoice", { ...submenu, title });
@@ -1354,15 +1290,7 @@ function ThreadSettingsModelsScreen() {
         />
       </ScreenContent>
       {Platform.OS === "ios" ? (
-        <SheetHeader
-          title="Thread settings"
-          onCancel={presentation.onClose}
-          accessibilityLabel="Cancel thread settings"
-          confirm={{
-            label: session.pendingModel ? "Save thread settings" : "Done",
-            onPress: commitAndClose,
-          }}
-        />
+        <SheetHeader title="Thread settings" onClose={presentation.onClose} />
       ) : null}
       {Platform.OS === "ios" && !usesNativeMailSearchToolbar ? (
         <Toolbar placement="bottom">
@@ -1550,7 +1478,7 @@ export function ExistingThreadSettingsRouteScreen({
       prompt={prompt}
       onPromptChange={(text) => setComposerDraftText(draftKey, text)}
       reportedModelSelection={reportedModelSelection}
-      onSelectModel={(option) => updateModelSelection(withRememberedModelOptions(option.selection))}
+      onSelectModel={(option) => updateModelSelection(option.selection)}
       restoreSelection={withRememberedModelOptions}
       optionDescriptors={resolveProviderOptionDescriptors({
         capabilities: currentModelOption?.capabilities,

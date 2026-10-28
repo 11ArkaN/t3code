@@ -1602,6 +1602,7 @@ describe("pending user input answers", () => {
       question: { id: "runtime" },
       isLast: false,
       canAdvance: false,
+      answeredCount: 0,
     });
     const answered = { runtime: { selectedOptionValues: ["Go"] } };
     expect(derivePendingUserInputPage(questions, answered, 0).canAdvance).toBe(true);
@@ -1609,6 +1610,7 @@ describe("pending user input answers", () => {
       question: { id: "region" },
       isLast: true,
       canAdvance: false,
+      answeredCount: 1,
     });
     expect(derivePendingUserInputPage(questions, answered, 5).index).toBe(1);
     expect(derivePendingUserInputPage([singleSelectQuestion], {}, 0).isLast).toBe(true);

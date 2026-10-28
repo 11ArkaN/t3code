@@ -6,7 +6,7 @@ import {
   selectableProviderOptionChoices,
 } from "@t3tools/client-runtime/model-traits";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
-import type { ModelOption } from "../lib/modelOptions";
+import { composerModelName, type ModelOption } from "../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../lib/providerOptions";
 import { AppText as Text } from "./ui/AppText";
 import { Menu } from "./ui/Menu";
@@ -54,7 +54,9 @@ export function ComposerModelControl(props: {
   readonly onPress: () => void;
 }) {
   const badge = props.modelOption?.providerBadge;
-  const label = props.modelOption?.label ?? props.selection?.model ?? "Choose model";
+  const label = props.selection
+    ? composerModelName(props.modelOption, props.selection)
+    : (props.modelOption?.label ?? "Choose model");
   return (
     <ComposerInlineControl
       accessibilityLabel={[
@@ -87,7 +89,7 @@ export function ComposerModelControl(props: {
           />
         )
       }
-      label={props.label ?? props.modelOption?.shortName ?? label}
+      label={props.label ?? label}
       iconOnly={props.iconOnly}
       suffix={
         props.traitsLabel && props.label === undefined ? (

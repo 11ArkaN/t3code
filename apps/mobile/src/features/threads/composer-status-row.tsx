@@ -5,7 +5,7 @@ import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reani
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
-import { GlassSurface } from "../../components/ui/GlassSurface";
+import { cn } from "../../lib/cn";
 import { WorkingTimer } from "./floating-working-control";
 import type { FloatingWorkingStatus, RunStatusSegment } from "./floating-working-status";
 
@@ -158,19 +158,18 @@ export function ComposerStatusRow(props: {
   );
 }
 
-/** The composer's own material, so the row reads as part of the composer block. */
+/** Flat rather than glass: glass over light content draws no edge, so the row read as bare text. */
 function RowSurface(props: { readonly className: string; readonly children: ReactNode }) {
   return (
-    <GlassSurface
-      chrome="none"
-      fallbackClassName="border border-composer-border"
-      glassEffectStyle="regular"
-      tintColor="transparent"
-      className={props.className}
-      style={{ height: ROW_HEIGHT, borderRadius: ROW_HEIGHT / 2 }}
+    <View
+      className={cn(
+        "overflow-hidden rounded-xl border border-composer-border bg-composer-surface",
+        props.className,
+      )}
+      style={{ height: ROW_HEIGHT }}
     >
       {props.children}
-    </GlassSurface>
+    </View>
   );
 }
 

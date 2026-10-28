@@ -11,18 +11,16 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
-import { isProviderDriverKind, resolveProjectProviderInstanceEnabled } from "@t3tools/contracts";
+import { resolveProjectProviderInstanceEnabled } from "@t3tools/contracts";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   formatModelSlugName,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
-import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 
 export type ModelOption = {
   readonly key: string;
   readonly label: string;
-  readonly shortName?: string;
   readonly subtitle: string;
   readonly providerKey: string;
   readonly providerLabel: string;
@@ -322,11 +320,9 @@ export function buildModelOptions(
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
     for (const model of models) {
       const key = `${provider.instanceId}:${model.slug}`;
-      const shortName = resolveModelShortName(model, provider.driver);
       options.set(key, {
         key,
         label: model.name,
-        ...(shortName ? { shortName } : {}),
         subtitle: model.subProvider ?? "",
         providerKey: provider.instanceId,
         providerLabel,
@@ -389,13 +385,9 @@ export function buildModelOptions(
         displayName: provider?.displayName ?? instanceConfig?.displayName,
         instanceId: fallbackModelSelection.instanceId,
       });
-      const shortName = model
-        ? resolveModelShortName(model, isProviderDriverKind(providerDriver) ? providerDriver : null)
-        : undefined;
       options.set(key, {
         key,
         label: model?.name ?? fallbackModelSelection.model,
-        ...(shortName ? { shortName } : {}),
         subtitle: model?.subProvider ?? "",
         providerKey: fallbackModelSelection.instanceId,
         providerLabel,
@@ -417,13 +409,11 @@ export function buildModelOptions(
   return [...options.values()];
 }
 
-/** The model name a composer chip shows. Without a catalog name (offline, still loading) it reads the slug. */
+/** The picker's model name, so chip and picker match. Without a catalog name (offline, still loading) it reads the slug. */
 export function composerModelName(option: ModelOption | null, selection: ModelSelection): string {
-  if (option?.shortName) return option.shortName;
-  if (option && option.label !== selection.model) return option.label;
-  const name = formatModelSlugName(selection.model);
-  const driver = option?.providerDriver;
-  return resolveModelShortName({ name }, isProviderDriverKind(driver) ? driver : null) ?? name;
+  return option && option.label !== selection.model
+    ? option.label
+    : formatModelSlugName(selection.model);
 }
 
 export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyArray<ProviderGroup> {

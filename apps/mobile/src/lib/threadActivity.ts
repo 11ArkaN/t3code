@@ -2112,13 +2112,14 @@ export function derivePendingUserInputPage(
 ) {
   const index = Math.max(0, Math.min(questionIndex, questions.length - 1));
   const question = questions[index];
+  const isAnswered = (candidate: ThreadUserInputQuestion) =>
+    resolvePendingUserInputAnswer(candidate, draftAnswers[candidate.id]) !== null;
   return {
     index,
     question,
     isLast: index >= questions.length - 1,
-    canAdvance:
-      question !== undefined &&
-      resolvePendingUserInputAnswer(question, draftAnswers[question.id]) !== null,
+    canAdvance: question !== undefined && isAnswered(question),
+    answeredCount: questions.filter(isAnswered).length,
   };
 }
 

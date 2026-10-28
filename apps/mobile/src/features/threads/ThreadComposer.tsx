@@ -191,6 +191,7 @@ function useCompactComposerEditor(text: ScaledTextRole, value: string) {
   return {
     isExpanded,
     height,
+    inset,
     containerStyle: { height: isExpanded ? height + 52 : compactRowHeight },
     editorStyle,
     onRowLayout: (event: { nativeEvent: { layout: { width: number } } }) => {
@@ -208,7 +209,8 @@ function useCompactComposerEditor(text: ScaledTextRole, value: string) {
     editorProps: {
       singleLineCentered: !isExpanded,
       scrollEnabled: Platform.OS === "android" || contentHeight >= text.lineHeight * 4,
-      contentInsetVertical: inset,
+      // iOS pads the editor's slot instead, so scrolled lines clip inside the pill, not at its edge.
+      contentInsetVertical: STACKS_CONTROLS ? 0 : inset,
       onContentSizeChange: (size: { width: number; height: number }) => {
         setContentSize(size);
       },
@@ -1153,7 +1155,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
           {isExpanded || STACKS_CONTROLS ? editingAttachments : null}
           {STACKS_CONTROLS ? (
             <View onLayout={(event) => setCompactRowWidth(event.nativeEvent.layout.width)}>
-              <View style={{ height: compactEditor.height, marginHorizontal: 14 }}>{editor}</View>
+              <View
+                style={{
+                  height: compactEditor.height,
+                  marginHorizontal: 14,
+                  paddingVertical: compactEditor.inset,
+                }}
+              >
+                {editor}
+              </View>
               <ComposerDictationDraftContent
                 className={
                   controls?.wraps

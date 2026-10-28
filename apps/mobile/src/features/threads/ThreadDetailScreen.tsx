@@ -1439,6 +1439,20 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                 composerWidthStyle,
               ]}
             >
+              {Platform.OS === "ios" ? (
+                // Plain View: Reanimated drops experimental_backgroundImage. Reaches the screen
+                // edge so scrolled text never shows crisp under or below the composer.
+                <View
+                  pointerEvents="none"
+                  className="absolute bg-linear-to-b from-screen/0 via-screen/85 to-screen"
+                  style={{
+                    top: -24,
+                    bottom: -(controlInsets.bottom + 120),
+                    left: -controlInsets.left,
+                    right: -controlInsets.right,
+                  }}
+                />
+              ) : null}
               {/* No paddingTop here: the overlay's measured height becomes the
                 list's bottom inset, so any padding above the pill/composer
                 pushes the resting content floor up by the same amount. */}
@@ -1552,6 +1566,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                             selectedThreadFeed,
                             props.activePendingApproval.requestId,
                           )}
+                          environmentLabel={props.environmentLabel}
+                          cwd={props.threadCwd ?? props.projectWorkspaceRoot}
                           respondingApprovalId={props.respondingApprovalId}
                           onRespond={props.onRespondToApproval}
                         />

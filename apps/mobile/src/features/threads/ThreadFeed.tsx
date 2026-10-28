@@ -3210,7 +3210,8 @@ export const ThreadFeed = memo(function ThreadFeed({
             ref={attachList}
             // LegendList cannot see adjustedContentInset; remount so initial positioning waits for UIKit attachment.
             key={listMountKey}
-            style={{ flex: 1 }}
+            // UIKit's header scroll-edge material samples the scroll view's own color.
+            style={{ flex: 1, backgroundColor: Platform.OS === "ios" ? screenColor : undefined }}
             // RN 0.81+ drops inset-area touches (facebook/react-native#54123), making blank post-send space unscrollable.
             applyWorkaroundForContentInsetHitTestBug
             {...(Platform.OS === "ios" ? { ScrollViewComponent: ThreadFeedScrollView } : {})}

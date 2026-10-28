@@ -2,11 +2,20 @@ import { useAtomValue } from "@effect/atom-react";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
   presentPendingBackgroundWork,
   type PendingBackgroundWorkItem,
 } from "@t3tools/client-runtime/state/thread-execution";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  type EnvironmentId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
+import { useState } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { ScreenStack } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,10 +23,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
+import * as Dialog from "../../components/ui/Dialog";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { NativeHeader, NativeScreen } from "../../native/ThemedScreenStack";
-import { environmentThreadShells } from "../../state/threads";
+import { useEnvironmentScope } from "../../state/session";
+import { environmentThreadShells, threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
@@ -39,6 +52,28 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
     environmentThreadShells.threadShellAtom(scopeThreadRef(target.environmentId, target.threadId)),
   );
   const presentation = presentPendingBackgroundWork(thread?.pendingBackgroundTasks ?? []);
+  const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
+  const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const [stopping, setStopping] = useState(false);
+  // Desktop's Stop: interrupting the turn ends its background commands and subagents.
+  const stop = async () => {
+    setStopping(true);
+    const result = await interruptThreadTurn({
+      environmentId: target.environmentId,
+      input: { threadId: target.threadId },
+    });
+    // An accepted interrupt can leave tasks running a moment longer; allow a retry.
+    setStopping(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      Dialog.alert(
+        "Could not stop background work",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    }
+  };
   const openThread = (threadId: ThreadId) => {
     void Haptics.selectionAsync();
     // A thread replaces the leaf sheet so workspace back navigation still works.
@@ -59,9 +94,21 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
           Nothing running in the background.
         </Text>
       ) : (
-        presentation.items.map((item) => (
-          <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
-        ))
+        <>
+          {presentation.items.map((item) => (
+            <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
+          ))}
+          <View className="pt-4">
+            <Button
+              label={stopping ? "Stopping..." : "Stop"}
+              accessibilityLabel="Stop background work"
+              tone="danger"
+              fullWidth
+              disabled={!canOperate || stopping}
+              onPress={() => void stop()}
+            />
+          </View>
+        </>
       )}
     </ScrollView>
   );
@@ -109,6 +156,7 @@ function BackgroundWorkRow(props: {
 }) {
   const { item } = props;
   const childThreadId = item.childThreadId;
+  const isCommand = item.kind === "command" || item.kind === "monitor";
   const row = (
     <View className="flex-row items-center gap-3 border-b border-border py-3.5">
       <SymbolView
@@ -119,8 +167,17 @@ function BackgroundWorkRow(props: {
         tintColorClassName="accent-foreground-muted"
         type="monochrome"
       />
-      <View className="min-w-0 flex-1">
-        <Text className="font-t3-medium text-sm text-foreground">{item.label}</Text>
+      <View className="min-w-0 flex-1 gap-0.5">
+        <Text
+          selectable={isCommand}
+          className={
+            isCommand
+              ? "text-sm text-foreground ios:font-[family-name:Menlo] android:font-mono"
+              : "font-t3-medium text-sm text-foreground"
+          }
+        >
+          {item.label}
+        </Text>
         <Text className="text-xs text-foreground-muted">{KIND_LABELS[item.kind]}</Text>
       </View>
       {childThreadId === undefined ? null : (

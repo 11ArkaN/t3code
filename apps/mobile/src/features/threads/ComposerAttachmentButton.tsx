@@ -3,7 +3,9 @@ import { Pressable } from "react-native";
 
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
+import { cn } from "../../lib/cn";
 
 const ATTACHMENT_MENU_ACTIONS: MenuAction[] = [
   { id: "photos", title: "Photo Library", image: "photo" },
@@ -13,6 +15,8 @@ const ATTACHMENT_MENU_ACTIONS: MenuAction[] = [
 export function ComposerAttachmentButton(props: {
   readonly disabled?: boolean;
   readonly size?: "regular" | "large";
+  /** Shown beside the icon where a bare "+" would not say what it adds. */
+  readonly label?: string;
   readonly supportsFiles: boolean;
   readonly onPickMedia: () => Promise<void>;
   readonly onPickFiles: () => Promise<void>;
@@ -20,10 +24,13 @@ export function ComposerAttachmentButton(props: {
   const { scale } = useAndroidControlSizing();
   const button = (
     <Pressable
-      accessibilityLabel="Add attachment"
+      accessibilityLabel={props.label ?? "Add attachment"}
       accessibilityRole="button"
       accessibilityState={{ disabled: props.disabled }}
-      className="size-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70 disabled:opacity-50"
+      className={cn(
+        "h-[44px] shrink-0 items-center justify-center rounded-full active:opacity-70 disabled:opacity-50",
+        props.label ? "flex-row gap-1.5 self-start pl-2.5 pr-3.5" : "w-[44px]",
+      )}
       disabled={props.disabled}
       onPress={props.supportsFiles ? undefined : () => void props.onPickMedia()}
     >
@@ -34,6 +41,9 @@ export function ComposerAttachmentButton(props: {
         tintColorClassName="accent-icon"
         type="monochrome"
       />
+      {props.label ? (
+        <AppText className="font-t3-medium text-sm text-foreground">{props.label}</AppText>
+      ) : null}
     </Pressable>
   );
 
@@ -44,7 +54,7 @@ export function ComposerAttachmentButton(props: {
   return (
     <Menu
       accessible
-      accessibilityLabel="Add attachment"
+      accessibilityLabel={props.label ?? "Add attachment"}
       accessibilityRole="button"
       actions={ATTACHMENT_MENU_ACTIONS}
       onPressAction={({ nativeEvent }) => {

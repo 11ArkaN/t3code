@@ -165,6 +165,7 @@ export function QuestionAttachments(props: {
     <View className="gap-2">
       {canAttach ? (
         <ComposerAttachmentButton
+          label="Attach"
           disabled={props.disabled}
           supportsFiles
           onPickMedia={() => pick("media")}

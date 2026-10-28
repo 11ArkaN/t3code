@@ -230,15 +230,12 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       onPress={() => setQuestionIndex(page.index + 1)}
     />
   );
-  // Accessibility sizes stack the actions and scroll them with the question, so the card's
-  // height limit cannot clip them.
+  // Accessibility sizes keep only Submit or Next pinned under the question; Back and the rest
+  // scroll with it, so the card's height limit cannot clip them.
   const actions = (
     <>
       {largeText ? (
-        <View className="gap-2.5">
-          {forwardButton}
-          {backButton}
-        </View>
+        backButton
       ) : (
         <View className="flex-row items-center gap-2.5">
           {backButton}
@@ -277,14 +274,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           ? undefined
           : FadeOutDown.duration(USER_INPUT_TOGGLE_DURATION_MS).easing(Easing.out(Easing.cubic))
       }
-      className="overflow-hidden gap-2.5 rounded-[20px] border border-border bg-card-alt p-4"
+      className="overflow-hidden gap-2.5 rounded-2xl border border-border bg-card-alt p-4"
       style={EXPANDED_CARD_IS_OVERLAY ? cardAnimatedStyle : cardMaxHeightStyle}
     >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={
           questionCount > 1
-            ? `Collapse user input, question ${page.index + 1} of ${questionCount}`
+            ? `Collapse user input, question ${page.index + 1} of ${questionCount}, ${page.answeredCount} answered`
             : "Collapse user input"
         }
         onPress={props.onToggleCollapsed}
@@ -295,7 +292,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         </Text>
         {questionCount > 1 ? (
           <Text className="font-sans text-xs text-foreground-muted">
-            {page.index + 1} of {questionCount}
+            {page.index + 1} of {questionCount} · {page.answeredCount} answered
           </Text>
         ) : null}
         <View className="h-8 w-8 items-center justify-center rounded-full bg-subtle-strong">
@@ -377,7 +374,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         ) : null}
         {largeText ? actions : null}
       </ScrollView>
-      {largeText ? null : actions}
+      {largeText ? forwardButton : actions}
     </Animated.View>
   ) : null;
   return (
