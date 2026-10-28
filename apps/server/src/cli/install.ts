@@ -17,6 +17,7 @@ import { detectCliRunner, resolveCliCommand, resolveEntryPath } from "./invocati
 
 export class CliInstallError extends Schema.TaggedError<CliInstallError>()("CliInstallError", {
   reason: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return this.reason;
@@ -63,7 +64,7 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const binDir = environment.T3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin");
   const name = windows ? "t3.cmd" : "t3";
   const link = path.join(binDir, name);
-  const failed = (reason: string) => () => new CliInstallError({ reason });
+  const failed = (reason: string) => (cause: unknown) => new CliInstallError({ reason, cause });
 
   // Resolve fully so a link through a symlinked T3 home still counts as ours; a dangling one
   // (a pruned version) falls back to its own text.

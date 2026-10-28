@@ -114,6 +114,8 @@ export function runCli() {
     foreground: inTerminalForeground,
     confirm: confirmCliInstall,
   }).pipe(
+    // The offer handles its own errors; even an unexpected defect must not stop the command.
+    Effect.catchDefect(() => Effect.succeed(true)),
     Effect.flatMap((proceed) =>
       proceed
         ? Command.run(cli, { version: packageJson.version })

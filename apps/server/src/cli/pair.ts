@@ -46,7 +46,7 @@ import {
 } from "../startupAccess.ts";
 import { authScopesFlag } from "./authScopes.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
-import { resolveCliCommand } from "./invocation.ts";
+import { resolveHostCliCommand } from "./invocation.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
 const PAIR_PROBE_TIMEOUT = Duration.millis(2_500);
@@ -297,8 +297,8 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
   return yield* new NoRunningServerError({
     checkedStatePaths,
     inLinkedWorktree,
-    serveCommand: yield* resolveCliCommand("serve"),
-    connectCommand: yield* resolveCliCommand("connect"),
+    serveCommand: (yield* resolveHostCliCommand("serve")).command,
+    connectCommand: (yield* resolveHostCliCommand("connect")).command,
   });
 });
 
