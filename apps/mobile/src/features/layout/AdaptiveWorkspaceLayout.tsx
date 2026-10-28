@@ -381,6 +381,10 @@ function AdaptiveWorkspaceLayoutContent(
       width,
     ],
   );
+  const keyboardRailRest =
+    keyboardHoldsSidebar && shouldRenderNavigationRail && sidebarRestsOpen
+      ? ANDROID_WORKSPACE_RAIL_WIDTH
+      : 0;
   const activeThread = parseActiveThreadPath(pathname);
   const environmentId = activeThread?.environmentId ?? null;
   const threadId = activeThread?.threadId ?? null;
@@ -768,7 +772,12 @@ function AdaptiveWorkspaceLayoutContent(
       renderedSidebarWidth.set(renderedSidebarWidth.get() * (1 - keyboardProgress.get()));
     }
     keyboardHold.set(keyboardHoldsSidebar);
-    renderedRailWidth.set(withTiming(navigationRailWidth, WORKSPACE_PANE_TIMING));
+    // Held by the keyboard, the rail keeps its resting width and rides the strip below.
+    renderedRailWidth.set(
+      keyboardHoldsSidebar
+        ? keyboardRailRest
+        : withTiming(navigationRailWidth, WORKSPACE_PANE_TIMING),
+    );
     // A workspace page hides the sidebar through React instead, in the same commit that mounts
     // the page. Animating it here would hide it a few frames before the page appears.
     if (workspacePage) {
@@ -793,6 +802,7 @@ function AdaptiveWorkspaceLayoutContent(
     layout.listPaneGap,
     panes.primarySidebarVisible,
     keyboardHoldsSidebar,
+    keyboardRailRest,
     keyboardHold,
     keyboardProgress,
     sidebarRestsOpen,
@@ -812,6 +822,15 @@ function AdaptiveWorkspaceLayoutContent(
   const drawnSidebarWidth = useDerivedValue(
     () => renderedSidebarWidth.value * (keyboardHold.value ? 1 - keyboardProgress.value : 1),
   );
+  // How far the keyboard has slid the rail, sidebar, and content strip to the left.
+  const keyboardShift = useDerivedValue(() =>
+    keyboardHold.value
+      ? -(renderedRailWidth.value + renderedSidebarWidth.value) * keyboardProgress.value
+      : 0,
+  );
+  const keyboardShiftStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: keyboardShift.value }],
+  }));
   const listPaneAnimatedStyle = useAnimatedStyle(() => ({
     width: Math.min(
       listPaneCeiling,
@@ -826,21 +845,11 @@ function AdaptiveWorkspaceLayoutContent(
         : Math.min(1, drawnSidebarWidth.value / 80),
     // Held by the keyboard, it keeps its resting width and slides, so nothing relays out.
     width: keyboardHold.value ? renderedSidebarWidth.value : drawnSidebarWidth.value,
-    transform: [
-      {
-        translateX: keyboardHold.value ? drawnSidebarWidth.value - renderedSidebarWidth.value : 0,
-      },
-    ],
+    transform: [{ translateX: keyboardShift.value }],
   }));
-  // The content keeps the width React laid it out at and rides the sidebar's edge, so a keyboard
+  // The content keeps the width React laid it out at and rides the same strip, so a keyboard
   // transition relays nothing out per frame, the way UIKit animates the iOS split view.
-  const contentKeyboardStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateX: keyboardHold.value ? drawnSidebarWidth.value - renderedSidebarWidth.value : 0,
-      },
-    ],
-  }));
+  const contentKeyboardStyle = keyboardShiftStyle;
 
   // Clip the navigator at its settled width so native headers and markdown reflow only once per pane toggle.
   const renderedInspectorWidth = useSharedValue(inspectorColumnTargetWidth);
@@ -941,7 +950,7 @@ function AdaptiveWorkspaceLayoutContent(
             workspacePage ? { position: "absolute", top: 0, bottom: 0, left: 0 } : null,
             // Out of the row while the keyboard slides it.
             keyboardHoldsSidebar
-              ? { position: "absolute", top: 0, bottom: 0, left: navigationRailWidth }
+              ? { position: "absolute", top: 0, bottom: 0, left: keyboardRailRest }
               : null,
             sidebarAnimatedStyle,
           ]}
@@ -1083,12 +1092,17 @@ function AdaptiveWorkspaceLayoutContent(
         setAuxiliaryPaneWidth={setAuxiliaryPaneWidth}
         onClosed={handleWorkspaceInspectorClosed}
       />
-      {shouldRenderNavigationRail && navigationRailWidth > 0 ? (
+      {shouldRenderNavigationRail && (navigationRailWidth > 0 || keyboardRailRest > 0) ? (
         // The rail reserves its slot above and draws over the panes, so it can widen over
         // the list in place. It takes the whole workspace only while it is open.
-        <View
+        <Animated.View
           className="absolute inset-y-0 left-0"
-          style={railOverlay ? { right: 0 } : { width: navigationRailWidth }}
+          style={[
+            railOverlay
+              ? { right: 0 }
+              : { width: keyboardHoldsSidebar ? keyboardRailRest : navigationRailWidth },
+            keyboardShiftStyle,
+          ]}
         >
           <AndroidWorkspaceNavigation
             onNewThread={handleStartNewTask}
@@ -1096,7 +1110,7 @@ function AdaptiveWorkspaceLayoutContent(
             onSelect={revealPrimarySidebar}
             onOverlayChange={setRailOverlay}
           />
-        </View>
+        </Animated.View>
       ) : null}
     </View>
   );
