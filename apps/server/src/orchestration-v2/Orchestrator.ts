@@ -2371,11 +2371,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...task,
       completionDelivery: {
         state,
-        // Disposal keeps the observer: that run stays eligible as the task's result.
         observedByRunId:
           command.type === "delegated_task.completion-delivery.acknowledge"
             ? command.observedByRunId
-            : (task.completionDelivery?.observedByRunId ?? null),
+            : null,
       },
       updatedAt: now,
     };

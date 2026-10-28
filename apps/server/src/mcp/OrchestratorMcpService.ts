@@ -87,7 +87,6 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import {
   subagentResultForRun,
   delegatedTaskProgress,
-  delegatedQuestionRunIds,
 } from "@t3tools/provider-core/server/subagentProjection";
 import {
   DispatchModeLimit,
@@ -604,20 +603,19 @@ function pageIncludesTerminalTaskResult(input: {
 }
 
 function latestTerminalResultRun(
-  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs" | "subagents">,
+  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "runs">,
   delegatedRun: OrchestrationV2Run | undefined,
 ): OrchestrationV2Run | undefined {
-  const notificationRunIds = new Set([
-    ...delegatedQuestionRunIds(projection),
-    ...projection.messages
+  const monitorRunIds = new Set(
+    projection.messages
       .filter((message) => message.notification?.source.kind === "monitor")
       .map((message) => message.runId),
-  ]);
+  );
   return projection.runs
     .filter(
       (run) =>
         ThreadManagementService.isTerminalRunStatus(run.status) &&
-        !notificationRunIds.has(run.id) &&
+        !monitorRunIds.has(run.id) &&
         run.status !== "rolled_back" &&
         (run.id === delegatedRun?.id || run.startedAt !== null),
     )
