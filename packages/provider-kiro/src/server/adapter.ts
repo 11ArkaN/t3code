@@ -55,6 +55,7 @@ export const KIRO_PROVIDER = ProviderDriverKind.make("kiro");
 /** T3's slug for "Kiro default", and Kiro's documented default model id. */
 const KIRO_DEFAULT_MODEL = "default";
 const KIRO_COMPACT_METHOD = "_kiro/session/compact";
+const KIRO_STEER_METHOD = "_session/steer";
 const KIRO_FALLBACK_DEFAULT_MODEL = "auto";
 const DEFAULT_KIRO_SETTINGS = Schema.decodeSync(KiroSettings)({});
 
@@ -63,6 +64,12 @@ const KiroProviderCapabilitiesV2 = {
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
     supportsModelSwitchInSession: true,
+  },
+  // `_session/steer` waits for the running tool, then Kiro reads the message at its next step.
+  turns: {
+    ...AcpProviderCapabilitiesV2.turns,
+    supportsActiveSteering: true,
+    activeSteeringInterruptsTools: false,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -97,6 +104,42 @@ const compactKiroSession = (
           ),
     ),
   );
+
+const KiroSteerResult = Schema.Struct({ queued: Schema.Literal(true), messageId: Schema.String });
+const decodeKiroSteerResult = Schema.decodeUnknownOption(KiroSteerResult);
+const KiroSteeringInjected = Schema.Struct({
+  kiro: Schema.Struct({ kind: Schema.Literal("steering_injected"), messageId: Schema.String }),
+});
+const decodeKiroSteeringInjected = Schema.decodeUnknownOption(KiroSteeringInjected);
+
+/** Kiro queues a steer, then reports `steering_injected` with its id once the model reads it. */
+const kiroSteering = {
+  send: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+    text: string,
+  ) =>
+    runtime.request(KIRO_STEER_METHOD, { sessionId, message: text }).pipe(
+      Effect.flatMap((result) =>
+        Option.match(decodeKiroSteerResult(result), {
+          onSome: (decoded) => Effect.succeed(decoded.messageId),
+          onNone: () =>
+            Effect.fail(
+              new EffectAcpErrors.AcpRequestError({
+                code: -32603,
+                errorMessage: "Kiro did not queue the steering message.",
+                method: KIRO_STEER_METHOD,
+                data: result,
+              }),
+            ),
+        }),
+      ),
+    ),
+  injectedSteerId: (notification: EffectAcpSchema.SessionNotification) =>
+    notification.update.sessionUpdate === "session_info_update"
+      ? Option.getOrUndefined(decodeKiroSteeringInjected(notification.update._meta))?.kiro.messageId
+      : undefined,
+};
 
 export interface KiroAdapterV2Options {
   readonly instanceId: Parameters<typeof makeAcpAdapterV2>[0]["instanceId"];
@@ -277,7 +320,7 @@ function isKiroPromptActivity(update: EffectAcpSchema.SessionUpdate): boolean {
   }
 }
 
-/** Past TinBane's dropped 0-0.5 s window and his honored 1.5 s cancel. */
+/** Past the 0-0.5 s window where TinBane saw cancels dropped, and the 1.5 s cancel they saw honored. */
 const KIRO_CANCEL_HOLD_BOUND = "2 seconds";
 
 /**
@@ -309,6 +352,75 @@ function makeKiroCloudConfigFilter() {
       running.delete(key);
     }
     return true;
+  };
+}
+
+const KIRO_STEERING_NOTE = "[STEERING steer-";
+const decodeKiroSteeringInfo = Schema.decodeUnknownOption(
+  Schema.Struct({ kiro: Schema.Struct({ kind: Schema.String }) }),
+);
+
+/** Length of the longest end of `text` that could still grow into the steering note. */
+function steeringNotePrefixLength(text: string): number {
+  for (let length = Math.min(text.length, KIRO_STEERING_NOTE.length - 1); length > 0; length -= 1) {
+    if (KIRO_STEERING_NOTE.startsWith(text.slice(-length))) return length;
+  }
+  return 0;
+}
+
+/**
+ * After an injected steer, Kiro's model ends its reply with a `[STEERING steer-…: …]`
+ * note meant for Kiro's own UI. This drops it from the streamed text, holding back a
+ * chunk end that may be the start of the note until the next chunk shows otherwise.
+ */
+function makeKiroSteeringNoteFilter() {
+  const sessions = new Map<string, { held: string; inNote: boolean }>();
+  return (
+    notification: EffectAcpSchema.SessionNotification,
+  ): EffectAcpSchema.SessionNotification => {
+    const { update } = notification;
+    if (update.sessionUpdate === "session_info_update") {
+      const kind = Option.getOrUndefined(decodeKiroSteeringInfo(update._meta))?.kiro.kind;
+      if (kind === "steering_injected") {
+        sessions.set(notification.sessionId, { held: "", inNote: false });
+      } else if (kind === "steering_cleared") sessions.delete(notification.sessionId);
+      return notification;
+    }
+    const state = sessions.get(notification.sessionId);
+    if (
+      state === undefined ||
+      update.sessionUpdate !== "agent_message_chunk" ||
+      update.content.type !== "text"
+    ) {
+      return notification;
+    }
+    let pending = state.held + update.content.text;
+    let visible = "";
+    state.held = "";
+    while (pending.length > 0) {
+      if (state.inNote) {
+        const end = pending.indexOf("]");
+        if (end < 0) break;
+        pending = pending.slice(end + 1);
+        state.inNote = false;
+        continue;
+      }
+      const start = pending.indexOf(KIRO_STEERING_NOTE);
+      if (start >= 0) {
+        visible += pending.slice(0, start).trimEnd();
+        pending = pending.slice(start + KIRO_STEERING_NOTE.length);
+        state.inNote = true;
+        continue;
+      }
+      const held = steeringNotePrefixLength(pending);
+      visible += pending.slice(0, pending.length - held);
+      state.held = pending.slice(pending.length - held);
+      break;
+    }
+    return {
+      ...notification,
+      update: { ...update, content: { ...update.content, text: visible } },
+    };
   };
 }
 
@@ -379,6 +491,7 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
         environment: { ...options.environment, ...processEnvironment },
       });
     });
+  const stripSteeringNote = makeKiroSteeringNoteFilter();
   return {
     driver: KIRO_PROVIDER,
     runtimeHarness: "Kiro",
@@ -390,7 +503,8 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
     makeRuntime,
     promptFailure: kiroPromptFailure,
     ignoreSessionUpdate: makeKiroCloudConfigFilter(),
-    normalizeSessionUpdate: normalizeKiroSessionUpdate,
+    normalizeSessionUpdate: (notification) =>
+      stripSteeringNote(normalizeKiroSessionUpdate(notification)),
     extractSubagentUpdate: extractKiroSubagentUpdate,
     // See applyKiroModelSelection: `model` arrives after session/new.
     modelOptionArrivesLate: true,
@@ -412,6 +526,7 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
     permissionDisposition: kiroPermissionDisposition,
     approvalOptions: kiroApprovalOptions,
     compactSession: compactKiroSession,
+    steering: kiroSteering,
     // Kiro V3 advertises `promptCapabilities.image`; the shared adapter reads it.
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };

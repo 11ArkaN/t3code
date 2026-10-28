@@ -344,6 +344,20 @@ export interface AcpAdapterV2Flavor {
   ) => Effect.Effect<void>;
   readonly subagentsIdleOnTurnCompletion?: boolean;
   readonly supportsCompaction?: boolean;
+  /**
+   * Native steering: `send` queues a message into the running turn and returns the
+   * agent's id for it, which `injectedSteerId` reads from the update that delivers it.
+   */
+  readonly steering?: {
+    readonly send: (
+      runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+      sessionId: string,
+      text: string,
+    ) => Effect.Effect<string, EffectAcpErrors.AcpError>;
+    readonly injectedSteerId: (
+      notification: EffectAcpSchema.SessionNotification,
+    ) => string | undefined;
+  };
   /** Compacts with the agent's own request, for agents that answer a `/compact` prompt as chat. */
   readonly compactSession?: (
     runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -605,6 +619,8 @@ export const AcpProviderCapabilitiesV2 = {
     enforcement: "client-boundary",
   },
 } satisfies OrchestrationV2ProviderCapabilities;
+
+const STEER_DELIVERY_BOUND = "2 seconds";
 
 function isCompactionMessage(message: ProviderAdapter.ProviderAdapterV2TurnMessage): boolean {
   return message.text.trim() === "/compact" && message.attachments.length === 0;
@@ -1609,6 +1625,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           input.runtimePolicy;
         const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveAcpTurn | null>(null);
+        // Keyed by the agent's steer id; an injection can arrive before its send returns.
+        const steerInjections = new Map<string, Deferred.Deferred<void>>();
+        const steerInjection = (steerId: string) => {
+          const existing = steerInjections.get(steerId);
+          if (existing !== undefined) return existing;
+          const created = Deferred.makeUnsafe<void>();
+          steerInjections.set(steerId, created);
+          return created;
+        };
         let pendingStopCloseTurn: ActiveAcpTurn | null = null;
         let followsAgentWorkState = false;
         let agentWork: Extract<
@@ -5887,6 +5912,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           Effect.fnUntraced(
             function* (rawNotification: EffectAcpSchema.SessionNotification) {
               if (flavor.ignoreSessionUpdate?.(rawNotification) === true) return;
+              const injectedSteerId = flavor.steering?.injectedSteerId(rawNotification);
+              if (injectedSteerId !== undefined) {
+                yield* Deferred.succeed(steerInjection(injectedSteerId), undefined);
+              }
               yield* markPromptStarted(rawNotification);
               const embedded = embeddedTerminalIdsFromSessionUpdate(rawNotification);
               if (embedded !== undefined) {
@@ -7278,6 +7307,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             }
           }
           yield* Ref.set(activeTurn, null);
+          steerInjections.clear();
           if (
             postSettleContinuationEnabled &&
             settledStatus === "completed" &&
@@ -8141,13 +8171,69 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   }),
               }
             : {}),
-          steerTurn: (turnInput) =>
-            Effect.fail(
-              new ProviderAdapter.ProviderAdapterSteerRunUnsupportedError({
-                driver,
-                providerThreadId: turnInput.providerThread.id,
-              }),
-            ),
+          steerTurn: Effect.fn("AcpAdapterV2.steerTurn")(
+            function* (turnInput) {
+              const steering = flavor.steering;
+              // The agent takes text only, so a steer with attachments waits for the next turn.
+              if (steering === undefined || turnInput.message.attachments.length > 0) {
+                return yield* new ProviderAdapter.ProviderAdapterSteerRunUnsupportedError({
+                  driver,
+                  providerThreadId: turnInput.providerThread.id,
+                });
+              }
+              const context = yield* Ref.get(activeTurn);
+              if (
+                context === null ||
+                context.finalized ||
+                context.providerTurnId !== turnInput.providerTurnId
+              ) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver,
+                  detail: `Provider turn ${turnInput.providerTurnId} is not active and cannot be steered.`,
+                });
+              }
+              // An agent that drops an early cancel drops an early steer too.
+              const startHold = flavor.cancelAfterPromptStarts;
+              if (startHold !== undefined) {
+                yield* Deferred.await(context.promptStarted).pipe(
+                  Effect.timeoutOption(startHold.bound),
+                );
+              }
+              const steerId = yield* steering.send(
+                runtime,
+                context.nativeThreadId,
+                turnInput.message.text,
+              );
+              const injected = steerInjection(steerId);
+              // The agent reads a steer at its next step. One that lands after the last
+              // step is dropped, and the turn settles right after; the orchestrator then
+              // sends it as a follow-up. The bound keeps Stop from queueing behind a tool.
+              const outcome = yield* Effect.raceFirst(
+                Deferred.await(injected).pipe(Effect.as("injected" as const)),
+                Deferred.await(context.promptWireSettled).pipe(Effect.as("settled" as const)),
+              ).pipe(Effect.timeoutOption(STEER_DELIVERY_BOUND));
+              steerInjections.delete(steerId);
+              if (Option.contains(outcome, "settled") && !(yield* Deferred.isDone(injected))) {
+                return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                  driver,
+                  detail: `Provider turn ${turnInput.providerTurnId} ended before it read the steering message.`,
+                });
+              }
+            },
+            (effect, turnInput) =>
+              effect.pipe(
+                Effect.mapError((cause) =>
+                  cause._tag === "ProviderAdapterSteerRunUnsupportedError"
+                    ? cause
+                    : new ProviderAdapter.ProviderAdapterSteerRunError({
+                        driver,
+                        providerThreadId: turnInput.providerThread.id,
+                        providerTurnId: turnInput.providerTurnId,
+                        cause,
+                      }),
+                ),
+              ),
+          ),
           interruptTurn: Effect.fn("AcpAdapterV2.interruptTurn")(
             function* (turnInput: ProviderAdapter.ProviderAdapterV2InterruptInput) {
               return yield* Effect.uninterruptibleMask((restore) =>

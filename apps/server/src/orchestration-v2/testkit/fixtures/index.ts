@@ -38,6 +38,8 @@ import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
 import { assertClaudeResultIsErrorOutput } from "./claude_result_is_error/output.ts";
 import { grokAutoBlockedCommandInput } from "./grok_auto_blocked_command/input.ts";
 import { kiroCompactionInput } from "./kiro_compaction/input.ts";
+import { kiroMessageSteeringInput } from "./kiro_message_steering/input.ts";
+import { assertKiroMessageSteeringOutput } from "./kiro_message_steering/output.ts";
 import { assertKiroCompactionOutput } from "./kiro_compaction/output.ts";
 import { KIRO_EFFORT_LEVEL, KIRO_EFFORT_MODEL, kiroEffortInput } from "./kiro_effort/input.ts";
 import { assertKiroEffortOutput } from "./kiro_effort/output.ts";
@@ -543,6 +545,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: KIRO_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertToolCallReadOnlyOnRequestKiroOutput,
+      },
+    ],
+  },
+  {
+    name: "kiro_message_steering",
+    buildInput: kiroMessageSteeringInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("kiro"),
+        transcriptFile: new URL("./kiro_message_steering/kiro_transcript.ndjson", import.meta.url),
+        modelSelection: KIRO_MODEL_SELECTION,
+        assertOutput: assertKiroMessageSteeringOutput,
       },
     ],
   },
@@ -1720,12 +1734,6 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("fx"),
         transcriptFile: new URL("./message_steering/fx_transcript.ndjson", import.meta.url),
         modelSelection: FX_MODEL_SELECTION,
-        assertOutput: assertGrokMessageSteeringOutput,
-      },
-      {
-        driver: ProviderDriverKind.make("kiro"),
-        transcriptFile: new URL("./message_steering/kiro_transcript.ndjson", import.meta.url),
-        modelSelection: KIRO_MODEL_SELECTION,
         assertOutput: assertGrokMessageSteeringOutput,
       },
       {
