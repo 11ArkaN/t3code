@@ -1379,7 +1379,8 @@ const make = Effect.gen(function* () {
     }
 
     const inheritsOptions =
-      instanceId === inheritedSelection.instanceId && slug === inheritedSelection.model;
+      instanceId === inheritedSelection.instanceId &&
+      (model === inheritedSelection.model || slug === inheritedSelection.model);
     let options = inheritsOptions ? inheritedSelection.options : undefined;
     if (requestedOptions !== undefined) {
       const selections = new Map(
