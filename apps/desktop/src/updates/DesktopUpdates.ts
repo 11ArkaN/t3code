@@ -52,6 +52,8 @@ import {
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
 const PREPARED_INSTALL_CHECK_WAIT = Duration.seconds(90);
+// electron-updater's own idle timeout never arms on Electron net requests, so a stalled download hangs.
+const DOWNLOAD_STALL_TIMEOUT = Duration.seconds(60);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -105,6 +107,15 @@ export class DesktopUpdateChannelPersistenceError extends Schema.TaggedError<Des
 ) {
   override get message(): string {
     return `Failed to persist the ${this.channel} desktop update channel.`;
+  }
+}
+
+export class DesktopUpdateDownloadStalledError extends Schema.TaggedError<DesktopUpdateDownloadStalledError>()(
+  "DesktopUpdateDownloadStalledError",
+  {},
+) {
+  override get message(): string {
+    return `The update download stalled: no data was received for ${Duration.toSeconds(DOWNLOAD_STALL_TIMEOUT)} seconds.`;
   }
 }
 
@@ -350,6 +361,7 @@ export const make = Effect.gen(function* () {
     ReadonlyArray<DesktopBackendPool.DesktopBackendInstance>
   >([]);
   const finishedUpdateActions = yield* PubSub.unbounded<UpdateAction>();
+  const downloadProgressPercents = yield* PubSub.sliding<number>(1);
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const notAppliedVersionRef = yield* Ref.make(Option.none<string>());
@@ -519,6 +531,19 @@ export const make = Effect.gen(function* () {
         );
   });
 
+  // Squirrel.Mac work after the last byte reports no progress, so stop watching at 100%.
+  const watchDownloadProgress = Effect.fn("desktop.updates.watchDownloadProgress")(function* (
+    progress: PubSub.Subscription<number>,
+  ) {
+    let percent = 0;
+    while (percent < 100) {
+      const next = yield* PubSub.take(progress).pipe(Effect.timeoutOption(DOWNLOAD_STALL_TIMEOUT));
+      if (Option.isNone(next)) return yield* new DesktopUpdateDownloadStalledError();
+      percent = next.value;
+    }
+    return yield* Effect.never;
+  });
+
   const downloadAvailableUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
@@ -535,20 +560,32 @@ export const make = Effect.gen(function* () {
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
       yield* logUpdaterInfo("downloading update");
-      yield* electronUpdater.downloadUpdate;
+      const progress = yield* PubSub.subscribe(downloadProgressPercents);
+      yield* Effect.raceFirst(electronUpdater.downloadUpdate, watchDownloadProgress(progress));
       return { accepted: true, completed: true };
     }).pipe(
+      Effect.scoped,
       Effect.catchTags({
         ElectronUpdaterDownloadUpdateError: Effect.fn("desktop.updates.handleDownloadFailure")(
+          function* (error) {
+            const cause = describeUpdateErrorCause(error.cause);
+            yield* updateState((current) =>
+              reduceDesktopUpdateStateOnDownloadFailure(current, `${error.message} ${cause}`),
+            );
+            yield* logUpdaterError(error.message, {
+              errorTag: error._tag,
+              cause,
+              channel: error.channel,
+            });
+            return { accepted: true, completed: false };
+          },
+        ),
+        DesktopUpdateDownloadStalledError: Effect.fn("desktop.updates.handleDownloadStall")(
           function* (error) {
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnDownloadFailure(current, error.message),
             );
-            yield* logUpdaterError(error.message, {
-              errorTag: error._tag,
-              cause: describeUpdateErrorCause(error.cause),
-              channel: error.channel,
-            });
+            yield* logUpdaterError(error.message, { errorTag: error._tag });
             return { accepted: true, completed: false };
           },
         ),
@@ -954,6 +991,7 @@ export const make = Effect.gen(function* () {
     yield* decodeDownloadProgressInfo(raw).pipe(
       Effect.flatMap(
         Effect.fn("desktop.updates.applyDownloadProgress")(function* (progress) {
+          yield* PubSub.publish(downloadProgressPercents, progress.percent);
           const state = yield* Ref.get(updateStateRef);
           const percent = Math.floor(progress.percent);
           if (shouldBroadcastDownloadProgress(state, progress.percent) || state.message !== null) {
