@@ -397,10 +397,15 @@ it.effect.each([
         {
           execute: (input) =>
             Effect.gen(function* () {
-              // Git quotes the URL it was given, query included, and appends a slash.
+              const cloneUrl = input.args.at(-2)!;
+              // Git treats @ in a pathless URL's query as userinfo, losing the query delimiter.
+              const diagnosticUrl =
+                cloneUrl === "https://github.com?access_token=abc@secret"
+                  ? "https://secret"
+                  : cloneUrl;
               yield* (
                 input.progress?.onStderrLine?.(
-                  `fatal: unable to access '${remote}?access_token=${token}/': Could not resolve host: github.com`,
+                  `fatal: unable to access '${diagnosticUrl}/': Could not resolve host: github.com`,
                 ) ?? Effect.void
               );
               return yield* new GitCommandError({
@@ -418,7 +423,7 @@ it.effect.each([
 
     assert.strictEqual(
       error.detail,
-      `fatal: unable to access '${remote}': Could not resolve host: github.com`,
+      `fatal: unable to access '${remote}${token === "abc@secret" ? "/" : ""}': Could not resolve host: github.com`,
     );
   }),
 );
