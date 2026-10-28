@@ -56,7 +56,7 @@ import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { usePreparedConnection } from "../../state/session";
 import { buildModelOptions } from "../../lib/modelOptions";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProjects, useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
+import { useProjects, useEnvironmentServerConfig, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -669,7 +669,7 @@ function TaskForm({
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const config = useEnvironmentServerConfig(environmentId);
   const boundThreadId = draft.task?.threadId ?? null;
-  const boundThread = useThreadShell(
+  const boundThread = useQuietThreadShell(
     boundThreadId ? scopeThreadRef(environmentId, boundThreadId) : null,
   );
   const modelOptions = buildModelOptions(config, null, undefined, draft.projectId);
