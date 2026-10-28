@@ -486,6 +486,62 @@ it.effect("does not duplicate delivery and yields to newer user work or opt-out"
   }),
 );
 
+it.effect("resends the original request when the cut turn never reached the provider", () =>
+  Effect.gen(function* () {
+    const base = makeProjection();
+    const userMessageId = MessageId.make("message:durian");
+    const request = "Reply with exactly the word DURIAN-26384 and nothing else.";
+    const cut = {
+      ...base,
+      runs: [{ ...base.runs[0]!, status: "cancelled", userMessageId }],
+      providerTurns: [{ ...base.providerTurns[0]!, status: "cancelled" }],
+      messages: [
+        { id: userMessageId, threadId, runId, role: "user", text: request, attachments: [] },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+    const continuationText = Effect.fn(function* (projection: OrchestrationV2ThreadProjection) {
+      const commands: Parameters<
+        ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
+      >[0][] = [];
+      yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(
+        Effect.provide(
+          Layer.merge(
+            Layer.mock(ThreadManagementService.ThreadManagementService)({
+              getThreadRecords: () => Effect.succeed(projection),
+              recoverDelegatedTask: () => Effect.void,
+              dispatch: (command) => {
+                commands.push(command);
+                return Effect.succeed({} as never);
+              },
+            }),
+            ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+          ),
+        ),
+      );
+      assert.lengthOf(commands, 1);
+      const command = commands[0]!;
+      assert.equal(command.type, "message.dispatch");
+      return command.type === "message.dispatch" ? command.text : "";
+    });
+
+    assert.include(
+      yield* continuationText(cut),
+      request,
+      "the provider never saw the cut turn's request, so the continuation must carry it",
+    );
+
+    const answered = {
+      ...cut,
+      messages: [
+        ...cut.messages,
+        { id: MessageId.make("message:partial"), threadId, runId, role: "assistant", text: "DUR" },
+      ],
+      turnItems: [{ id: "item:partial", threadId, runId, type: "assistant_message" }],
+    } as unknown as OrchestrationV2ThreadProjection;
+    assert.notInclude(yield* continuationText(answered), request);
+  }),
+);
+
 it.effect("prepares no continuation for background work another provider thread launched", () =>
   Effect.gen(function* () {
     const base = makeProjection();
