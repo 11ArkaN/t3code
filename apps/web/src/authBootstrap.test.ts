@@ -196,7 +196,7 @@ describe("resolveInitialServerAuthGateState", () => {
       getLocalEnvironmentBootstraps: () => [
         {
           id: "primary",
-          label: "Windows",
+          label: "Local",
           httpBaseUrl: "http://localhost:3773",
           wsBaseUrl: "ws://localhost:3773",
           bootstrapToken: "desktop-bootstrap-token",

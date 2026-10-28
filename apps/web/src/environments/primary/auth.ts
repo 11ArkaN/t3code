@@ -303,8 +303,9 @@ function isTransientBootstrapError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-const isTransportError = (error: unknown) =>
-  HttpClientError.isHttpClientError(error) && error.reason._tag === "TransportError";
+function isTransportError(error: unknown): boolean {
+  return HttpClientError.isHttpClientError(error) && error.reason._tag === "TransportError";
+}
 
 async function bootstrapServerAuth(urlCredential: string | null): Promise<ServerAuthGateState> {
   const currentSession = await fetchSessionState();
