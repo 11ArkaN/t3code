@@ -2,7 +2,7 @@ diff --git a/out/electronHttpExecutor.js b/out/electronHttpExecutor.js
 index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..3932b6607ca41e6663aae001111c9b18594ed37a 100644
 --- a/out/electronHttpExecutor.js
 +++ b/out/electronHttpExecutor.js
-@@ -61,6 +61,36 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
+@@ -61,6 +61,35 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
          }
          return request;
      }
@@ -32,7 +32,6 @@ index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..3932b6607ca41e6663aae001111c9b18
 +            response.on("error", clear);
 +        });
 +        request.on("abort", clear);
-+        request.on("close", clear);
 +        request.on("error", clear);
 +        arm();
 +    }

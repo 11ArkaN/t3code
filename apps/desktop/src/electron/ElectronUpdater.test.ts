@@ -8,7 +8,9 @@ function startRequest() {
   const response = new NodeEvents.EventEmitter();
   const reject = vi.fn();
   new ElectronHttpExecutor().addErrorAndTimeoutHandlers(request, reject);
-  request.emit("response", response);
+  // Electron's net.ClientRequest emits these as soon as the request body is sent, before any response.
+  request.emit("finish");
+  request.emit("close");
   return { request, response, reject };
 }
 
@@ -20,7 +22,7 @@ describe("ElectronHttpExecutor idle timeout", () => {
     vi.useRealTimers();
   });
 
-  it("aborts a request that receives no data for 60 seconds", () => {
+  it("aborts a request that receives no response for 60 seconds", () => {
     const { request, reject } = startRequest();
 
     vi.advanceTimersByTime(59_999);
@@ -33,6 +35,7 @@ describe("ElectronHttpExecutor idle timeout", () => {
 
   it("keeps a slow download alive while data keeps arriving", () => {
     const { request, response, reject } = startRequest();
+    request.emit("response", response);
 
     for (let elapsed = 0; elapsed < 180_000; elapsed += 30_000) {
       vi.advanceTimersByTime(30_000);
@@ -45,6 +48,7 @@ describe("ElectronHttpExecutor idle timeout", () => {
 
   it("stops the timer once the response ends", () => {
     const { request, response, reject } = startRequest();
+    request.emit("response", response);
 
     response.emit("end");
     vi.advanceTimersByTime(600_000);
