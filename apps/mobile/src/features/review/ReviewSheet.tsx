@@ -10,7 +10,8 @@ import type { AppBarAction, AppBarMenuItem } from "../../components/ui/AppBar.ty
 import type { ReviewSectionItem } from "./reviewModel";
 import { useReviewHeaderPresentation } from "./useReviewHeaderPresentation";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
-import { type Ref, type ReactElement, useImperativeHandle, useRef, useState } from "react";
+import type { MenuAction } from "@react-native-menu/menu";
+import { type Ref, type ReactElement, use, useImperativeHandle, useRef, useState } from "react";
 import {
   FlatList,
   Platform,
@@ -27,6 +28,7 @@ import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { IconButton } from "../../components/ui/IconButton";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { cn } from "../../lib/cn";
@@ -62,6 +64,8 @@ import { resolveSelectedReviewFileId } from "./reviewPaneSelection";
 import { buildReviewSectionMenu } from "./review-section-menu";
 import { reportShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import { ListFilterMenu } from "../workspace/ListFilterMenu";
+import { InThreadPanelContext } from "../threads/thread-panel";
 
 function ReviewHeader(
   props: Parameters<typeof useReviewHeaderPresentation>[0] & {
@@ -418,21 +422,100 @@ function ReviewFileNavigator({
   );
 }
 
+/** The thread panel's stand-in for the Diff screen's header and changed-files column. */
+function ReviewPanelToolbar(
+  props: Parameters<typeof useReviewHeaderPresentation>[0] & {
+    readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
+    readonly showSectionToolbar: boolean;
+    readonly files: ReadonlyArray<ReviewNavigatorFile>;
+    readonly onSelectSection: (sectionId: string) => void;
+    readonly onSelectFile: (fileId: string) => void;
+  },
+) {
+  const { gitActions } = useReviewHeaderPresentation(props);
+  const sectionAction = (section: ReviewSectionItem | null, title: string): MenuAction => ({
+    id: section?.id ?? `unavailable:${title}`,
+    title,
+    state: section !== null && section.id === props.selectedSection?.id ? "on" : "off",
+    attributes: section === null ? { disabled: true } : undefined,
+  });
+  return (
+    <View className="flex-row items-center gap-2 px-3">
+      {props.showSectionToolbar ? (
+        <ListFilterMenu
+          label={props.selectedSection?.title ?? "Changes"}
+          accessibilityLabel="Select diff"
+          actions={[
+            sectionAction(props.sectionMenu.branchChanges, "Changes"),
+            sectionAction(props.sectionMenu.workingTree, "Uncommitted"),
+            sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
+            ...(props.sectionMenu.turns.length > 0
+              ? [
+                  {
+                    id: "turns",
+                    title: "Turn",
+                    subactions: props.sectionMenu.turns.map((section) => ({
+                      ...sectionAction(section, section.title),
+                      subtitle: section.subtitle ?? undefined,
+                    })),
+                  },
+                ]
+              : []),
+          ]}
+          onSelect={props.onSelectSection}
+        />
+      ) : null}
+      {props.files.length > 0 ? (
+        <ListFilterMenu
+          label={`${props.files.length} ${props.files.length === 1 ? "file" : "files"}`}
+          accessibilityLabel="Go to a changed file"
+          actions={props.files.map((file) => ({
+            id: file.id,
+            title: file.path,
+            subtitle: `+${formatDiffCount(file.additions)} -${formatDiffCount(file.deletions)}`,
+          }))}
+          onSelect={props.onSelectFile}
+        />
+      ) : null}
+      <View className="flex-1" />
+      {gitActions.map((action) => (
+        <IconButton
+          key={action.accessibilityLabel}
+          accessibilityLabel={action.accessibilityLabel}
+          icon={action.icon}
+          disabled={action.disabled}
+          onPress={action.onPress}
+        />
+      ))}
+    </View>
+  );
+}
+
 type ReviewSheetProps = StaticScreenProps<{
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }>;
 
+/** The Diff screen. Its changed files show in the inspector column when there is room. */
 export function ReviewSheet(props: ReviewSheetProps) {
-  const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
   useAdaptiveWorkspacePaneRole("inspector");
+  return <ReviewDiff {...props.route.params} />;
+}
+
+/** A thread's review. Under the thread panel, a toolbar row replaces the header and column. */
+export function ReviewDiff(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const inPanel = use(InThreadPanelContext);
+  const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
   const { panes } = useAdaptiveWorkspaceLayout();
   const navigation = useNavigation();
   const selectDetail = useSelectWorkspaceDetail();
   const insets = useSafeAreaInsets();
   const { themeAppearance: selectedTheme } = useAppearancePreferences();
   const headerIcon = String(useUniwindTheme()["--color-icon"]);
-  const { environmentId, threadId } = props.route.params;
+  const { environmentId, threadId } = props;
   const environment = useEnvironmentPresentation(environmentId);
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
@@ -441,7 +524,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const columnMetrics = useNativeColumnLayoutMetrics();
   const safeArea = columnMetrics?.safeArea ?? insets;
-  const topContentInset = Platform.OS === "ios" ? safeArea.top : 0;
+  const topContentInset = Platform.OS === "ios" && !inPanel ? safeArea.top : 0;
   const bottomContentInset =
     Platform.OS === "ios" ? safeArea.bottom + 8 : Math.max(insets.bottom, 18) + 18;
 
@@ -619,7 +702,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     selectedSection !== null &&
     parsedDiff.kind === "files" &&
     NativeReviewDiffView !== null;
-  useRegisterWorkspaceInspector(showChangedFilesPane ? renderInspector : undefined);
+  useRegisterWorkspaceInspector(showChangedFilesPane && !inPanel ? renderInspector : undefined);
   const showChangedFilesToggle = panes.supportsAuxiliaryPane && showChangedFilesPane;
 
   const listHeader = (() => {
@@ -661,24 +744,36 @@ export function ReviewSheet(props: ReviewSheetProps) {
     .join(" · ");
   const headerTitleText = selectedSection?.title ?? "Review changes";
 
+  const headerProps = {
+    environmentId,
+    threadId,
+    title: headerTitleText,
+    subtitle: headerSubtitle,
+    androidSubtitle: androidHeaderSubtitle,
+    selectedThreadCwd,
+    sectionMenu,
+    selectedSection,
+    showSectionToolbar,
+    onRefresh: handlePullToRefresh,
+    onSelectSection: selectSection,
+  };
+
   return (
     <>
-      <ReviewHeader
-        environmentId={environmentId}
-        threadId={threadId}
-        title={headerTitleText}
-        subtitle={headerSubtitle}
-        androidSubtitle={androidHeaderSubtitle}
-        iconColor={headerIcon}
-        selectedThreadCwd={selectedThreadCwd}
-        sectionMenu={sectionMenu}
-        selectedSection={selectedSection}
-        showSectionToolbar={showSectionToolbar}
-        showChangedFilesToggle={showChangedFilesToggle}
-        onRefresh={handlePullToRefresh}
-        onSelectSection={selectSection}
-        onReturnToThread={handleReturnToThread}
-      />
+      {inPanel ? (
+        <ReviewPanelToolbar
+          {...headerProps}
+          files={showChangedFilesPane ? nativeReviewDiffData.files : []}
+          onSelectFile={(fileId) => void handleSelectFile(fileId)}
+        />
+      ) : (
+        <ReviewHeader
+          {...headerProps}
+          iconColor={headerIcon}
+          showChangedFilesToggle={showChangedFilesToggle}
+          onReturnToThread={handleReturnToThread}
+        />
+      )}
 
       <ScreenContent>
         <View className="flex-1 bg-sheet android:bg-sheet-solid">

@@ -1,5 +1,6 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { VcsStatusResult } from "@t3tools/contracts";
+import { createContext } from "react";
 
 import {
   presentThreadLinkedPullRequests,
@@ -29,11 +30,15 @@ export const THREAD_PANEL_TAB_LABELS: Record<ThreadPanelTab, string> = {
 
 export type ThreadPanelPresentation = "sheet" | "column";
 
-// The other tabs open their existing full screen, which cannot live inside the panel.
+// Browser and Pull request keep their own screens, which own a native header and navigator.
+// The sheet also pushes Device: its swipe to dismiss would fight the device stream's gestures.
 const TABS_SHOWN_IN_PANEL: Record<ThreadPanelPresentation, ReadonlySet<ThreadPanelTab>> = {
-  sheet: new Set(["terminal", "files"]),
-  column: new Set(["terminal", "files", "device"]),
+  sheet: new Set(["terminal", "files", "diff"]),
+  column: new Set(["terminal", "files", "diff", "device"]),
 };
+
+/** True under the panel's tab strip, which is the only header its tabs show. */
+export const InThreadPanelContext = createContext(false);
 
 export function threadPanelShowsTab(tab: ThreadPanelTab, presentation: ThreadPanelPresentation) {
   return TABS_SHOWN_IN_PANEL[presentation].has(tab);

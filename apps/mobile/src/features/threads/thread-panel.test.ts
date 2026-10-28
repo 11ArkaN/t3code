@@ -32,15 +32,15 @@ describe("resolveThreadPanelTab", () => {
     expect(resolve(null)).toBe("terminal");
   });
 
-  it("skips tabs that open their own screen", () => {
+  it("shows diff in place and skips tabs that open their own screen", () => {
     expect(
       resolveThreadPanelTab({
         tabs,
         presentation: "sheet",
-        requested: "diff",
-        remembered: "device",
+        requested: "device",
+        remembered: "diff",
       }),
-    ).toBe("terminal");
+    ).toBe("diff");
     expect(
       resolveThreadPanelTab({
         tabs,
@@ -62,7 +62,7 @@ describe("resolveThreadPanelTab", () => {
     ).toBe("files");
     expect(
       resolveThreadPanelTab({
-        tabs: ["diff"],
+        tabs: ["browser", "pull-request"],
         presentation: "sheet",
         requested: null,
         remembered: undefined,

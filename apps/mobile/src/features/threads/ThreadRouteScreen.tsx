@@ -69,6 +69,7 @@ import {
   useRegisterWorkspaceInspector,
 } from "../layout/AdaptiveWorkspaceLayout";
 import { ThreadFileNavigatorPane } from "../files/thread-file-navigator-pane";
+import { ReviewDiff } from "../review/ReviewSheet";
 import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
@@ -554,7 +555,11 @@ function ThreadRouteContent(
     } else {
       navigation.setParams({ inspector: undefined });
       setChosenInspectorMode(
-        tab === "terminal" ? "terminal" : props.renderInspector === undefined ? "files" : "route",
+        tab === "terminal" || tab === "diff"
+          ? tab
+          : props.renderInspector === undefined
+            ? "files"
+            : "route",
       );
     }
     showAuxiliaryPane("inspector");
@@ -639,8 +644,8 @@ function ThreadRouteContent(
       presentation="column"
       terminal={terminal}
       tab={
-        inspectorMode === "terminal"
-          ? "terminal"
+        inspectorMode === "terminal" || inspectorMode === "diff"
+          ? inspectorMode
           : inspectorMode === "preview"
             ? "device"
             : inspectorMode === null
@@ -665,9 +670,12 @@ function ThreadRouteContent(
             }
             renderFiles={renderFilesInspector}
             renderTerminal={() => <ThreadPanelTerminal {...terminal} />}
+            renderDiff={() => (
+              <ReviewDiff environmentId={thread.environmentId} threadId={thread.id} />
+            )}
             mode={
-              tab === "terminal"
-                ? "terminal"
+              tab === "terminal" || tab === "diff"
+                ? tab
                 : tab === "device"
                   ? "preview"
                   : props.renderInspector

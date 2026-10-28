@@ -11,9 +11,9 @@ import { useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { Chip } from "../../components/ui/Chip";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListSection } from "../../components/ui/ListSection";
-import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { deviceEnvironment } from "../../state/device";
@@ -25,8 +25,10 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { vcsEnvironment } from "../../state/vcs";
 import { threadDevicePreviews } from "../devices/threadDevicePreviews";
 import { ThreadFileNavigatorPane } from "../files/thread-file-navigator-pane";
+import { ReviewDiff } from "../review/ReviewSheet";
 import { basename, getTerminalStatusLabel, projectScriptMenuIcon } from "../terminal/terminalMenu";
 import {
+  InThreadPanelContext,
   THREAD_PANEL_TAB_LABELS,
   lastThreadPanelTabs,
   resolveThreadPanelTab,
@@ -82,8 +84,6 @@ export function ThreadPanel(props: {
   const openThreadPullRequests = useOpenThreadPullRequests({
     replace: presentation === "sheet",
   });
-  // UIKit keeps a tapped segment selected, so the strip remounts after a tab opens its own screen.
-  const [stripRevision, setStripRevision] = useState(0);
   const pullRequest = resolveThreadPullRequest({
     thread,
     supportsLinks,
@@ -106,7 +106,6 @@ export function ThreadPanel(props: {
   });
 
   const openScreen = (screen: ThreadPanelTab) => {
-    setStripRevision((revision) => revision + 1);
     if (screen === "pull-request") {
       if (pullRequest) openThreadPullRequests(thread, pullRequest);
       return;
@@ -124,8 +123,7 @@ export function ThreadPanel(props: {
         : CommonActions.navigate(name, params),
     );
   };
-  const select = (next: ThreadPanelTab | "") => {
-    if (next === "") return;
+  const select = (next: ThreadPanelTab) => {
     if (!threadPanelShowsTab(next, presentation)) {
       openScreen(next);
       return;
@@ -137,21 +135,31 @@ export function ThreadPanel(props: {
   return (
     <View className="flex-1 bg-sheet">
       {tabs.length > 0 ? (
-        <View
-          className="px-3 pb-2"
-          style={{ paddingTop: presentation === "sheet" ? 20 : columnSafeArea.top + 8 }}
+        // Scrolls so full tab names fit any width and text size.
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }}
+          contentContainerStyle={{
+            gap: 6,
+            paddingHorizontal: 12,
+            paddingTop: presentation === "sheet" ? 20 : columnSafeArea.top + 8,
+            paddingBottom: 8,
+          }}
         >
-          <SegmentedControl<ThreadPanelTab | "">
-            key={stripRevision}
-            options={tabs.map((value) => ({ value, label: THREAD_PANEL_TAB_LABELS[value] }))}
-            selected={tab ?? ""}
-            onSelect={select}
-            role="tab"
-            size="compact"
-          />
-        </View>
+          {tabs.map((value) => (
+            <Chip
+              key={value}
+              label={THREAD_PANEL_TAB_LABELS[value]}
+              selected={value === tab}
+              onPress={() => select(value)}
+            />
+          ))}
+        </ScrollView>
       ) : null}
-      <View className="flex-1">{props.children(tab)}</View>
+      <View className="flex-1">
+        <InThreadPanelContext value>{props.children(tab)}</InThreadPanelContext>
+      </View>
     </View>
   );
 }
@@ -185,6 +193,8 @@ export function ThreadPanelSheet(
       {(current) =>
         current === "terminal" ? (
           <ThreadPanelTerminal {...terminal} />
+        ) : current === "diff" ? (
+          <ReviewDiff environmentId={selectedThread.environmentId} threadId={selectedThread.id} />
         ) : current === "files" && selectedThreadCwd !== null ? (
           <ThreadFileNavigatorPane
             cwd={selectedThreadCwd}
@@ -192,7 +202,6 @@ export function ThreadPanelSheet(
             headerInset={0}
             projectName={selectedThreadProject?.title ?? "Files"}
             selectedPath={null}
-            onClose={() => navigation.goBack()}
             onSelectFile={(path) =>
               navigation.dispatch(
                 StackActions.replace("ThreadFile", {

@@ -3,8 +3,15 @@ import { environmentSession } from "../../state/session";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ScreenContent } from "../../components/ui/ScreenContent";
-import { useState, type ComponentProps } from "react";
-import { Platform, Pressable, View, type NativeSyntheticEvent } from "react-native";
+import { SearchField } from "../../components/ui/SearchField";
+import { use, useRef, useState, type ComponentProps } from "react";
+import {
+  Platform,
+  Pressable,
+  View,
+  type NativeSyntheticEvent,
+  type TextInputInstance,
+} from "react-native";
 import {
   Screen,
   ScreenStack,
@@ -25,6 +32,7 @@ import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 import { useFileTreeEntries } from "./useFileTreeEntries";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { InThreadPanelContext } from "../threads/thread-panel";
 
 export function ThreadFileNavigatorPane(props: {
   readonly cwd: string;
@@ -33,12 +41,11 @@ export function ThreadFileNavigatorPane(props: {
   readonly projectName: string;
   readonly selectedPath: string | null;
   readonly onSelectFile: (path: string) => void;
-  /** Defaults to hiding the inspector column. */
-  readonly onClose?: () => void;
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<TextInputInstance>(null);
+  const inPanel = use(InThreadPanelContext);
   const { toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
-  const close = props.onClose ?? toggleAuxiliaryPane;
   const { themeAppearance: highlightTheme } = useAppearancePreferences();
   const theme = useUniwindTheme();
   const foregroundColor = theme["--color-foreground"];
@@ -73,7 +80,7 @@ export function ThreadFileNavigatorPane(props: {
       accessibilityLabel: "Close files",
       icon: { name: "xmark", type: "sfSymbol" as const },
       identifier: "thread-file-navigator-close",
-      onPress: close,
+      onPress: toggleAuxiliaryPane,
       sharesBackground: false,
       tintColor: foregroundColor,
       type: "button" as const,
@@ -110,6 +117,25 @@ export function ThreadFileNavigatorPane(props: {
       }}
     />
   );
+
+  if (inPanel) {
+    return (
+      <View className="flex-1">
+        <View className="px-3 pb-2">
+          <SearchField
+            inputRef={searchRef}
+            autoFocus={false}
+            accessibilityLabel="Search files"
+            clearAccessibilityLabel="Clear file search"
+            placeholder="Search files"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+        {fileTree}
+      </View>
+    );
+  }
 
   if (Platform.OS === "ios") {
     return (

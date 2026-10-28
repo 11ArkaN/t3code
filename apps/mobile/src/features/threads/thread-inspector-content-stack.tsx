@@ -4,7 +4,7 @@ import { View } from "react-native";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
 import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 
-export type ThreadInspectorMode = "route" | "git" | "files" | "preview" | "terminal";
+export type ThreadInspectorMode = "route" | "git" | "files" | "preview" | "terminal" | "diff";
 
 const INSPECTOR_PREWARM_DELAY_MS = 350;
 
@@ -50,6 +50,7 @@ export function ThreadInspectorContentStack(props: {
   readonly renderFiles: () => ReactNode;
   readonly renderGit?: () => ReactNode;
   readonly renderTerminal?: () => ReactNode;
+  readonly renderDiff?: () => ReactNode;
   readonly mode: ThreadInspectorMode;
   readonly resetKeys: readonly [string | null, string | null];
   readonly renderRoute?: () => ReactNode;
@@ -116,6 +117,15 @@ export function ThreadInspectorContentStack(props: {
           visible={props.mode === "terminal"}
         >
           <InspectorRenderer render={props.renderTerminal} />
+        </InspectorContentPane>
+      ) : null}
+      {props.renderDiff ? (
+        <InspectorContentPane
+          mounted={mountedModes.has("diff") || props.mode === "diff"}
+          resetKeys={props.resetKeys}
+          visible={props.mode === "diff"}
+        >
+          <InspectorRenderer render={props.renderDiff} />
         </InspectorContentPane>
       ) : null}
       {props.renderRoute ? (
