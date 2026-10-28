@@ -388,6 +388,17 @@ describe("sourceControlClients.parseCommitUrl", () => {
     expect(parsed?.link).toMatchObject({ host: new URL(url).hostname, repository, sha });
   });
 
+  it("reads a GitHub Enterprise Server commit link once the project names its host", () => {
+    const url = `https://git.example.com/Team/Repo/pull/12/commits/${sha}`;
+    expect(
+      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("github"))?.link,
+    ).toMatchObject({
+      host: "git.example.com",
+      repository: "team/repo",
+      sha,
+    });
+  });
+
   it.each([`https://github.com/team/repo/commit/abc1234`, `https://github.com/team/repo/pull/12`])(
     "reads no commit from %s",
     (url) => {

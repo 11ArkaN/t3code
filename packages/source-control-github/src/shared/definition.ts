@@ -84,7 +84,9 @@ export const definition = defineSourceControl({
   },
   commitUrl: (input) =>
     isRepositoryPath(input.repository) ? buildCommitUrl(input, "commit") : null,
-  parseCommitUrl: (url) => (isGitHubHost(url.hostname) ? parseCommitPath(url, COMMIT_PATH) : null),
+  // A known project's host can be any GitHub Enterprise Server name.
+  parseCommitUrl: (url, known) =>
+    known || isGitHubHost(url.hostname) ? parseCommitPath(url, COMMIT_PATH) : null,
   parseChangeRequestUrl: (url) => parseChangeRequestPath(url, CHANGE_REQUEST_PATH),
   // GitHub writes every bare reference through `/issues/`, including pull requests.
   changeRequestUrlFromReferenceAutolink: (url) => {

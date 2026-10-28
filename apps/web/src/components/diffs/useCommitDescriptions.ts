@@ -77,20 +77,30 @@ export function useCommitDescriptions({
     });
   };
 
-  /** Asks for the next batch once the last row of the current one scrolls into view. */
-  const observeRow = (index: number) =>
-    (index + 1) % COMMIT_DESCRIPTION_BATCH_SIZE === 0 && index + 1 < shas.length
-      ? (element: HTMLElement | null) => {
+  /**
+   * Asks for the next batch once the last row of the current one scrolls into view. The first
+   * row asks for the first batch, for a list that arrives after the menu opened.
+   */
+  const observeRow = (index: number) => {
+    const start =
+      index === 0
+        ? 0
+        : (index + 1) % COMMIT_DESCRIPTION_BATCH_SIZE === 0 && index + 1 < shas.length
+          ? index + 1
+          : null;
+    return start === null
+      ? undefined
+      : (element: HTMLElement | null) => {
           if (!element) return;
           const observer = new IntersectionObserver((entries) => {
             if (!entries.some((entry) => entry.isIntersecting)) return;
             observer.disconnect();
-            load(index + 1, false);
+            load(start, false);
           });
           observer.observe(element);
           return () => observer.disconnect();
-        }
-      : undefined;
+        };
+  };
 
   return {
     descriptions: loaded.descriptions,

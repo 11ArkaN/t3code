@@ -227,7 +227,8 @@ export interface SourceControlDefinition {
   readonly defaultCloneTransport: "https" | "ssh";
   readonly changeRequestUrl: (input: ChangeRequestUrlInput) => string | null;
   readonly commitUrl?: (input: CommitUrlInput) => string | null;
-  readonly parseCommitUrl?: (url: URL) => CommitLink | null;
+  /** `known` is set when the caller already knows this host serves the URL's repository. */
+  readonly parseCommitUrl?: (url: URL, known: boolean) => CommitLink | null;
   /** Null when the URL is not one of this host's change requests. */
   readonly parseChangeRequestUrl: (url: URL) => ParsedChangeRequestUrl | null;
   /**
@@ -685,7 +686,7 @@ export function makeSourceControlDefinitionRegistry(
       if (url === null) return null;
       const preferred = kind === undefined ? undefined : byKind.get(kind);
       for (const definition of kind === undefined ? claimOrder : preferred ? [preferred] : []) {
-        const link = definition.parseCommitUrl?.(url);
+        const link = definition.parseCommitUrl?.(url, preferred !== undefined);
         if (link != null) return { definition, link };
       }
       return null;
