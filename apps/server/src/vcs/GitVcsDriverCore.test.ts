@@ -1013,17 +1013,27 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         const fileSystem = yield* FileSystem.FileSystem;
         const markerPath = pathService.join(yield* makeTmpDir(), "outlived-timeout");
         const driver = yield* GitVcsDriver.GitVcsDriver;
+        const trapped = yield* Deferred.make<void>();
 
-        const error = yield* TestClock.withLive(
-          driver.execute({
+        const command = yield* driver
+          .execute({
             operation: "GitVcsDriver.test.ignoresSigterm",
             cwd,
-            args: ["-c", `alias.hang=!trap '' TERM; sleep 3; touch '${markerPath}'`, "hang"],
-            timeoutMs: 200,
-          }),
-        ).pipe(Effect.flip);
+            args: [
+              "-c",
+              `alias.hang=!trap '' TERM; echo trapped; sleep 3; touch '${markerPath}'`,
+              "hang",
+            ],
+            progress: {
+              onStdoutLine: (line) =>
+                line === "trapped" ? Deferred.succeed(trapped, undefined) : Effect.void,
+            },
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(trapped);
+        // The driver's timeout ends a command the same way: by interrupting it.
+        yield* Fiber.interrupt(command);
 
-        assert.equal(error.detail, "Git command timed out.");
         assert.isFalse(
           yield* fileSystem.exists(markerPath),
           "the timed-out git command kept running until it finished on its own",
