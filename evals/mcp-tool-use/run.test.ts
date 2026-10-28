@@ -263,6 +263,20 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
     ["webmcp notCalls delete_note"],
   );
 
+  assert.deepEqual(
+    failed(
+      read,
+      run(`(async () => {
+        const tools = await document.modelContext.getTools();
+        const notes = JSON.parse(await document.modelContext.executeTool(tools.find(t => t.name === 'list_notes'), {}));
+        const duplicates = notes.filter((note, index) => notes.findIndex(other => other.title === note.title && other.body === note.body) !== index);
+        for (const note of duplicates)
+          await document.modelContext.executeTool(tools.find(t => t.name === 'delete_note'), {id: note.id});
+      })()`),
+    ),
+    ["webmcp notCalls delete_note"],
+  );
+
   const save = caseExpect("control-webmcp-requested-chart-save");
   const chart = (spec: string) => run(execute("save_chart", `{spec: ${spec}}`));
   for (const spec of [

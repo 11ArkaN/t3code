@@ -155,6 +155,8 @@ const WebMcpExpect = Schema.Struct({
   tools: Schema.Array(
     Schema.StructWithRest(Schema.Struct({ name: Schema.String, description: Schema.String }), Rest),
   ),
+  /** Tool return values, JSON-serialized as native `executeTool` strings. */
+  results: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   /** Each entry needs one execution on `tabId` whose input matches, as `args` values match. */
   calls: Schema.optional(
     Schema.Array(
@@ -1381,8 +1383,8 @@ const decodeWebMcpExecuted = Schema.decodeUnknownOption(
 const WEBMCP_PAGES = String.raw`
 const vm = require("node:vm");
 // Its source runs inside each page, so the page never holds a child-process object.
-const setup = (tools, origin) => {
-  delete globalThis.__tools; delete globalThis.__origin;
+const setup = (tools, origin, results) => {
+  delete globalThis.__tools; delete globalThis.__origin; delete globalThis.__results;
   const page = globalThis, stringify = JSON.stringify, parse = JSON.parse, names = tools.map(t => t.name);
   let executed = [], count = 0;
   Object.defineProperty(page, "__take", { value: () => { const taken = stringify({ executed, complete: count <= 128 }); executed = []; return taken; } });
@@ -1397,19 +1399,19 @@ const setup = (tools, origin) => {
       if (!names.includes(tool.name)) throw new Error("No tool named " + tool.name + ".");
       if (++count > 128) throw new Error("Page exceeded 128 tool executions.");
       executed[executed.length] = [tool.name, parse(stringify(input) ?? "null")];
-      return "ok";
+      return Object.hasOwn(results, tool.name) ? stringify(results[tool.name]) : "ok";
     },
   };
   page.document = { modelContext };
 };
-const { origin, tools, pages } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+const { origin, tools, pages, results } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 for (const [page, expressions] of pages.entries()) {
   const context = vm.createContext(
-    { __tools: JSON.stringify(tools), __origin: origin },
+    { __tools: JSON.stringify(tools), __origin: origin, __results: JSON.stringify(results) },
     { codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" },
   );
   const run = (source) => vm.runInContext(source, context, { timeout: 250 });
-  run("(" + setup + ")(JSON.parse(__tools), __origin)");
+  run("(" + setup + ")(JSON.parse(__tools), __origin, JSON.parse(__results))");
   for (const expression of expressions) {
     try {
       run(expression);
@@ -1432,6 +1434,7 @@ export const executeWebMcp = (
   pages: ReadonlyArray<ReadonlyArray<string>>,
   origin: string,
   tools: ReadonlyArray<{ readonly name: string }>,
+  results: Readonly<Record<string, unknown>> = {},
 ) => {
   const executed = pages.map(() => Array<{ readonly tool: string; readonly input: unknown }>());
   if (pages.length === 0) return executed;
@@ -1439,7 +1442,7 @@ export const executeWebMcp = (
     process.execPath,
     ["--unhandled-rejections=none", "-e", WEBMCP_PAGES],
     {
-      input: JSON.stringify({ origin, tools, pages }),
+      input: JSON.stringify({ origin, tools, pages, results }),
       encoding: "utf8",
       env: {},
       timeout: 30_000,
@@ -1473,9 +1476,12 @@ const gradeWebMcp = (expect: McpToolUseCase["expect"]["webmcp"], run: SampleRun)
       pages.set(tabId, [...(pages.get(tabId) ?? []), input.expression]);
     }
   const tabs = [...pages.keys()];
-  const executed = executeWebMcp([...pages.values()], expect.origin, expect.tools).flatMap(
-    (page, at) => page.map((execution) => ({ ...execution, tabId: tabs[at] })),
-  );
+  const executed = executeWebMcp(
+    [...pages.values()],
+    expect.origin,
+    expect.tools,
+    expect.results,
+  ).flatMap((page, at) => page.map((execution) => ({ ...execution, tabId: tabs[at] })));
   return [
     ...(expect.calls ?? []).map(({ tool, input = {} }) => ({
       check: `webmcp calls ${tool} ${valueText(input)}`,
