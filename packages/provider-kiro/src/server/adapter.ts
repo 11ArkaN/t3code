@@ -76,6 +76,8 @@ const KiroProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.turns,
     supportsActiveSteering: true,
     activeSteeringInterruptsTools: false,
+    // `_session/steer` takes a string, so a message with images restarts the turn.
+    activeSteeringAcceptsAttachments: false,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,

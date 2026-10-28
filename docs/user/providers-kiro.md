@@ -47,5 +47,14 @@ Kiro asks before tool calls such as writes and commands, and T3 Code answers by 
 - **Full access** approves them without asking you. Autopilot stays on, so there is no review step.
 
 Kiro offers no **Auto** or **Auto-accept edits**. Approvals offer only the choices Kiro sends. Kiro's
-"always allow" saves a rule for the whole workspace, so T3 Code does not offer it as a
-session-wide choice.
+**Always allow** saves a rule for the whole workspace, so T3 Code shows it only when Kiro offers no
+one-time choice.
+
+## Steering, Forks and Compaction
+
+- A message you send while Kiro is working joins the running turn. Kiro reads it once its current
+  step or tool call finishes. A message with images stops the turn and starts a new one with it.
+- Forking a thread from a message gives the fork Kiro's own copy of the conversation up to that
+  message.
+- `/compact` uses Kiro's own compaction. Kiro also compacts on its own as the conversation fills its
+  context.
