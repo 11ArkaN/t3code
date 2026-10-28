@@ -1140,8 +1140,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   const canvas = useChatCanvas();
   const registerTimeline = canvas?.registerTimeline;
-  // A new ref callback identity would detach and reattach the list on every
-  // render, reporting no overflow in between; what it attaches reads refs.
+  // A new ref callback identity would detach and reattach the list on every render,
+  // reporting no overflow in between. The closures it attaches read only refs and stable callbacks.
   const setTimelineList = useStableCallback((list: LegendListRef | null) => {
     listRef.current = list;
     const scrollNode: HTMLElement | null = list?.getScrollableNode() ?? null;
