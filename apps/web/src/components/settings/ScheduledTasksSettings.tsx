@@ -61,6 +61,7 @@ import {
   type EnvironmentPresentation,
 } from "../../state/environments";
 import { useProjects, useQuietThreadShell } from "../../state/entities";
+import { useThreadFamily } from "../../state/threads";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -1134,8 +1135,11 @@ function ScheduledTaskEditorForm({
   const [draft, setDraft] = useState<DraftState>(() =>
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
   );
+  const boundThreadId = draft.threadId ? (draft.threadId as ThreadId) : null;
+  // Shells can omit older settled threads, so read the destination's family on demand.
+  useThreadFamily(environmentId, boundThreadId);
   const boundThread = useQuietThreadShell(
-    draft.threadId ? scopeThreadRef(environmentId, draft.threadId as ThreadId) : null,
+    boundThreadId ? scopeThreadRef(environmentId, boundThreadId) : null,
   );
   const submissionPending = useRef(false);
   const editingTaskMissing =
