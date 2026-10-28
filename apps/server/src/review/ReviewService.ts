@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -119,7 +120,9 @@ export const make = Effect.gen(function* () {
           ? "Review diff preview cwd must stay within the configured workspace root."
           : operation === "ReviewService.getBranchCommits"
             ? "Review commit list cwd must stay within the configured workspace root."
-            : "Review diff file contents cwd must stay within the configured workspace root.",
+            : operation === "ReviewService.generateCommitDescriptions"
+              ? "Review commit description cwd must stay within the configured workspace root."
+              : "Review diff file contents cwd must stay within the configured workspace root.",
     });
   });
 
@@ -244,13 +247,15 @@ export const make = Effect.gen(function* () {
               if (descriptionsByKey.get(item.key) === item.description) {
                 descriptionsByKey.delete(item.key);
               }
-              yield* Exit.isFailure(generated)
+              yield* Exit.isFailure(generated) && !Cause.hasInterruptsOnly(generated.cause)
                 ? Deferred.failCause(item.description, generated.cause)
                 : Deferred.fail(
                     item.description,
                     new TextGenerationError({
                       operation: "generateCommitDescriptions",
-                      detail: "The model returned incomplete commit descriptions.",
+                      detail: Exit.isFailure(generated)
+                        ? "Commit description generation was cancelled."
+                        : "The model returned incomplete commit descriptions.",
                     }),
                   );
             }
