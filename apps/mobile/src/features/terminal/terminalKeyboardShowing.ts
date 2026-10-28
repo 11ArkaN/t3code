@@ -14,9 +14,10 @@ export function subscribeKeyboardShowing(onChange: () => void) {
   const show = () => {
     const repaired = hiddenWithoutWillHide;
     hiddenWithoutWillHide = false;
-    if (keyboardShowing && !repaired) return;
-    keyboardShowing = true;
-    showEpoch += 1;
+    if (!keyboardShowing || repaired) {
+      keyboardShowing = true;
+      showEpoch += 1;
+    }
     onChange();
   };
   const willShow = KeyboardEvents.addListener("keyboardWillShow", show);

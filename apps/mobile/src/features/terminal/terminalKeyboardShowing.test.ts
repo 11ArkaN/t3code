@@ -23,29 +23,44 @@ function emit(name: string) {
 // Android's syncKeyboardPosition repairs a nonanimated IME inset change with
 // keyboardDidHide then keyboardDidShow, and no will-events.
 it("keeps the accessory through Android's did-only repair and starts a new show after it", () => {
-  const onChange = vi.fn();
-  const unsubscribe = subscribeKeyboardShowing(onChange);
-  const trace = ["keyboardWillShow", "keyboardDidShow", "keyboardDidHide", "keyboardDidShow"].map(
-    (name) => {
-      emit(name);
-      return getKeyboardShowEpoch();
-    },
-  );
-  emit("keyboardWillHide");
+  // Two mounted terminal screens, each reading the snapshot when notified.
+  const seen = [0, 0];
+  const unsubscribes = seen.map((_, index) => {
+    seen[index] = getKeyboardShowEpoch();
+    return subscribeKeyboardShowing(() => {
+      seen[index] = getKeyboardShowEpoch();
+    });
+  });
+  const trace = [
+    "keyboardWillShow",
+    "keyboardDidShow",
+    "keyboardDidHide",
+    "keyboardDidShow",
+    "keyboardWillHide",
+    "keyboardWillShow",
+  ].map((name) => {
+    emit(name);
+    return {
+      epoch: getKeyboardShowEpoch(),
+      inSync: seen.every((s) => s === getKeyboardShowEpoch()),
+    };
+  });
 
-  const [shown, settled, repairHidden, repairShown] = trace;
+  const [shown, settled, repairHidden, repairShown, hidden, reshown] = trace.map((t) => t.epoch);
   expect({
-    neverHidden: trace.every((epoch) => epoch !== 0),
+    neverHiddenByRepair: [shown, settled, repairHidden, repairShown].every((epoch) => epoch !== 0),
     sameShow: settled === shown && repairHidden === shown,
     newShow: repairShown !== shown,
-    hiddenAfterWillHide: getKeyboardShowEpoch(),
-    notified: onChange.mock.calls.length,
+    hidden,
+    newShowAfterHide: reshown !== 0 && reshown !== repairShown,
+    subscribersInSync: trace.every((t) => t.inSync),
   }).toEqual({
-    neverHidden: true,
+    neverHiddenByRepair: true,
     sameShow: true,
     newShow: true,
-    hiddenAfterWillHide: 0,
-    notified: 3,
+    hidden: 0,
+    newShowAfterHide: true,
+    subscribersInSync: true,
   });
-  unsubscribe();
+  for (const unsubscribe of unsubscribes) unsubscribe();
 });
