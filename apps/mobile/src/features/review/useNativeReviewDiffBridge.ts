@@ -1,7 +1,11 @@
 import { useMemo, useRef, useState } from "react";
-import type { NativeSyntheticEvent } from "react-native";
+import { Platform, type NativeSyntheticEvent } from "react-native";
 
-import { createNativeReviewDiffTheme, type NativeReviewDiffData } from "./nativeReviewDiffAdapter";
+import {
+  createNativeReviewDiffTheme,
+  withNameFirstFileHeaders,
+  type NativeReviewDiffData,
+} from "./nativeReviewDiffAdapter";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useNativeReviewDiffHighlighting } from "./useNativeReviewDiffHighlighting";
@@ -42,7 +46,10 @@ export function useNativeReviewDiffBridge(input: {
     [appTheme, scheme, themeId],
   );
   const collapsedFileIdsSet = useMemo(() => new Set(collapsedFileIds), [collapsedFileIds]);
-  const rowsJson = useMemo(() => JSON.stringify(data.rows), [data.rows]);
+  const rowsJson = useMemo(
+    () => JSON.stringify(Platform.OS === "ios" ? withNameFirstFileHeaders(data.rows) : data.rows),
+    [data.rows],
+  );
   const collapsedFileIdsJson = useMemo(() => JSON.stringify(collapsedFileIds), [collapsedFileIds]);
   const viewedFileIdsJson = useMemo(() => JSON.stringify(viewedFileIds), [viewedFileIds]);
   const selectedRowIdsJson = useMemo(() => JSON.stringify(selectedRowIds), [selectedRowIds]);

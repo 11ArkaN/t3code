@@ -33,6 +33,7 @@ import {
   lastThreadPanelTabs,
   resolveThreadPanelTab,
   resolveThreadPullRequest,
+  threadChangesLabel,
   threadPanelShowsTab,
   threadPanelTabs,
   type ThreadPanelPresentation,
@@ -103,6 +104,7 @@ export function ThreadPanel(props: {
     presentation,
     requested: props.tab,
     remembered: lastThreadPanelTabs.get(threadKey),
+    hasChanges: threadChangesLabel(gitStatus.data) !== null,
   });
 
   const openScreen = (screen: ThreadPanelTab) => {
@@ -166,7 +168,11 @@ export function ThreadPanel(props: {
 
 /** The panel on iPhone and the folded Duo, where the window has no room for a column. */
 export function ThreadPanelSheet(
-  _props: StaticScreenProps<{ readonly environmentId: string; readonly threadId: string }>,
+  props: StaticScreenProps<{
+    readonly environmentId: string;
+    readonly threadId: string;
+    readonly tab?: ThreadPanelTab;
+  }>,
 ) {
   const navigation = useNavigation();
   const { selectedThread, selectedThreadProject, selectedEnvironmentRuntime } =
@@ -179,7 +185,7 @@ export function ThreadPanelSheet(
     worktreePath: selectedThreadWorktreePath,
     replace: true,
   });
-  const [tab, setTab] = useState<ThreadPanelTab | null>(null);
+  const [tab, setTab] = useState<ThreadPanelTab | null>(props.route.params.tab ?? null);
   if (selectedThread === null) return null;
   return (
     <ThreadPanel

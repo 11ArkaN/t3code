@@ -236,9 +236,16 @@ function AdaptiveWorkspaceLayoutContent(
       keepOpenFor: null,
     });
   }
+  // A review in native columns takes the sidebar's room while it is open. Showing the sidebar
+  // there keeps it for that review; leaving restores the user's preference.
+  const [reviewSidebarRouteKey, setReviewSidebarRouteKey] = useState<string | null>(null);
+  const reviewHidesSidebar =
+    nativeWorkspace &&
+    props.workspaceRouteName === "ThreadReview" &&
+    props.workspaceRouteKey !== reviewSidebarRouteKey;
   const preferredSidebarVisible = baseLayout.primarySidebarOverlaysContent
     ? overlaySidebar.visible
-    : primarySidebarPreferredVisible;
+    : primarySidebarPreferredVisible && !reviewHidesSidebar;
   const primarySidebarPinned = isPrimarySidebarPinned({
     pathname,
     nativeWorkspace,
@@ -430,6 +437,7 @@ function AdaptiveWorkspaceLayoutContent(
     if (layout.primarySidebarOverlaysContent) {
       setOverlaySidebar((current) => ({ ...current, visible }));
     } else {
+      if (visible && reviewHidesSidebar) setReviewSidebarRouteKey(props.workspaceRouteKey ?? null);
       setPrimarySidebarPreferredVisible(visible);
     }
   };

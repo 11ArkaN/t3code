@@ -25,6 +25,7 @@ import {
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveThreadRuntime,
+  presentPendingBackgroundWork,
   threadRuntimeHasInterruptibleRun,
 } from "./threadExecution.ts";
 
@@ -391,5 +392,19 @@ describe("provider-reported model selection", () => {
         ],
       }),
     ).toBeNull();
+  });
+});
+
+describe("presentPendingBackgroundWork", () => {
+  it("names a command without its shell wrapper, as the work log does", () => {
+    expect(
+      presentPendingBackgroundWork([
+        {
+          taskId: "task-1",
+          kind: "command",
+          description: '/bin/zsh -lc "vp run dev --filter web"',
+        },
+      ])?.title,
+    ).toBe("Running: vp run dev --filter web");
   });
 });

@@ -586,3 +586,22 @@ export function getCachedNativeReviewDiffData(
   nativeReviewDiffDataCache.set(input.parsedDiff, { prepared, commentsKey, data });
   return data;
 }
+
+/** A changed file's name and its folder, so a list can lead with the name. */
+export function reviewFilePathParts(path: string) {
+  const slash = path.lastIndexOf("/");
+  return { name: path.slice(slash + 1), folder: path.slice(0, Math.max(0, slash)) };
+}
+
+/**
+ * The iOS view draws a file header's path on one line clipped at its end, so the name leads.
+ * Renames keep their native "old -> new" form.
+ */
+export function withNameFirstFileHeaders(rows: ReadonlyArray<NativeReviewDiffRow>) {
+  return rows.map((row) => {
+    if (row.kind !== "file" || !row.filePath) return row;
+    if (row.previousPath && row.previousPath !== row.filePath) return row;
+    const { name, folder } = reviewFilePathParts(row.filePath);
+    return folder ? { ...row, filePath: `${name} · ${folder}` } : row;
+  });
+}

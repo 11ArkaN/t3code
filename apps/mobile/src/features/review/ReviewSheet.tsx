@@ -51,7 +51,7 @@ import {
   type NativeReviewDiffViewHandle,
   resolveNativeReviewDiffView,
 } from "../diffs/nativeReviewDiffSurface";
-import { NATIVE_REVIEW_DIFF_CONTENT_WIDTH } from "./nativeReviewDiffAdapter";
+import { NATIVE_REVIEW_DIFF_CONTENT_WIDTH, reviewFilePathParts } from "./nativeReviewDiffAdapter";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
 import { useReviewDiffData } from "./useReviewDiffData";
 import { useReviewDiffPrewarming } from "./useReviewDiffPrewarming";
@@ -245,6 +245,7 @@ const ReviewFileNavigatorRow = function ReviewFileNavigatorRow(props: {
   readonly onSelectFile: (fileId: string | null) => void;
 }) {
   const { file, selected, onSelectFile } = props;
+  const { name, folder } = reviewFilePathParts(file.path);
   const handlePress = () => {
     onSelectFile(selected ? null : file.id);
   };
@@ -271,10 +272,15 @@ const ReviewFileNavigatorRow = function ReviewFileNavigatorRow(props: {
             ? "text-xs font-t3-bold text-foreground"
             : "text-xs font-t3-medium text-foreground-secondary"
         }
-        numberOfLines={2}
+        numberOfLines={1}
       >
-        {file.path}
+        {name}
       </Text>
+      {folder ? (
+        <Text className="text-2xs text-foreground-muted" numberOfLines={1} ellipsizeMode="head">
+          {folder}
+        </Text>
+      ) : null}
       <View className="mt-1 flex-row gap-2">
         <Text className="text-2xs font-t3-bold text-adaptive-emerald-700-300">
           +{formatDiffCount(file.additions)}
@@ -469,11 +475,11 @@ function ReviewPanelToolbar(
         <ListFilterMenu
           label={`${props.files.length} ${props.files.length === 1 ? "file" : "files"}`}
           accessibilityLabel="Go to a changed file"
-          actions={props.files.map((file) => ({
-            id: file.id,
-            title: file.path,
-            subtitle: `+${formatDiffCount(file.additions)} -${formatDiffCount(file.deletions)}`,
-          }))}
+          actions={props.files.map((file) => {
+            const { name, folder } = reviewFilePathParts(file.path);
+            const stat = `+${formatDiffCount(file.additions)} -${formatDiffCount(file.deletions)}`;
+            return { id: file.id, title: name, subtitle: folder ? `${folder} · ${stat}` : stat };
+          })}
           onSelect={props.onSelectFile}
         />
       ) : null}

@@ -9,6 +9,7 @@ import { createPullRequestDiffHighlightFiles } from "../pull-requests/pullReques
 import {
   buildNativeReviewDiffData,
   getCachedNativeReviewDiffData,
+  withNameFirstFileHeaders,
 } from "./nativeReviewDiffAdapter";
 import type { ReviewInlineComment } from "./reviewCommentSelection";
 import { buildReviewParsedDiff, type ReviewParsedDiff } from "./reviewModel";
@@ -262,6 +263,23 @@ describe("getCachedNativeReviewDiffData", () => {
       const input = { parsedDiff: diff, comments: [makeComment("Coordinates")] };
       expect(getCachedNativeReviewDiffData(input)).toEqual(buildNativeReviewDiffData(input));
     }
+  });
+});
+
+describe("withNameFirstFileHeaders", () => {
+  it("leads file headers with the name and leaves renames, root files and lines alone", () => {
+    const rows = withNameFirstFileHeaders([
+      { kind: "file", id: "a", filePath: "apps/mobile/src/RemoteHandoffCard.tsx" },
+      { kind: "line", id: "a:1", filePath: "apps/mobile/src/RemoteHandoffCard.tsx" },
+      { kind: "file", id: "b", filePath: "README.md" },
+      { kind: "file", id: "c", filePath: "src/new.ts", previousPath: "src/old.ts" },
+    ]);
+    expect(rows.map((row) => row.filePath)).toEqual([
+      "RemoteHandoffCard.tsx · apps/mobile/src",
+      "apps/mobile/src/RemoteHandoffCard.tsx",
+      "README.md",
+      "src/new.ts",
+    ]);
   });
 });
 

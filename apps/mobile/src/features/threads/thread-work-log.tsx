@@ -203,6 +203,7 @@ export function ThreadDisclosureChevron(props: {
 function ShimmerWorkContent(props: {
   readonly textClassName?: string;
   readonly compact?: boolean;
+  readonly ellipsizeMode?: "head" | "tail";
   readonly environmentId?: EnvironmentId;
   readonly highlighted: boolean;
   readonly icon: WorkContentIcon;
@@ -242,6 +243,7 @@ function ShimmerWorkContent(props: {
           props.textClassName,
         )}
         numberOfLines={1}
+        ellipsizeMode={props.ellipsizeMode}
         onTextLayout={props.onTextLayout}
       >
         {props.label}
@@ -254,6 +256,7 @@ export function ShimmeringWorkContent(props: {
   readonly className?: string;
   readonly textClassName?: string;
   readonly compact?: boolean;
+  readonly ellipsizeMode?: "head" | "tail";
   readonly environmentId?: EnvironmentId;
   readonly icon: WorkContentIcon;
   readonly iconSubtleColor: ColorValue;
@@ -315,6 +318,7 @@ export function ShimmeringWorkContent(props: {
       <ShimmerWorkContent
         textClassName={props.textClassName}
         compact={props.compact}
+        ellipsizeMode={props.ellipsizeMode}
         environmentId={props.environmentId}
         highlighted={false}
         icon={props.icon}
@@ -366,6 +370,7 @@ export function ShimmeringWorkContent(props: {
               <ShimmerWorkContent
                 textClassName={props.textClassName}
                 compact={props.compact}
+                ellipsizeMode={props.ellipsizeMode}
                 environmentId={props.environmentId}
                 highlighted
                 icon={props.icon}
@@ -495,6 +500,7 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
       copied={props.copiedRowId === row.id}
       expanded={props.expandedRows[row.id] ?? false}
       environmentId={props.environmentId}
+      workspaceRoot={props.workspaceRoot}
       iconSubtleColor={props.iconSubtleColor}
       onCopyRow={props.onCopyRow}
       onToggleRow={props.onToggleRow}
@@ -1007,12 +1013,15 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
       </Text>
     );
   const toolPresentation = resolveWorkEntryToolPresentation(row.workEntry);
-  const previewText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry);
+  const previewText =
+    row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, false, props.workspaceRoot).text;
   const answerPreview = row.workEntry.questionAnswer
     ? getQuestionAnswerPreview(row.workEntry.questionAnswer)
     : null;
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
-  const displayText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
+  const rowLabel = workEntryRowLabel(row.workEntry, expanded, props.workspaceRoot);
+  const displayText = row.groupStandIn?.label ?? rowLabel.text;
+  const ellipsizeMode = row.groupStandIn?.label === undefined ? rowLabel.ellipsizeMode : "tail";
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
   const isUsageLimit =
     row.projectedItem.item.type === "error" &&
@@ -1064,6 +1073,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             icon={icon}
             iconSubtleColor={props.iconSubtleColor}
             label={displayText}
+            ellipsizeMode={ellipsizeMode}
             showIcon
             themeAppearance={props.themeAppearance}
             toolIcon={toolIcon}
@@ -1097,6 +1107,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             </WorkLogIconSlot>
             <WorkLogLabel
               tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
+              ellipsizeMode={ellipsizeMode}
             >
               {displayText}
               {answerPreview ? (

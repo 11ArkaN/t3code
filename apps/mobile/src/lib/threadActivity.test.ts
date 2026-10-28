@@ -38,11 +38,46 @@ import {
   setPendingUserInputCustomAnswer,
   isPendingUserInputOptionSelected,
   buildPendingUserInputAnswers,
+  workEntryRowLabel,
 } from "./threadActivity";
 
 const threadId = ThreadId.make("thread-1");
 const sourceThreadId = ThreadId.make("thread-source");
 const runId = RunId.make("run-1");
+
+describe("workEntryRowLabel", () => {
+  const root = "/var/folders/12/T/moonbase";
+  it.each([
+    {
+      entry: { itemType: "file_change", changedFiles: [`${root}/apps/mobile/src/Card.tsx`] },
+      text: "apps/mobile/src/Card.tsx",
+      ellipsizeMode: "head",
+    },
+    {
+      entry: { itemType: "file_change", changedFiles: [`${root}/a.ts`, `${root}/b.ts`] },
+      text: "a.ts +1 more",
+      ellipsizeMode: "head",
+    },
+    {
+      entry: { itemType: "file_change", changedFiles: ["/tmp/notes.md"] },
+      text: "/tmp/notes.md",
+      ellipsizeMode: "head",
+    },
+    {
+      entry: { itemType: "command_execution", command: '/bin/zsh -lc "vp run dev --filter web"' },
+      text: "vp run dev --filter web",
+      ellipsizeMode: "tail",
+    },
+  ] as const)("labels $entry.itemType rows as $text", ({ entry, text, ellipsizeMode }) => {
+    expect(
+      workEntryRowLabel(
+        { id: "row", createdAt: "2026-10-28T00:00:00.000Z", label: "Tool", tone: "tool", ...entry },
+        false,
+        root,
+      ),
+    ).toEqual({ text, ellipsizeMode });
+  });
+});
 
 it("keeps historical plan detail accessible from its paged turn item", () => {
   const item = {

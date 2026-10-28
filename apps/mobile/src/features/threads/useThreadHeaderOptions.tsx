@@ -37,6 +37,8 @@ export function useThreadHeaderOptions(props: {
   readonly inspectorMode: ThreadInspectorMode | null;
   /** Absent when the panel would be empty. */
   readonly onTogglePanel: (() => void) | undefined;
+  /** The thread's diff stat, as desktop's Changes row shows it. Absent without changes. */
+  readonly changes?: { readonly label: string; readonly onOpen: () => void };
   readonly onReturnToThread?: () => void;
   readonly draft?: boolean;
 }) {
@@ -98,7 +100,21 @@ export function useThreadHeaderOptions(props: {
     }),
   ];
   // Desktop's right panel toggle: the panel holds browser, terminal, files, diff and devices.
+  // With changes, desktop's Changes row sits beside it and opens the Diff tab.
   const panelHeaderItems: NativeHeaderItems = [
+    ...(props.changes
+      ? [
+          {
+            accessibilityLabel: `Changes ${props.changes.label}`,
+            identifier: "thread-right-changes",
+            label: layout.usesSplitView ? `Changes ${props.changes.label}` : props.changes.label,
+            onPress: props.changes.onOpen,
+            sharesBackground: true,
+            type: "button",
+            variant: "plain",
+          },
+        ]
+      : []),
     {
       accessibilityLabel: "Toggle panel",
       disabled: props.onTogglePanel === undefined,

@@ -63,6 +63,7 @@ import {
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
 import { claudeResumeCompactionAge } from "@t3tools/shared/claudeCompaction";
+import { workspaceRelativeFilePath } from "@t3tools/shared/path";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { truncate } from "@t3tools/shared/String";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
@@ -260,12 +261,29 @@ function compactWorkEntryText(value: string): string {
   return truncate(value.replace(/\s+/gu, " "), WORK_LOG_LABEL_MAX_LENGTH);
 }
 
-export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = false): string {
+export interface WorkEntryRowLabel {
+  readonly text: string;
+  /** Paths are cut from their start, so the file name stays. */
+  readonly ellipsizeMode: "head" | "tail";
+}
+
+const tailLabel = (text: string): WorkEntryRowLabel => ({ text, ellipsizeMode: "tail" });
+const headLabel = (text: string): WorkEntryRowLabel => ({ text, ellipsizeMode: "head" });
+
+/** Paths show relative to the thread's workspace, as desktop's work log shows them. */
+export function workEntryRowLabel(
+  entry: WorkLogPresentationEntry,
+  expanded = false,
+  workspaceRoot?: string | null,
+): WorkEntryRowLabel {
   if (expanded && entry.itemType === "reasoning")
-    return entry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought";
+    return tailLabel(entry.toolLifecycleStatus === "inProgress" ? "Thinking" : "Thought");
   const presentation = resolveWorkEntryToolPresentation(entry);
-  if (presentation) return presentation.displayName;
-  if (entry.command?.trim()) return compactWorkEntryText(commandDisplayText(entry.command));
+  if (presentation) return tailLabel(presentation.displayName);
+  if (entry.command?.trim()) {
+    return tailLabel(compactWorkEntryText(commandDisplayText(entry.command)));
+  }
+  const displayPath = (path: string) => workspaceRelativeFilePath(path, workspaceRoot) ?? path;
   const action = toolGroupAction(entry);
   const isToolRead = action === "read" && entry.itemType === "dynamic_tool";
   if (action === "code-search" || action === "search") {
@@ -277,27 +295,39 @@ export function workEntryRowLabel(entry: WorkLogPresentationEntry, expanded = fa
         : undefined;
     const searchLabel =
       entry.itemType === "file_search" ? entry.label : formatSearchToolLabel(toolData);
-    if (searchLabel) return searchLabel;
+    if (searchLabel) return tailLabel(searchLabel);
   }
   if (isToolRead) {
     const [firstPath] = entry.changedFiles ?? collectToolFilePaths(entry.toolData);
     if (firstPath) {
-      return formatReadToolLabel(firstPath, Math.max(0, (entry.changedFiles?.length ?? 1) - 1));
+      return headLabel(
+        formatReadToolLabel(
+          displayPath(firstPath),
+          Math.max(0, (entry.changedFiles?.length ?? 1) - 1),
+        ),
+      );
     }
-    if (!expanded) return "Read file";
+    if (!expanded) return tailLabel("Read file");
   }
-  const preview =
+  const text =
     entry.command ??
     (isToolRead || (!expanded && (action === "code-search" || action === "search"))
       ? null
       : entry.detail) ??
-    (entry.changedFiles?.length
-      ? entry.changedFiles.length === 1
-        ? entry.changedFiles[0]!
-        : `${entry.changedFiles[0]!} +${entry.changedFiles.length - 1} more`
-      : null);
-  if (expanded) return preview?.trim() ? truncate(preview, WORK_LOG_LABEL_MAX_LENGTH) : entry.label;
-  return preview ? compactWorkEntryText(preview) || entry.label : entry.label;
+    null;
+  const [firstFile, ...otherFiles] = entry.changedFiles ?? [];
+  const preview =
+    text ??
+    (firstFile === undefined
+      ? null
+      : `${displayPath(firstFile)}${otherFiles.length > 0 ? ` +${otherFiles.length} more` : ""}`);
+  const label = text === null && preview !== null ? headLabel : tailLabel;
+  if (expanded) {
+    return preview?.trim()
+      ? label(truncate(preview, WORK_LOG_LABEL_MAX_LENGTH))
+      : tailLabel(entry.label);
+  }
+  return preview ? label(compactWorkEntryText(preview) || entry.label) : tailLabel(entry.label);
 }
 
 type ThreadFeedActivityGroup = Extract<ThreadFeedEntry, { readonly type: "activity-group" }>;

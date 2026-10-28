@@ -169,10 +169,16 @@ function WorkspaceColumns(
   const windowDimensions = useWindowDimensions();
   const nativeMetrics = useNativeLayoutMetrics();
   const viewportWidth = nativeMetrics?.width ?? windowDimensions.width;
-  const [inspectorWidthFraction, setInspectorWidthFraction] = useState(0.4);
+  // A review's inspector lists its changed files, so it starts at the minimum width: a rail
+  // beside the diff. Each kind keeps its own resized width.
+  const inspectorKind = props.detail.at(-1)?.name === "ThreadReview" ? "review" : "panel";
+  const [inspectorWidthFractions, setInspectorWidthFractions] = useState({
+    panel: 0.4,
+    review: 0,
+  });
   const inspectorWidth = Math.max(
     260,
-    Math.min(viewportWidth * 0.6, viewportWidth * inspectorWidthFraction),
+    Math.min(viewportWidth * 0.6, viewportWidth * inspectorWidthFractions[inspectorKind]),
   );
   const resizeStartWidth = useRef(inspectorWidth);
   const settingsDetailIn = (detail: readonly Route[]) =>
@@ -462,7 +468,10 @@ function WorkspaceColumns(
                             260,
                             Math.min(viewportWidth * 0.6, resizeStartWidth.current + delta),
                           );
-                          setInspectorWidthFraction(width / viewportWidth);
+                          setInspectorWidthFractions((current) => ({
+                            ...current,
+                            [inspectorKind]: width / viewportWidth,
+                          }));
                         }}
                       />
                     </View>

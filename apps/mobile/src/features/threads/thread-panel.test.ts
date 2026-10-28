@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
-import { resolveThreadPanelTab, resolveThreadPullRequest, threadPanelTabs } from "./thread-panel";
+import {
+  resolveThreadPanelTab,
+  resolveThreadPullRequest,
+  threadChangesLabel,
+  threadPanelTabs,
+} from "./thread-panel";
 
 const none = {
   browser: false,
@@ -24,11 +29,15 @@ describe("threadPanelTabs", () => {
 describe("resolveThreadPanelTab", () => {
   const tabs = threadPanelTabs({ ...none, terminal: true, files: true, diff: true, device: true });
 
-  it("prefers the requested tab, then the thread's last tab, then the first one", () => {
-    const resolve = (requested: "terminal" | "files" | null, remembered?: "terminal" | "files") =>
-      resolveThreadPanelTab({ tabs, presentation: "sheet", requested, remembered });
-    expect(resolve("files", "terminal")).toBe("files");
-    expect(resolve(null, "files")).toBe("files");
+  it("prefers the requested tab, then the thread's last tab, then Diff with changes, then the first one", () => {
+    const resolve = (
+      requested: "terminal" | "files" | null,
+      remembered?: "terminal" | "files",
+      hasChanges = false,
+    ) => resolveThreadPanelTab({ tabs, presentation: "sheet", requested, remembered, hasChanges });
+    expect(resolve("files", "terminal", true)).toBe("files");
+    expect(resolve(null, "files", true)).toBe("files");
+    expect(resolve(null, undefined, true)).toBe("diff");
     expect(resolve(null)).toBe("terminal");
   });
 
@@ -39,6 +48,7 @@ describe("resolveThreadPanelTab", () => {
         presentation: "sheet",
         requested: "device",
         remembered: "diff",
+        hasChanges: false,
       }),
     ).toBe("diff");
     expect(
@@ -47,6 +57,7 @@ describe("resolveThreadPanelTab", () => {
         presentation: "column",
         requested: null,
         remembered: "device",
+        hasChanges: false,
       }),
     ).toBe("device");
   });
@@ -58,6 +69,7 @@ describe("resolveThreadPanelTab", () => {
         presentation: "column",
         requested: null,
         remembered: "terminal",
+        hasChanges: true,
       }),
     ).toBe("files");
     expect(
@@ -66,8 +78,32 @@ describe("resolveThreadPanelTab", () => {
         presentation: "sheet",
         requested: null,
         remembered: undefined,
+        hasChanges: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe("threadChangesLabel", () => {
+  const workingTree = { files: [], insertions: 3, deletions: 1 };
+
+  it("shows the branch's changes like desktop, else the working tree's", () => {
+    expect(
+      threadChangesLabel({
+        isRepo: true,
+        workingTree,
+        branchChanges: { baseRef: "main", insertions: 15, deletions: 2 },
+      }),
+    ).toBe("+15 -2");
+    expect(threadChangesLabel({ isRepo: true, workingTree })).toBe("+3 -1");
+  });
+
+  it("is absent without changes or a repository", () => {
+    expect(
+      threadChangesLabel({ isRepo: true, workingTree: { files: [], insertions: 0, deletions: 0 } }),
+    ).toBeNull();
+    expect(threadChangesLabel({ isRepo: false, workingTree })).toBeNull();
+    expect(threadChangesLabel(null)).toBeNull();
   });
 });
 

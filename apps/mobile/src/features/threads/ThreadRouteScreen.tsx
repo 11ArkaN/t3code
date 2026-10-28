@@ -45,7 +45,7 @@ import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
 import { useThreadTerminalLaunch } from "./useThreadTerminalLaunch";
 import { ThreadPanel, ThreadPanelTerminal } from "./ThreadPanel";
-import { lastThreadPanelTabs, type ThreadPanelTab } from "./thread-panel";
+import { lastThreadPanelTabs, threadChangesLabel, type ThreadPanelTab } from "./thread-panel";
 import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
 import { draftRouteIdentity } from "./thread-route-state";
@@ -564,6 +564,7 @@ function ThreadRouteContent(
     }
     showAuxiliaryPane("inspector");
   };
+  const changesLabel = threadChangesLabel(gitStatus.data);
   const handleTogglePanel = () => {
     if (selectedThread === null) return;
     if (!fileInspector.supported) {
@@ -579,8 +580,20 @@ function ThreadRouteContent(
     }
     handleSelectPanelTab(
       lastThreadPanelTabs.get(scopedThreadKey(selectedThread.environmentId, selectedThread.id)) ??
-        (selectedThreadCwd === null ? "terminal" : "files"),
+        (changesLabel !== null ? "diff" : selectedThreadCwd === null ? "terminal" : "files"),
     );
+  };
+  const handleOpenChanges = () => {
+    if (selectedThread === null) return;
+    if (fileInspector.supported) {
+      handleSelectPanelTab("diff");
+      return;
+    }
+    navigation.navigate("ThreadPanel", {
+      environmentId: String(selectedThread.environmentId),
+      threadId: String(selectedThread.id),
+      tab: "diff",
+    });
   };
   const handleSelectInspectorFile = (path: string) => {
     if (selectedThread === null) {
@@ -921,6 +934,11 @@ function ThreadRouteContent(
                 fileInspectorSupported={fileInspector.supported}
                 inspectorMode={inspectorMode}
                 onTogglePanel={handleTogglePanel}
+                changes={
+                  changesLabel === null
+                    ? undefined
+                    : { label: changesLabel, onOpen: handleOpenChanges }
+                }
                 onToggleInspector={handleToggleInspector}
                 onOpenGitInspector={handleOpenGitInspector}
                 onOpenFilesInspector={handleOpenFilesInspector}
