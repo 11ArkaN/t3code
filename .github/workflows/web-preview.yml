@@ -112,7 +112,7 @@ jobs:
               "",
               "Open this exact URL — the hosted-app origin is baked in at build time.",
               "Pair a server into it with `t3 pair --tailscale`, or paste a host + pairing",
-              "code under Settings → Connections.",
+              "code under Settings → Environments.",
             ].join("\n");
 
             const { data: comments } = await github.rest.issues.listComments({
