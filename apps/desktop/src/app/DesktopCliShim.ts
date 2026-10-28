@@ -181,9 +181,10 @@ export const install = Effect.gen(function* () {
       yield* logInfo("installed t3 launcher", { shimPath });
     } else {
       // npx trusts the version line only while the shim is newer than the app it runs.
-      // Any utimes moves the ctime npx compares; the times passed are in seconds.
+      // Any utimes moves the ctime npx compares; the times passed are in seconds. If it fails
+      // (a shim root once wrote), npx only falls back to npm's copy.
       const now = (yield* Clock.currentTimeMillis) / 1000;
-      yield* fs.utimes(shimPath, now, now);
+      yield* fs.utimes(shimPath, now, now).pipe(Effect.ignore);
     }
     return Option.some(shimPath);
   }).pipe(
