@@ -1044,6 +1044,7 @@ describe("ClaudeAdapterV2 MCP elicitation acceptance", () => {
       "accept_once",
       "Approve once",
       "allow_this_time",
+      "allow_once_only",
     ]) {
       assert.deepEqual(
         ClaudeAdapterV2.claudeMcpElicitationAcceptance(
