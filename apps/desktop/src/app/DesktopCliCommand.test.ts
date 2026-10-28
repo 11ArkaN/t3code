@@ -128,6 +128,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
         launcherPath: null,
       });
       yield* command.installOnFirstLaunch;
+      expect((yield* command.state).installedPath).toBe(link);
       const installed = yield* command.install;
       expect(installed.installedPath).toBe(link);
       expect(installed.launcherPath).toBe(path.join(home, ".t3", "bin", "t3"));
