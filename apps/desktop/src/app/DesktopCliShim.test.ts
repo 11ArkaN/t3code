@@ -131,7 +131,7 @@ describe("renderCliShim", () => {
 
   it("runs an installed app's server directly", () => {
     const root = tempRoot();
-    const executable = NodePath.join(root, "opt", "T3 Code", "t3code");
+    const executable = NodePath.join(root, "opt", "T3 Code's", "t3code");
     writeExecutable(executable, REPORTER);
     const shim = writeShim(root, {
       kind: "direct",
@@ -144,18 +144,9 @@ describe("renderCliShim", () => {
       "setup",
       "",
     ]);
-  });
-
-  it("names its version and app in the lines the npm launcher reads", () => {
-    const executable = "/opt/T3 Code's App/t3-desktop";
-    const script = renderCliShim({
-      target: { kind: "direct", executable, entry: "/opt/app.asar/bin.mjs" },
-      shimPath: "/home/u/.t3/bin/t3",
-      t3Home: "/home/u/.t3",
-      version: "1.2.3-nightly.20261027.1",
-    });
-    // Same patterns as scripts/npm-launcher/t3.mjs.
-    expect(/^# T3 Code version: (\S+)$/m.exec(script)?.[1]).toBe("1.2.3-nightly.20261027.1");
+    // The npm launcher reads these two lines with the same patterns (scripts/npm-launcher/t3.mjs).
+    const script = NodeFS.readFileSync(shim, "utf8");
+    expect(/^# T3 Code version: (\S+)$/m.exec(script)?.[1]).toBe("1.2.3");
     expect(/^app='(.*)'$/m.exec(script)?.[1]?.replaceAll(`'"'"'`, "'")).toBe(executable);
   });
 

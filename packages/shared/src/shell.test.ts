@@ -1048,26 +1048,28 @@ effectIt.layer(NodeServices.layer)("resolveWindowsEnvironment", (it) => {
 });
 
 describe("pathSetupCommand", () => {
-  const command = (directory: string, shell: string | undefined, platform: NodeJS.Platform) =>
-    pathSetupCommand({ directory, home: "/Users/theo", shell, platform });
-
-  it("writes to the startup file of the user's shell", () => {
-    expect(command("/home/theo/.local/bin", "/bin/bash", "linux")).toBe(
+  // Undefined where a pasted line could break things: Windows (it would flatten %VAR% entries in
+  // the registry PATH), macOS bash (several startup files), other shells, and unsafe paths.
+  it.each([
+    [
+      "/home/theo/.local/bin",
+      "/bin/bash",
+      "linux",
       `printf '\\n%s\\n' 'export PATH="/home/theo/.local/bin:$PATH"' >> ~/.bashrc`,
-    );
-    expect(command("/Users/theo/.local/bin", "/usr/bin/fish", "linux")).toBe(
-      "fish_add_path $HOME/.local/bin",
-    );
-    expect(command("/opt/t3/bin", "/bin/zsh", "linux")).toBe(
+    ],
+    ["/Users/theo/.local/bin", "/usr/bin/fish", "linux", "fish_add_path $HOME/.local/bin"],
+    [
+      "/opt/t3/bin",
+      "/bin/zsh",
+      "linux",
       `printf '\\n%s\\n' 'export PATH="/opt/t3/bin:$PATH"' >> ~/.zshrc`,
-    );
-  });
-
-  it("prints nothing for Windows, other shells, or a path a pasted command would mangle", () => {
-    expect(command("/Users/theo/.local/bin", "/bin/tcsh", "darwin")).toBeUndefined();
-    expect(command("/Users/theo/.local/bin", "/bin/bash", "darwin")).toBeUndefined();
-    expect(command("C:\\Users\\theo\\.local\\bin", "pwsh", "win32")).toBeUndefined();
-    expect(command("/Users/theo/it's here", "/bin/zsh", "darwin")).toBeUndefined();
-    expect(command("/opt/a$PWD/bin", "/bin/zsh", "linux")).toBeUndefined();
+    ],
+    ["/Users/theo/.local/bin", "/bin/tcsh", "darwin", undefined],
+    ["/Users/theo/.local/bin", "/bin/bash", "darwin", undefined],
+    ["C:\\Users\\theo\\.local\\bin", "pwsh", "win32", undefined],
+    ["/Users/theo/it's here", "/bin/zsh", "darwin", undefined],
+    ["/opt/a$PWD/bin", "/bin/zsh", "linux", undefined],
+  ] as const)("%s with %s on %s", (directory, shell, platform, expected) => {
+    expect(pathSetupCommand({ directory, home: "/Users/theo", shell, platform })).toBe(expected);
   });
 });

@@ -59,10 +59,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       const installed = yield* provide(installCli());
       assert.equal(yield* fs.readLink(link), executable);
       assert.isFalse(installed.onPath);
-      assert.equal(
-        installed.pathCommand,
-        `printf '\\n%s\\n' 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc`,
-      );
+      assert.include(installed.pathCommand, "$HOME/bin");
 
       // A link written through a symlinked T3 home is still ours.
       const alias = path.join(root, "alias");
@@ -79,33 +76,23 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       const error = yield* provide(installCli()).pipe(Effect.flip);
       assert.include(error.message, "Another t3 is already at");
       assert.equal(yield* fs.readFileString(link), "#!/bin/sh\n");
-    }).pipe(Effect.scoped),
-  );
 
-  it.effect("on Windows, writes a t3.cmd only over its own and only for paths cmd can run", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const { root, runtimeDir, executable, provide } = yield* setup;
+      // Windows writes a t3.cmd: only over its own, and only for paths cmd can run.
       const shim = path.join(root, "bin", "t3.cmd");
       const windows = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         provide(effect.pipe(Effect.provideService(HostProcess.Platform, "win32")));
-
-      yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
       const desktopShim =
         '@echo off\r\nrem Written by T3 Code\r\n"C:\\T3 Code\\T3 Code.exe" "x" %*\r\n';
       yield* fs.writeFileString(shim, desktopShim);
-      const error = yield* windows(installCli()).pipe(Effect.flip);
-      assert.include(error.message, "Another t3 is already at");
+      const foreignShim = yield* windows(installCli()).pipe(Effect.flip);
+      assert.include(foreignShim.message, "Another t3 is already at");
       assert.equal(yield* fs.readFileString(shim), desktopShim);
-
       yield* fs.writeFileString(
         shim,
         `@echo off\r\n"${path.join(runtimeDir, "versions/0.0.1/t3.exe")}" %*`,
       );
       yield* windows(installCli());
       assert.equal(yield* fs.readFileString(shim), `@echo off\r\n"${executable}" %*`);
-
       const unrunnable = yield* windows(
         installCli().pipe(
           Effect.provideService(
@@ -125,7 +112,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       const { root, npmPackage, runtimeDir, executable, link, provide } = yield* setup;
       let asked = 0;
       const offer = (
-        answer: boolean | undefined,
+        answer: boolean | undefined | Effect.Effect<boolean>,
         options: {
           readonly args?: ReadonlyArray<string>;
           readonly env?: NodeJS.ProcessEnv;
@@ -138,10 +125,10 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
             args: options.args ?? ["connect"],
             interactive: options.interactive ?? true,
             foreground: Effect.succeed(options.foreground ?? true),
-            confirm: Effect.sync(() => {
-              asked += 1;
-              return answer;
-            }),
+            confirm: Effect.andThen(
+              Effect.sync(() => (asked += 1)),
+              Effect.isEffect(answer) ? answer : Effect.succeed(answer),
+            ),
           }),
           options.env,
         );
@@ -186,38 +173,20 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       yield* fs.remove(path.join(runtimeDir, "install-prompt-declined"));
       yield* offer(true);
       assert.equal(asked, 2);
-    }).pipe(Effect.scoped),
-  );
 
-  it.effect("a failed yes and no answer at all wait for the next minor release", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const { runtimeDir, link, provide } = yield* setup;
+      // A yes that cannot install, and no answer at all, also wait for the next minor release.
       const declined = path.join(runtimeDir, "install-prompt-declined");
-      let asked = 0;
-      const offer = (confirm: Effect.Effect<boolean>) =>
-        provide(
-          offerCliInstall({
-            args: ["connect"],
-            interactive: true,
-            foreground: Effect.succeed(true),
-            confirm: Effect.andThen(
-              Effect.sync(() => (asked += 1)),
-              confirm,
-            ),
-          }),
-        );
-
-      yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+      yield* fs.remove(link);
+      yield* fs.remove(path.join(runtimeDir, "launchers"));
       yield* fs.writeFileString(link, "#!/bin/sh\necho mine\n");
-      assert.isTrue(yield* offer(Effect.succeed(true)));
+      asked = 0;
+      assert.isTrue(yield* offer(true));
       assert.equal(yield* fs.readFileString(link), "#!/bin/sh\necho mine\n");
       assert.equal(
         (yield* fs.readFileString(declined)).trim(),
         VERSION.split(".").slice(0, 2).join("."),
       );
-      yield* offer(Effect.succeed(true));
+      yield* offer(true);
       assert.equal(asked, 1);
 
       yield* fs.remove(declined);

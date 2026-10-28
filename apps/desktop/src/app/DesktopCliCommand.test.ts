@@ -103,76 +103,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
-      const command = yield* commandIn({ home });
-      const link = path.join(home, ".local", "bin", "t3");
-
-      expect(yield* command.state).toEqual({
-        supported: true,
-        installedPath: null,
-        onPath: false,
-        launcherPath: null,
-      });
-      const installed = yield* command.install;
-      expect(installed.installedPath).toBe(link);
-      expect(installed.launcherPath).toBe(path.join(home, ".t3", "bin", "t3"));
-      expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "t3"));
-      expect((yield* command.install).installedPath).toBe(link);
-
-      expect((yield* command.uninstall).installedPath).toBeNull();
-      expect(yield* fs.exists(link)).toBe(false);
-      expect(yield* fs.exists(path.join(home, ".t3", "bin", "t3"))).toBe(true);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("installs once on first launch and leaves a removed command removed", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fs.makeTempDirectoryScoped();
-      const command = yield* commandIn({ home });
-      const link = path.join(home, ".local", "bin", "t3");
-
-      yield* command.installOnFirstLaunch;
-      const installed = yield* command.state;
-      expect(installed.installedPath).toBe(link);
-      expect(installed.pathCommand).toBe(
-        `printf '\\n%s\\n' 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`,
-      );
-
-      yield* command.uninstall;
-      yield* command.installOnFirstLaunch;
-      expect(yield* fs.exists(link)).toBe(false);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("does not retry a first-launch install that failed", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fs.makeTempDirectoryScoped();
-      const shadow = path.join(home, "shadow");
-      yield* fs.makeDirectory(shadow);
-      yield* fs.writeFileString(path.join(shadow, "t3"), "#!/bin/sh\n", { mode: 0o755 });
-      process.env.PATH = [shadow, path.join(home, ".local", "bin")].join(":");
-      const command = yield* commandIn({ home });
-      const link = path.join(home, ".local", "bin", "t3");
-
-      yield* command.installOnFirstLaunch;
-      expect(yield* fs.exists(link)).toBe(false);
-      expect(yield* fs.readFileString(path.join(shadow, "t3"))).toBe("#!/bin/sh\n");
-
-      yield* fs.remove(path.join(shadow, "t3"));
-      yield* command.installOnFirstLaunch;
-      expect(yield* fs.exists(link)).toBe(false);
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("keeps working when the shim's times cannot be refreshed", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const home = yield* fs.makeTempDirectoryScoped();
-      // Like a shim root once wrote: the user cannot set its times.
+      // Like a launcher root once wrote: refreshing its times fails, and installs still work.
       const noUtimes = FileSystem.FileSystem.of({
         ...fs,
         utimes: (target) =>
@@ -190,9 +121,26 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       );
       const link = path.join(home, ".local", "bin", "t3");
 
+      expect(yield* command.state).toEqual({
+        supported: true,
+        installedPath: null,
+        onPath: false,
+        launcherPath: null,
+      });
+      yield* command.installOnFirstLaunch;
+      const installed = yield* command.install;
+      expect(installed.installedPath).toBe(link);
+      expect(installed.launcherPath).toBe(path.join(home, ".t3", "bin", "t3"));
+      expect(installed.pathCommand).toContain("$HOME/.local/bin");
+      expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "t3"));
       expect((yield* command.install).installedPath).toBe(link);
-      // The shim exists with the same text now, so this install refreshes its times.
-      expect((yield* command.install).installedPath).toBe(link);
+
+      expect((yield* command.uninstall).installedPath).toBeNull();
+      expect(yield* fs.exists(link)).toBe(false);
+      expect(yield* fs.exists(path.join(home, ".t3", "bin", "t3"))).toBe(true);
+      // Removed stays removed: first launch never installs again.
+      yield* command.installOnFirstLaunch;
+      expect(yield* fs.exists(link)).toBe(false);
     }).pipe(Effect.scoped),
   );
 
@@ -249,9 +197,14 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect((yield* command.state).shadowedBy).toBe(theirs);
       const error = yield* Effect.flip(command.install);
       expect(error.message).toContain(theirs);
+      yield* command.installOnFirstLaunch;
       expect(yield* fs.exists(path.join(home, ".local", "bin", "t3"))).toBe(false);
+      expect(yield* fs.readFileString(theirs)).toBe("#!/bin/sh\n");
 
+      // A first-launch install that failed is not retried behind the user's back.
       yield* fs.remove(theirs);
+      yield* command.installOnFirstLaunch;
+      expect(yield* fs.exists(path.join(home, ".local", "bin", "t3"))).toBe(false);
       const installed = yield* command.install;
       expect(installed).toMatchObject({
         onPath: true,

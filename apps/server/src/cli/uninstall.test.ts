@@ -12,7 +12,10 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-uninstall-" });
+      // macOS spells the temp folder /var but resolves it to /private/var.
+      const root = yield* fs
+        .makeTempDirectoryScoped({ prefix: "t3-uninstall-" })
+        .pipe(Effect.flatMap(fs.realPath));
       const versionsDir = path.join(root, "runtime/versions");
       const exe = path.join(versionsDir, "1.0.0/t3");
       const otherExe = path.join(root, "other/runtime/versions/1.0.0/t3");
@@ -32,47 +35,21 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: theirs, versionsDir }));
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: copy, versionsDir }));
       assert.isUndefined(yield* findOwnedLauncher({ launchedAs: undefined, versionsDir }));
-    }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
-  );
 
-  it.effect("also finds recorded launchers that npx did not start from", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      // macOS spells the temp folder /var but resolves it to /private/var.
-      const root = yield* fs
-        .makeTempDirectoryScoped({ prefix: "t3-uninstall-" })
-        .pipe(Effect.flatMap(fs.realPath));
-      const home = path.join(root, ".t3");
-      const versionsDir = path.join(home, "runtime/versions");
-      const exe = path.join(versionsDir, "1.0.0/t3");
-      yield* fs.makeDirectory(path.dirname(exe), { recursive: true });
-      yield* fs.writeFileString(exe, "");
-      yield* fs.makeDirectory(path.join(root, "bin"));
-      const ours = path.join(root, "bin/t3");
+      // npx can run another version than the installed one, so uninstall also reads the
+      // recorded launchers: through a symlinked home, and dangling after a prune.
       const throughAlias = path.join(root, "bin/t3-alias");
       const pruned = path.join(root, "bin/t3-pruned");
-      const foreign = path.join(root, "bin/t3-foreign");
-      yield* fs.symlink(path.join(root, ".t3"), path.join(root, "alias"));
-      yield* fs.symlink(exe, ours);
+      yield* fs.symlink(root, path.join(root, "alias"));
       yield* fs.symlink(path.join(root, "alias/runtime/versions/1.0.0/t3"), throughAlias);
       yield* fs.symlink(path.join(versionsDir, "0.9.0/t3"), pruned);
-      yield* fs.writeFileString(foreign, "#!/bin/sh\n");
       yield* fs.writeFileString(
-        path.join(home, "runtime/launchers"),
-        [ours, throughAlias, pruned, foreign, path.join(root, "missing")].join("\n") + "\n",
+        path.join(root, "runtime/launchers"),
+        [ours, theirs, copy, throughAlias, pruned, path.join(root, "missing")].join("\n") + "\n",
       );
-
-      // Read through the alias too: the T3 home itself can be a symlink.
-      assert.deepStrictEqual(yield* findRecordedLaunchers(versionsDir), [
-        ours,
-        throughAlias,
-        pruned,
-      ]);
-      assert.deepStrictEqual(
-        yield* findRecordedLaunchers(path.join(root, "alias/runtime/versions")),
-        [ours, throughAlias, pruned],
-      );
+      for (const dir of [versionsDir, path.join(root, "alias/runtime/versions")]) {
+        assert.deepStrictEqual(yield* findRecordedLaunchers(dir), [ours, throughAlias, pruned]);
+      }
     }).pipe(Effect.scoped, Effect.provideService(HostProcess.Platform, "linux")),
   );
 });

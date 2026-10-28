@@ -272,6 +272,36 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
           assert.equal(cannotStart.exitCode, 7);
         }
 
+        // Signals stop that fallback while it downloads, instead of going to the dead child.
+        yield* fs.remove(path.join(home, "runtime/versions", VERSION), { recursive: true });
+        const requested = Promise.withResolvers<void>();
+        const hanging = NodeHttp.createServer(() => requested.resolve());
+        yield* Effect.acquireRelease(
+          Effect.callback<void>((resume) => {
+            hanging.listen(0, "127.0.0.1", () => resume(Effect.void));
+          }),
+          () =>
+            Effect.callback<void>((resume) => {
+              hanging.closeAllConnections();
+              hanging.close(() => resume(Effect.void));
+            }),
+        );
+        const address = hanging.address();
+        if (address === null || typeof address === "string") {
+          return yield* Effect.die("no TCP address");
+        }
+        const downloading = NodeChildProcess.spawn(process.execPath, [launcher, "serve"], {
+          env: { ...env, T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}` },
+          stdio: "ignore",
+        });
+        const stopped = yield* Effect.promise(async () => {
+          const exited = NodeEvents.EventEmitter.once(downloading, "exit");
+          await requested.promise;
+          downloading.kill("SIGTERM");
+          return exited;
+        });
+        assert.deepStrictEqual(stopped, [null, "SIGTERM"]);
+
         // Pre-0.0.41 services re-enter over IPC and must keep npm's exact version.
         yield* installAs("1.2.4-nightly.20261026.1");
         const service = NodeChildProcess.fork(launcher, ["__service-preflight"], {
@@ -321,64 +351,6 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         yield* fs.utimes(desktopShim, 1_800_000_000, 1_800_000_000);
         const desktop = yield* run(process.execPath, [launcher, "connect"], { cwd: root, env });
         assert.equal(desktop.stdout.trim(), "desktop connect", desktop.stderr);
-      }),
-  );
-
-  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-    "stops on SIGTERM while falling back to a download of npm's copy",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-signal-" });
-        const { packageDir } = yield* unpackLauncher(root);
-        const home = path.join(root, "home");
-        const broken = path.join(home, "runtime/versions/1.2.4/t3");
-        yield* fs.makeDirectory(path.dirname(broken), { recursive: true });
-        yield* fs.writeFileString(broken, "#!/no/such/interpreter\n");
-        yield* fs.chmod(broken, 0o755);
-        yield* fs.writeFileString(path.join(path.dirname(broken), ".install-complete"), "1.2.4\n");
-        const link = path.join(root, "bin", "t3");
-        yield* fs.makeDirectory(path.dirname(link), { recursive: true });
-        yield* fs.symlink(broken, link);
-        yield* fs.writeFileString(path.join(home, "runtime/launchers"), `${link}\n`);
-
-        // A release server that takes the download request and never answers it.
-        const requested = Promise.withResolvers<void>();
-        const hanging = NodeHttp.createServer(() => requested.resolve());
-        yield* Effect.acquireRelease(
-          Effect.callback<void>((resume) => {
-            hanging.listen(0, "127.0.0.1", () => resume(Effect.void));
-          }),
-          () =>
-            Effect.callback<void>((resume) => {
-              hanging.closeAllConnections();
-              hanging.close(() => resume(Effect.void));
-            }),
-        );
-        const address = hanging.address();
-        if (address === null || typeof address === "string")
-          return yield* Effect.die("no TCP address");
-
-        const launcher = NodeChildProcess.spawn(
-          process.execPath,
-          [path.join(packageDir, "bin/t3.mjs"), "serve"],
-          {
-            env: {
-              PATH: process.env.PATH,
-              T3CODE_HOME: home,
-              T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
-            },
-            stdio: "ignore",
-          },
-        );
-        const exit = yield* Effect.promise(async () => {
-          const exited = NodeEvents.EventEmitter.once(launcher, "exit");
-          await requested.promise;
-          launcher.kill("SIGTERM");
-          return exited;
-        });
-        assert.deepStrictEqual(exit, [null, "SIGTERM"]);
       }),
   );
 
