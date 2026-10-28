@@ -2196,12 +2196,23 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const childId = stringField(payload.metadata, "childID");
       if (stringField(payload.metadata, "source") !== "subagent" || childId === undefined) return;
       strays.delete(childId);
-      const call = [...state.calls.values()].find(
+      const open = [...state.calls.values()].filter(
         (candidate) => candidate.child?.sessionId === childId,
       );
-      const calls = [...state.calls.values()].filter(
-        (candidate) => candidate === call || (call !== undefined && candidate.joined === call),
+      // A child runs one job at a time, so the report answers the newest call whose run started;
+      // the attached call's pending prompt is cleared only when its run starts. A lone call
+      // settles regardless: a new child's start can precede its call attaching.
+      const last = Math.max(
+        0,
+        open.findLastIndex(
+          (candidate) =>
+            candidate.joined !== undefined ||
+            candidate.child?.subagent?.call !== candidate ||
+            candidate.child.subagent.prompt === undefined,
+        ),
       );
+      const call = open[last]?.joined ?? open[last];
+      const ended = open.slice(0, last + 1);
       const outcome = reportOutcome(stringField(payload.metadata, "state"));
       state.reports.set(inboxId, {
         inboxId,
@@ -2221,7 +2232,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           : outcome === "cancelled"
             ? "cancelled"
             : "completed";
-      for (const each of calls) yield* settleCall(each, status, subagentOutput(payload.text));
+      for (const each of ended) {
+        // Older calls belong to earlier runs that ended before this one; their reports were lost.
+        if (each !== call && each.joined !== call) yield* settleCall(each, "completed");
+        else yield* settleCall(each, status, subagentOutput(payload.text));
+      }
     });
 
     const holderOf = (sessionId: string) => {
