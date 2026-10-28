@@ -47,16 +47,26 @@ __setClientSettingsForTests({
 
 const lastAnswer = (threadId: ThreadId) => page.getByText(`Answer ${TURNS - 1} for ${threadId}.`);
 
-async function mountApp(threadId: ThreadId) {
+const loadRouter = async (threadId: ThreadId) => {
   const router = getRouter(
     createMemoryHistory({ initialEntries: [`/${ENVIRONMENT_ID}/${threadId}`] }),
   );
   await router.load();
+  return router;
+};
+// Compiles the lazy thread route once, so no test pays for it against the timeout.
+await loadRouter(A);
+
+async function mountApp(threadId: ThreadId) {
+  await using stack = new AsyncDisposableStack();
   const container = document.createElement("div");
   container.style.cssText = "height: 900px; width: 1163px;";
-  const screen = await render(<AppRoot router={router} />, { container, router: false });
+  // AppRoot brings its own router.
+  stack.use(
+    await render(<AppRoot router={await loadRouter(threadId)} />, { container, router: false }),
+  );
   await expect.element(lastAnswer(threadId)).toBeVisible();
-  return screen;
+  return stack.move();
 }
 
 // Chromium's touch emulation makes (pointer: coarse) and (hover: none) match.
