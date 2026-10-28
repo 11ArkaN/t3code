@@ -2199,12 +2199,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const open = [...state.calls.values()].filter(
         (candidate) => candidate.child?.sessionId === childId,
       );
-      // Reports arrive after their run ends, not ordered against the next start: skip calls whose run
-      // has not started (prompt still pending) and, while the child runs, the newest started group.
-      // An idle lone call settles regardless: a new child's start can precede its call attaching.
-      const running = busy.has(childId);
+      // Reports carry no run id and are not ordered against the child's next start: skip calls whose
+      // run has not started (prompt still pending), and the running group while an older run is open.
+      // A lone call settles regardless: a new child's start can precede its call attaching.
       const started =
-        open.length === 1 && !running
+        open.length === 1
           ? open
           : open.filter(
               (candidate) =>
@@ -2212,11 +2211,11 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                 candidate.child?.subagent?.call !== candidate ||
                 candidate.child.subagent.prompt === undefined,
             );
-      const current = running ? started.at(-1) : undefined;
-      const ended = started.filter(
-        (candidate) =>
-          current === undefined || (candidate.joined ?? candidate) !== (current.joined ?? current),
+      const current = started.at(-1);
+      const older = started.filter(
+        (candidate) => (candidate.joined ?? candidate) !== (current?.joined ?? current),
       );
+      const ended = busy.has(childId) && older.length > 0 ? older : started;
       const call = ended.at(-1)?.joined ?? ended.at(-1);
       const outcome = reportOutcome(stringField(payload.metadata, "state"));
       state.reports.set(inboxId, {

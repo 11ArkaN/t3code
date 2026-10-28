@@ -1218,6 +1218,22 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("settles a background subagent whose report arrives before its run's end", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        ...launchedAndRunning,
+        childReport("msg_report", "CHILD_OK"),
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const watch = yield* watchCalls(runtime, thread);
+      yield* runtime.startTurn(withLineage(thread));
+      yield* watch.until(() => watch.state.terminal !== undefined);
+      assert.deepEqual(watch.calls.get("Sleep"), { status: "completed", result: "CHILD_OK" });
+      assert.deepEqual(watch.state.roster, []);
+    }).pipe(Effect.scoped),
+  );
+
   const MIDDLE = "ses_middle0000000000000000000";
   const DEEP = "ses_grandchild00000000000000";
   const toolOf = (session: string, id: string) => ({
