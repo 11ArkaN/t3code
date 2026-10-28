@@ -105,6 +105,12 @@ export const ProjectIconOverride = Schema.Union([
 ]);
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
+export const SCRATCH_PROJECT_ICON = {
+  kind: "lucide",
+  name: "message-square-dashed",
+  color: "gray",
+} as const satisfies ProjectIconOverride;
+
 const ProjectLucideIconWithLegacyMonogram = Schema.Struct({
   ...ProjectLucideIcon.fields,
   monogramText: Schema.optional(ProjectMonogramText),
