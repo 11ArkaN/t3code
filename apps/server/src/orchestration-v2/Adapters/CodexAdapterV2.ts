@@ -252,7 +252,8 @@ const CODEX_CLIENT_CAPABILITIES = {
 export const CodexProviderCapabilitiesV2 = {
   sessions: {
     // One app-server per thread: its tools share the thread's scope, so a memory
-    // kill stops only that thread instead of every Codex thread on the instance.
+    // kill stops only that thread and its native subagents. Requests that need a
+    // loaded thread (turns, revert, thread/sample) must use that thread's session.
     supportsMultipleProviderThreadsPerSession: false,
     supportsModelSwitchInSession: true,
     supportsProviderSwitchingViaHandoff: true,
