@@ -61,10 +61,10 @@ import {
 } from "../../state/environments";
 import { useProjects, useThreadShell } from "../../state/entities";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { buildThreadRouteParams } from "../../threadRoutes";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
+import { threadFamilies } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
@@ -1104,7 +1104,12 @@ function ScheduledTaskDestination({
   readonly threadId: ThreadId | null;
 }) {
   const ref = threadId === null ? null : scopeThreadRef(environmentId, threadId);
-  const thread = useThreadShell(ref);
+  const shell = useThreadShell(ref);
+  // The shell can omit older settled threads; their family read still carries the title.
+  const family = useEnvironmentQuery(
+    ref !== null && shell === null ? threadFamilies.familyAtom(environmentId, ref.threadId) : null,
+  );
+  const thread = shell ?? family.data?.threads.find((row) => row.id === threadId);
   return (
     <Field label="Destination">
       {ref === null ? (
@@ -1113,13 +1118,7 @@ function ScheduledTaskDestination({
         </p>
       ) : (
         <div className="space-y-1 text-sm">
-          <Link
-            to="/$environmentId/$threadId"
-            params={buildThreadRouteParams(ref)}
-            className="block truncate underline underline-offset-2"
-          >
-            {thread?.title.trim() || `Thread ${ref.threadId}`}
-          </Link>
+          <p className="truncate">{thread?.title.trim() || `Thread ${ref.threadId}`}</p>
           <p className="text-muted-foreground">
             Each run continues this conversation, in its workspace and with its current model.
           </p>
