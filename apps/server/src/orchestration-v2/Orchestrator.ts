@@ -45,6 +45,7 @@ import {
   type OrchestrationV2DelegatedCompletionDelivery,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
+  type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RemoteTaskChild,
@@ -145,6 +146,11 @@ import {
   type ShellSnapshotOptions,
 } from "./ProjectionStore.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
+import {
+  LEFT_SHARED_SESSION_REASON,
+  newProviderSessionId,
+  reusableProviderSessionId,
+} from "./ProviderSessionIds.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as RunExecutionService from "./RunExecutionService.ts";
@@ -1041,37 +1047,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ),
     );
 
-  const providerSessionIdFor = (input: {
-    readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
-    readonly providerInstanceId: ProviderInstanceId;
-    readonly threadId: ThreadId;
-  }) =>
-    input.adapter.getCapabilities().pipe(
-      Effect.flatMap((capabilities) =>
-        capabilities.sessions.supportsMultipleProviderThreadsPerSession
-          ? Effect.succeed(
-              idAllocator.derive.providerSession({
-                providerInstanceId: input.providerInstanceId,
-              }),
-            )
-          : idAllocator.allocate.providerSession({
-              providerInstanceId: input.providerInstanceId,
-              threadId: input.threadId,
-            }),
-      ),
-    );
-
-  // providerSessionIdFor re-derives a shared id, so a thread leaves its instance's
-  // shared session once that provider runs one session per thread.
-  const reusableProviderSessionId = (
-    providerInstanceId: ProviderInstanceId,
-    providerSessionId: ProviderSessionId | null | undefined,
-  ): ProviderSessionId | undefined =>
-    providerSessionId == null ||
-    providerSessionId === idAllocator.derive.providerSession({ providerInstanceId })
-      ? undefined
-      : providerSessionId;
-
   const makeEvent =
     /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
     Effect.fnUntraced(function* <Event extends OrchestrationV2DomainEvent>(
@@ -1098,6 +1073,58 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* Ref.update(events, (existing) => [...existing, withId]);
         return withId;
       });
+
+  // A thread that leaves its instance's shared session detaches from it there. Queued
+  // before the turn starts, so the shared app-server lets go of the native thread first.
+  const detachLeftSharedSession = Effect.fn("Orchestrator.detachLeftSharedSession")(
+    function* (input: {
+      readonly command: Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
+      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+      readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
+      readonly providerSessions: ReadonlyArray<OrchestrationV2ProviderSession>;
+      readonly previousSessionId: ProviderSessionId | null | undefined;
+      readonly providerSessionId: ProviderSessionId;
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly now: DateTime.Utc;
+    }) {
+      const left = input.providerSessions.find(
+        (session) =>
+          session.id === input.previousSessionId &&
+          session.id !== input.providerSessionId &&
+          reusableProviderSessionId(idAllocator, input.providerInstanceId, session.id) ===
+            undefined &&
+          session.status !== "stopped" &&
+          session.status !== "error",
+      );
+      if (left === undefined) return;
+      yield* emit(
+        input.events,
+        input.command,
+      )({
+        type: "provider-session.detached",
+        threadId: input.command.threadId,
+        driver: left.driver,
+        providerInstanceId: left.providerInstanceId,
+        occurredAt: input.now,
+        payload: {
+          providerSessionId: left.id,
+          detachedAt: input.now,
+          reason: LEFT_SHARED_SESSION_REASON,
+        },
+      });
+      const detachEffect = {
+        id: `effect:${input.command.commandId}:provider-session.detach:${left.id}`,
+        commandId: input.command.commandId,
+        threadId: input.command.threadId,
+        request: {
+          type: "provider-session.detach",
+          providerSessionId: left.id,
+          detail: LEFT_SHARED_SESSION_REASON,
+        },
+      } satisfies PendingOrchestrationEffectV2;
+      yield* Ref.update(input.effects, (existing) => [...existing, detachEffect]);
+    },
+  );
 
   // Runs in every command transaction; avoid reading thousands of finished leaf nodes.
   const readCommandProjection = (threadId: ThreadId) =>
@@ -1851,6 +1878,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ),
           ));
       const storedProviderSessionId = reusableProviderSessionId(
+        idAllocator,
         queuedRun.providerInstanceId,
         queuedProviderThread.providerSessionId,
       );
@@ -1862,7 +1890,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : null) ??
         (yield* providerAdapters.get(queuedRun.providerInstanceId).pipe(
           Effect.flatMap((adapter) =>
-            providerSessionIdFor({
+            newProviderSessionId({
+              idAllocator,
               adapter,
               providerInstanceId: queuedRun.providerInstanceId,
               threadId,
@@ -2022,9 +2051,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               },
             ]
           : [];
+      // A thread that leaves its instance's shared session detaches from it there.
+      const leftSharedSessionId =
+        storedProviderSessionId === undefined &&
+        queuedProviderThread.providerSessionId !== null &&
+        queuedProviderThread.providerSessionId !== providerSessionId
+          ? queuedProviderThread.providerSessionId
+          : undefined;
+      const detachReason = (session: { readonly id: ProviderSessionId }) =>
+        session.id === leftSharedSessionId
+          ? LEFT_SHARED_SESSION_REASON
+          : "Provider or model selection changed.";
       const sessionsToDetach = projection.providerSessions.filter(
         (session) =>
-          switchPlan?.releaseProviderSessionIds.includes(session.id) &&
+          (switchPlan?.releaseProviderSessionIds.includes(session.id) ||
+            session.id === leftSharedSessionId) &&
           session.status !== "stopped" &&
           session.status !== "error",
       );
@@ -2128,7 +2169,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: {
               providerSessionId: session.id,
               detachedAt: now,
-              reason: "Provider or model selection changed.",
+              reason: detachReason(session),
             },
           })),
           ...executionIdentityEvents,
@@ -2166,7 +2207,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             request: {
               type: "provider-session.detach" as const,
               providerSessionId: session.id,
-              detail: "Provider or model selection changed.",
+              detail: detachReason(session),
             },
           })),
           {
@@ -4656,11 +4697,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ).find((candidate) => candidate.id !== providerThread.id);
       const targetProviderSessionId =
         reusableProviderSessionId(
+          idAllocator,
           input.modelSelection.instanceId,
           existingTargetProviderThread?.providerSessionId,
         ) ??
         (yield* mapDispatchError(input.command)(
-          providerSessionIdFor({
+          newProviderSessionId({
+            idAllocator,
             adapter: targetAdapter,
             providerInstanceId: input.modelSelection.instanceId,
             threadId: input.command.threadId,
@@ -5873,11 +5916,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
       const providerSessionId =
         reusableProviderSessionId(
+          idAllocator,
           modelSelection.instanceId,
           activeProviderThread?.providerSessionId,
         ) ??
         (yield* mapDispatchError(command)(
-          providerSessionIdFor({
+          newProviderSessionId({
+            idAllocator,
             adapter,
             providerInstanceId: modelSelection.instanceId,
             threadId: command.threadId,
@@ -6100,6 +6145,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         occurredAt: now,
         payload: providerThread,
       });
+      yield* detachLeftSharedSession({
+        command,
+        events,
+        effects,
+        providerSessions: projection.providerSessions,
+        previousSessionId: activeProviderThread?.providerSessionId,
+        providerSessionId,
+        providerInstanceId: modelSelection.instanceId,
+        now,
+      });
       if (legacyImportHandoff !== null) {
         yield* emitEvent({
           type: "context-handoff.updated",
@@ -6261,11 +6316,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (canResumeAcrossInstances
         ? undefined
         : reusableProviderSessionId(
+            idAllocator,
             modelSelection.instanceId,
             targetProviderThread?.providerSessionId,
           )) ??
       (yield* mapDispatchError(command)(
-        providerSessionIdFor({
+        newProviderSessionId({
+          idAllocator,
           adapter,
           providerInstanceId: modelSelection.instanceId,
           threadId: command.threadId,
@@ -6883,6 +6940,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       providerInstanceId: modelSelection.instanceId,
       occurredAt: now,
       payload: providerThread,
+    });
+    yield* detachLeftSharedSession({
+      command,
+      events,
+      effects,
+      providerSessions: projection.providerSessions,
+      previousSessionId: targetProviderThread?.providerSessionId,
+      providerSessionId,
+      providerInstanceId: modelSelection.instanceId,
+      now,
     });
     if (portableForkHandoff !== null) {
       yield* emitEvent({
