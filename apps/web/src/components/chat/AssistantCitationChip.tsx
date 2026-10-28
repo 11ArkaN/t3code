@@ -126,7 +126,8 @@ export function AssistantCitationChip({
   const composerSourceLink = (
     <Link
       {...sourceLinkProps}
-      className="inline-flex min-w-0 items-center gap-[0.2em] self-baseline text-inherit no-underline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current rounded-sm"
+      // Empty ::after is the click target. Padding would grow the painted link and the line.
+      className="relative inline-flex min-w-0 items-center gap-[0.2em] self-baseline text-inherit no-underline after:absolute after:inset-x-0 after:-inset-y-[0.4em] after:content-[''] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current rounded-sm"
       aria-label={`View cited assistant text: ${label}`}
     >
       <QuoteIcon aria-hidden="true" />
@@ -176,7 +177,12 @@ export function AssistantCitationChip({
           <PopoverTrigger
             aria-label={citation.comment ? "Edit citation comment" : "Add comment to citation"}
             data-citation-comment-trigger="true"
-            render={<ContextChipAction />}
+            render={
+              <ContextChipAction
+                // Same invisible slop as the quote link. The 1em box, hover fill, and line stay put.
+                className="relative after:absolute after:-inset-[0.4em] after:content-['']"
+              />
+            }
           >
             <PencilIcon aria-hidden="true" />
           </PopoverTrigger>
