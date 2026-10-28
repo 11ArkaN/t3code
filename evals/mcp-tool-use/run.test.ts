@@ -181,8 +181,14 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
     if (!testCase) throw new Error(`Missing case ${id}`);
     return testCase.expect;
   };
-  const run = (expression: unknown, tabId = "tab_1"): SampleRun => ({
-    calls: [{ step: 0, tool: "preview_evaluate", input: { tabId, expression } }],
+  const run = (expression: unknown, tabId: string | null = "tab_1"): SampleRun => ({
+    calls: [
+      {
+        step: 0,
+        tool: "preview_evaluate",
+        input: { ...(tabId === null ? {} : { tabId }), expression },
+      },
+    ],
     text: "",
     stopReason: "end_turn",
   });
@@ -216,14 +222,21 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
     null,
   ])
     assert.lengthOf(failed(write, run(expression)), 1, String(expression));
+  assert.deepEqual(failed(write, run(create, null)), []);
   assert.lengthOf(failed(write, run(create, "wrong_tab")), 1);
   const saveTools = "document.modelContext.getTools().then(tools => { window.saved = tools })";
   const useSaved = `document.modelContext.executeTool(window.saved.find(t => t.name === 'create_note'), {title: 'Groceries', body: 'milk, eggs, bread'})`;
-  const across = (saveTab: string): SampleRun => ({
+  const across = (saveTab: string | null, useTab: string | null = "tab_1"): SampleRun => ({
     ...run(saveTools, saveTab),
-    calls: [...run(saveTools, saveTab).calls, ...run(useSaved).calls],
+    calls: [...run(saveTools, saveTab).calls, ...run(useSaved, useTab).calls],
   });
-  assert.deepEqual(failed(write, across("tab_1")), []);
+  for (const [saveTab, useTab] of [
+    ["tab_1", "tab_1"],
+    [null, "tab_1"],
+    ["tab_1", null],
+    [null, null],
+  ] as const)
+    assert.deepEqual(failed(write, across(saveTab, useTab)), []);
   assert.lengthOf(failed(write, across("tab_2")), 1);
   assert.deepEqual(
     failed(write, {
@@ -336,22 +349,20 @@ it("rejects partial WebMCP results from an unexpectedly terminated replay", () =
 });
 
 it("contains page rejections no expression handles", () => {
-  const grader = new URL("./run.ts", import.meta.url).href;
-  const script = `
-    import { gradeSample } from ${JSON.stringify(grader)};
-    const webmcp = { tabId: "tab_1", origin: "https://acme.dev", tools: [{ name: "mock", description: "Mock." }], calls: [{ tool: "mock" }] };
-    const grade = (expression) => gradeSample({ webmcp }, { calls: [{ step: 0, tool: "preview_evaluate", input: { tabId: "tab_1", expression } }], text: "", stopReason: "end_turn" }).every((check) => check.pass);
-    const first = grade("document.modelContext.getTools().then(() => { throw new Error('page') }); (async () => { throw new Error('page') })(); 1");
-    await new Promise((resolve) => setImmediate(resolve));
-    const later = grade("document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, {}))");
-    process.stdout.write(JSON.stringify([first, later]));
-  `;
-  const child = NodeChildProcess.spawnSync(
-    process.execPath,
-    ["--input-type=module", "--no-warnings", "-e", script],
-    { encoding: "utf8" },
+  const tools = [{ name: "mock", description: "Mock." }];
+  assert.deepEqual(
+    executeWebMcp(
+      [
+        [
+          "document.modelContext.getTools().then(() => { throw new Error('page') }); (async () => { throw new Error('page') })(); 1",
+          "document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, {}))",
+        ],
+      ],
+      "https://acme.dev",
+      tools,
+    ),
+    [[{ tool: "mock", input: {} }]],
   );
-  assert.deepEqual([child.status, child.stdout], [0, "[false,true]"], child.stderr);
 });
 
 it("bounds numbers and reads target.options in either schema form", () => {

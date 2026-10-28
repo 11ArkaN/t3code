@@ -1466,8 +1466,10 @@ const gradeWebMcp = (expect: McpToolUseCase["expect"]["webmcp"], run: SampleRun)
   // Expressions on one tab share its page, as in the browser; other tabs never see it.
   const pages = new Map<unknown, Array<string>>();
   for (const { tool, input } of run.calls)
-    if (tool === "preview_evaluate" && isRecord(input) && typeof input.expression === "string")
-      pages.set(input.tabId, [...(pages.get(input.tabId) ?? []), input.expression]);
+    if (tool === "preview_evaluate" && isRecord(input) && typeof input.expression === "string") {
+      const tabId = input.tabId ?? expect.tabId;
+      pages.set(tabId, [...(pages.get(tabId) ?? []), input.expression]);
+    }
   const tabs = [...pages.keys()];
   const executed = executeWebMcp([...pages.values()], expect.origin, expect.tools).flatMap(
     (page, at) => page.map((execution) => ({ ...execution, tabId: tabs[at] })),
