@@ -8,13 +8,15 @@ const FOCUS_BOUNDARY_SELECTOR =
 const FOCUSABLE_SELECTOR =
   'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [contenteditable="true"], [tabindex]';
 
-/** Props that make an element one stop in the F6 cycle; `order` sets its place in the cycle. */
-export function workspaceAreaProps(name: string, order: number, label: string) {
+/**
+ * Props that make an element one stop in the F6 cycle; `order` sets its place in the cycle.
+ * Omit `label` when the area's focus target already names it, so it is not announced twice.
+ */
+export function workspaceAreaProps(name: string, order: number, label?: string) {
   return {
     "data-workspace-area": name,
     "data-workspace-order": order,
-    "aria-label": label,
-    role: "region",
+    ...(label ? { "aria-label": label, role: "region" } : {}),
     tabIndex: -1,
   } as const;
 }
