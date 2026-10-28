@@ -8,6 +8,7 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area
 import { AdaptiveWorkspaceContext, useAdaptiveWorkspaceLayout } from "./adaptive-workspace-context";
 import { threadSelectionDeferral } from "./deferred-navigation";
 import { uuidv4 } from "../../lib/uuid";
+import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -835,6 +836,19 @@ function AdaptiveWorkspaceLayoutContent(
   }));
   // The content keeps the width React laid it out at and rides the sidebar's edge, so a keyboard
   // transition relays nothing out per frame, the way UIKit animates the iOS split view.
+  // While the keyboard is moving, the detail card continues past its right edge, so the strip the
+  // narrower settled column leaves on the way back shows the card instead of the row behind it.
+  const contentOverhangStyle = useAnimatedStyle(() => ({
+    opacity: keyboardHold.value && keyboardProgress.value > 0 && keyboardProgress.value < 1 ? 1 : 0,
+    transform: [
+      {
+        translateX: keyboardHold.value ? drawnSidebarWidth.value - renderedSidebarWidth.value : 0,
+      },
+    ],
+  }));
+  const threadHeader = useToolbarLayout(false, composerKeyboardActive);
+  const threadHeaderHeight =
+    threadHeader.paddingTop + threadHeader.height + threadHeader.paddingBottom;
   const contentKeyboardStyle = useAnimatedStyle(() => ({
     transform: [
       {
@@ -1074,6 +1088,35 @@ function AdaptiveWorkspaceLayoutContent(
             </WorkspaceSettledContentWidthContext>
           </WorkspaceContentWidthContext>
         </Animated.View>
+        {keyboardHoldsSidebar && contentTargetWidth !== null ? (
+          <>
+            <Animated.View
+              pointerEvents="none"
+              className="absolute top-0 bg-header"
+              style={[
+                {
+                  left: keyboardSidebarRest + contentTargetWidth,
+                  width: keyboardSidebarRest + contentEndGap,
+                  height: threadHeaderHeight,
+                },
+                contentOverhangStyle,
+              ]}
+            />
+            <Animated.View
+              pointerEvents="none"
+              className="absolute bottom-0 rounded-tr-[28px] bg-thread-canvas"
+              style={[
+                {
+                  // Starts under the card's rounded corner so the two read as one card.
+                  left: keyboardSidebarRest + contentTargetWidth - 28,
+                  width: keyboardSidebarRest + 28,
+                  top: threadHeaderHeight,
+                },
+                contentOverhangStyle,
+              ]}
+            />
+          </>
+        ) : null}
       </View>
       <WorkspaceInspectorPane
         pathname={props.pathname}
