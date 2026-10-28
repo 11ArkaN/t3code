@@ -90,7 +90,7 @@ import {
 } from "./terminalInput";
 import { createTerminalPasteSession } from "./terminalPaste";
 import { cacheTerminalGridSize, getCachedTerminalGridSize } from "./terminalUiState";
-import { getKeyboardShowing, subscribeKeyboardShowing } from "./terminalKeyboardShowing";
+import { getKeyboardShowEpoch, subscribeKeyboardShowing } from "./terminalKeyboardShowing";
 
 function TerminalHeader(props: {
   readonly subtitle: string;
@@ -572,12 +572,12 @@ function ThreadTerminal(props: {
   }, [hostPlatform]);
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const keyboardHeight = useKeyboardState((state) => state.height);
-  const keyboardShowing = useSyncExternalStore(subscribeKeyboardShowing, getKeyboardShowing);
+  const keyboardShowEpoch = useSyncExternalStore(subscribeKeyboardShowing, getKeyboardShowEpoch);
   // The accessory follows the keyboard, except that the dismiss and show
   // buttons flip it ahead of the keyboard animation.
-  const [accessory, setAccessory] = useState({ keyboardShowing, dismissed: false });
-  if (accessory.keyboardShowing !== keyboardShowing) {
-    setAccessory({ keyboardShowing, dismissed: !keyboardShowing });
+  const [accessory, setAccessory] = useState({ keyboardShowEpoch, dismissed: false });
+  if (accessory.keyboardShowEpoch !== keyboardShowEpoch) {
+    setAccessory({ keyboardShowEpoch, dismissed: keyboardShowEpoch === 0 });
   }
   const isAccessoryDismissed = accessory.dismissed;
   const isAccessoryVisible = canOperateTerminal && isKeyboardVisible && !isAccessoryDismissed;

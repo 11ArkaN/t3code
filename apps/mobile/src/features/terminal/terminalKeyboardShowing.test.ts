@@ -14,7 +14,7 @@ vi.mock("react-native-keyboard-controller", () => ({
   },
 }));
 
-import { getKeyboardShowing, subscribeKeyboardShowing } from "./terminalKeyboardShowing";
+import { getKeyboardShowEpoch, subscribeKeyboardShowing } from "./terminalKeyboardShowing";
 
 function emit(name: string) {
   for (const listener of listeners.get(name) ?? []) listener();
@@ -22,18 +22,30 @@ function emit(name: string) {
 
 // Android's syncKeyboardPosition repairs a nonanimated IME inset change with
 // keyboardDidHide then keyboardDidShow, and no will-events.
-it("follows Android's nonanimated hide and show, which send only the did-events", () => {
+it("keeps the accessory through Android's did-only repair and starts a new show after it", () => {
   const onChange = vi.fn();
   const unsubscribe = subscribeKeyboardShowing(onChange);
-  emit("keyboardWillShow");
+  const trace = ["keyboardWillShow", "keyboardDidShow", "keyboardDidHide", "keyboardDidShow"].map(
+    (name) => {
+      emit(name);
+      return getKeyboardShowEpoch();
+    },
+  );
+  emit("keyboardWillHide");
 
-  emit("keyboardDidHide");
-  const hidden = { showing: getKeyboardShowing(), notified: onChange.mock.calls.length };
-  emit("keyboardDidShow");
-
+  const [shown, settled, repairHidden, repairShown] = trace;
   expect({
-    hidden,
-    shown: { showing: getKeyboardShowing(), notified: onChange.mock.calls.length },
-  }).toEqual({ hidden: { showing: false, notified: 2 }, shown: { showing: true, notified: 3 } });
+    neverHidden: trace.every((epoch) => epoch !== 0),
+    sameShow: settled === shown && repairHidden === shown,
+    newShow: repairShown !== shown,
+    hiddenAfterWillHide: getKeyboardShowEpoch(),
+    notified: onChange.mock.calls.length,
+  }).toEqual({
+    neverHidden: true,
+    sameShow: true,
+    newShow: true,
+    hiddenAfterWillHide: 0,
+    notified: 3,
+  });
   unsubscribe();
 });
