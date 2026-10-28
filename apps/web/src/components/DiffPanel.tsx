@@ -784,7 +784,10 @@ export default function DiffPanel({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
-            className="max-w-full"
+            className={cn(
+              "max-w-full",
+              selectedRunId === null && selectedCommitSha !== null && "min-w-0 shrink",
+            )}
             aria-label={`Diff scope: ${selectedScopeLabel}`}
             data-workspace-focus-default
           >
@@ -1089,7 +1092,12 @@ export default function DiffPanel({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]",
+          selectedRunId === null && selectedCommitSha !== null && "gap-0",
+        )}
+      >
         {codeViewFiles.length > 0 || (isGitSelection && selectedGitSource?.files?.length) ? (
           <DiffStatLabel
             additions={diffLineStat.additions}
