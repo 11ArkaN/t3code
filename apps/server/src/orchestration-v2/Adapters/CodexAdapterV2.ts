@@ -155,17 +155,19 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 const CODEX_CAPACITY_MAX_RETRIES = 5;
 
-const isActiveWriterConflict = (error: CodexErrors.CodexAppServerError) =>
+// Another app-server may still hold a thread's writer lock (one T3 just closed holds it until it
+// exits) or be writing its history while a fork reads it. Both clear within seconds.
+const isThreadBusyElsewhere = (error: CodexErrors.CodexAppServerError) =>
   error._tag === "CodexAppServerRequestError" &&
-  error.errorMessage.includes("already has an active writer");
+  (error.errorMessage.includes("already has an active writer") ||
+    error.errorMessage.includes("is behind durable rollout"));
 
-// An app-server that T3 just closed holds the thread's writer lock until it exits.
-export const retryWhileWriterHeld = <A, R>(
+export const retryWhileThreadBusyElsewhere = <A, R>(
   request: Effect.Effect<A, CodexErrors.CodexAppServerError, R>,
 ) =>
   request.pipe(
     Effect.retry({
-      while: isActiveWriterConflict,
+      while: isThreadBusyElsewhere,
       schedule: Schedule.spaced("500 millis"),
       times: 20,
     }),
@@ -6830,7 +6832,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           resumeThread: Effect.fn("CodexAdapterV2.resumeThread")(
             function* (threadInput) {
               const nativeThreadId = yield* getNativeThreadId(threadInput.providerThread);
-              const resume = retryWhileWriterHeld(
+              const resume = retryWhileThreadBusyElsewhere(
                 client.raw.request("thread/resume", {
                   threadId: nativeThreadId,
                   excludeTurns: true,
@@ -7618,7 +7620,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               }
               // thread/revert requires the thread loaded in this app-server; resume after restart or idle release.
               if (!loaded) {
-                yield* retryWhileWriterHeld(
+                yield* retryWhileThreadBusyElsewhere(
                   client.raw.request("thread/resume", {
                     threadId,
                     excludeTurns: true,
@@ -7670,21 +7672,23 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               const boundary = yield* resolveCodexForkBoundary(threadInput);
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(
-                  client.request("thread/fork", {
-                    threadId,
-                    ...(boundary.lastTurnId === undefined
-                      ? {}
-                      : { lastTurnId: boundary.lastTurnId }),
-                    ...codexThreadRuntimeParams({
-                      mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
-                      ...(threadInput.modelSelection === undefined
+                  retryWhileThreadBusyElsewhere(
+                    client.request("thread/fork", {
+                      threadId,
+                      ...(boundary.lastTurnId === undefined
                         ? {}
-                        : { modelSelection: threadInput.modelSelection }),
-                      ...(threadInput.runtimePolicy === undefined
-                        ? {}
-                        : { runtimePolicy: threadInput.runtimePolicy }),
+                        : { lastTurnId: boundary.lastTurnId }),
+                      ...codexThreadRuntimeParams({
+                        mcpSession: yield* mcpSessions.read(threadInput.targetThreadId),
+                        ...(threadInput.modelSelection === undefined
+                          ? {}
+                          : { modelSelection: threadInput.modelSelection }),
+                        ...(threadInput.runtimePolicy === undefined
+                          ? {}
+                          : { runtimePolicy: threadInput.runtimePolicy }),
+                      }),
                     }),
-                  }),
+                  ),
                 ),
                 Effect.mapError(
                   (cause) =>

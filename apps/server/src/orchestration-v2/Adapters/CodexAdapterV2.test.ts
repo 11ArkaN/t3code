@@ -915,16 +915,17 @@ describe("CodexAdapterV2 thread writer", () => {
       "3",
     );
 
-  it.effect("retries a request while another app-server still holds the thread's writer", () =>
+  it.effect.each([
+    "thread saved-thread already has an active writer",
+    "thread history projection for saved-thread is behind durable rollout",
+  ])("retries while another app-server is busy with the thread: %s", (busyMessage) =>
     Effect.gen(function* () {
       let attempts = 0;
       const request = Effect.suspend(() => {
         attempts += 1;
-        return attempts === 1
-          ? Effect.fail(writerError("thread saved-thread already has an active writer"))
-          : Effect.succeed("resumed");
+        return attempts === 1 ? Effect.fail(writerError(busyMessage)) : Effect.succeed("resumed");
       });
-      const fiber = yield* CodexAdapterV2.retryWhileWriterHeld(request).pipe(
+      const fiber = yield* CodexAdapterV2.retryWhileThreadBusyElsewhere(request).pipe(
         Effect.forkChild({ startImmediately: true }),
       );
       assert.equal(attempts, 1);
@@ -941,7 +942,7 @@ describe("CodexAdapterV2 thread writer", () => {
         attempts += 1;
         return Effect.fail(writerError("thread not found: saved-thread"));
       });
-      const error = yield* Effect.flip(CodexAdapterV2.retryWhileWriterHeld(request));
+      const error = yield* Effect.flip(CodexAdapterV2.retryWhileThreadBusyElsewhere(request));
       assert.nestedPropertyVal(error, "errorMessage", "thread not found: saved-thread");
       assert.equal(attempts, 1);
     }),
