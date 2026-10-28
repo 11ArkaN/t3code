@@ -705,6 +705,25 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     );
   });
 
+  it.effect("does not report a device registered when its push token is empty", () => {
+    const registrations = stubAndroidDeviceRelay();
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "android",
+      data: " ",
+    });
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+
+      expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
+      expect(registrations).toEqual([]);
+    }).pipe(
+      Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
+      Effect.provide(layerRelayTest),
+    );
+  });
+
   it.effect("keeps notifications enabled when a refresh cannot read the push token", () => {
     const registrations = stubAndroidDeviceRelay();
     vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({

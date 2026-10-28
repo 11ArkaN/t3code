@@ -269,19 +269,16 @@ const nativePushTokenRegistration = Effect.fn("remoteRegistration.nativePushToke
           operation: "read-native-push-token",
           cause,
         }),
-    }).pipe(
-      Effect.tapError((error) =>
-        Effect.sync(() => {
-          logRegistrationError("native push token lookup failed", error);
-        }),
-      ),
-      Effect.orElseSucceed(() => null),
-    );
+    });
     const pushToken =
-      token?.type === Platform.OS && typeof token.data === "string" && token.data.trim().length > 0
-        ? token.data.trim()
-        : null;
-    return { notificationsEnabled: pushToken !== null, pushToken };
+      token.type === Platform.OS && typeof token.data === "string" ? token.data.trim() : "";
+    if (!pushToken) {
+      return yield* new AgentAwarenessOperationError({
+        operation: "read-native-push-token",
+        cause: new Error(`Native push token lookup returned an unusable ${token.type} token.`),
+      });
+    }
+    return { notificationsEnabled: true, pushToken };
   },
 );
 
