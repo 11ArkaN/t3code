@@ -1,4 +1,4 @@
-import { useAtomMount, useAtomSubscribe, useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomMount, useAtomSubscribe, useAtomValue } from "@effect/atom-react";
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import {
   assetUrlStateFromResult,
@@ -11,6 +11,7 @@ import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { Atom, AsyncResult } from "effect/reactivity";
+import { useCallback, useContext } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -95,6 +96,41 @@ export function useRefreshAssetUrl(
     );
     return state._tag === "Success" ? state.url : null;
   };
+}
+
+/**
+ * Mints cached asset URLs on demand, for renderers that ask per item. It changes identity with the
+ * connection, so an item that failed can ask again after a reconnect.
+ */
+export function useAssetUrlResolver(
+  environmentId: EnvironmentId | null,
+): (resource: AssetResource) => Promise<string | null> {
+  const registry = useContext(RegistryContext);
+  const connection = usePreparedConnection(environmentId);
+  const httpBaseUrl = connection._tag === "Some" ? connection.value.httpBaseUrl : null;
+  const connectionPhase =
+    useEnvironmentPresentation(environmentId).presentation?.connection.phase ?? "available";
+  return useCallback(
+    async (resource) => {
+      if (
+        environmentId === null ||
+        httpBaseUrl === null ||
+        connectionPhase === "offline" ||
+        connectionPhase === "reconnecting" ||
+        connectionPhase === "error" ||
+        connectionPhase === "unsupported"
+      )
+        return null;
+      const atom = assetEnvironment.createUrl({ environmentId, input: { resource } });
+      const result = await executeAtomQuery(registry, atom, {
+        label: atom.label?.[0] ?? "asset url",
+        reportFailure: false,
+      });
+      const state = assetUrlStateFromResult(result, httpBaseUrl);
+      return state._tag === "Success" ? state.url : null;
+    },
+    [connectionPhase, environmentId, httpBaseUrl, registry],
+  );
 }
 
 /** {@link useRefreshAssetUrl} for async tasks that resolve several resources at once. */

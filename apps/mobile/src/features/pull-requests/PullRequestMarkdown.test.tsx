@@ -46,6 +46,7 @@ vi.mock("../../state/assets", () => ({
     harness.authorize(resource),
   refreshAssetUrl: async (_environmentId: unknown, resource: AssetResource) =>
     harness.authorize(resource),
+  useAssetUrlResolver: () => async (resource: AssetResource) => harness.authorize(resource),
 }));
 
 import { EnvironmentId, SOURCE_CONTROL_MEDIA_ASSET } from "@t3tools/contracts";

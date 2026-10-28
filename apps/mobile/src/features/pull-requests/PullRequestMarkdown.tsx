@@ -6,6 +6,7 @@ import { pullRequestTarget, type PullRequestParams } from "./usePullRequestDiff"
 import {
   PullRequestMedia,
   PullRequestMediaContext,
+  usePullRequestImageSourceResolver,
   usePullRequestMediaUrl,
 } from "./PullRequestMedia";
 import { videoMimeType } from "@t3tools/shared/video";
@@ -131,6 +132,7 @@ function PullRequestMarkdownContent(props: {
   const renderImage: MarkdownImageRenderer = (image) => (
     <MarkdownImage href={image.href} alt={image.alt} onPreview={setPreview} />
   );
+  const resolveImageSource = usePullRequestImageSourceResolver();
   const styles = useMarkdownPreviewStyles();
   return (
     <FilePreviewGallery value={gallery}>
@@ -139,6 +141,7 @@ function PullRequestMarkdownContent(props: {
         textStyle={styles.nativeTextStyle}
         onLinkPress={openLink}
         renderImage={renderImage}
+        resolveImageSource={resolveImageSource}
         onImagePress={(href) => setPreview(pullRequestImageSource(href, mediaContext))}
       />
       <FilePreviewModal source={preview} onRequestClose={() => setPreview(null)} />

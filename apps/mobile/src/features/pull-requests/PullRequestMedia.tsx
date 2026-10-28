@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 import { pullRequestMediaSource, pullRequestImageSource } from "./pullRequestMediaSource";
 import { useFilePreviewGallery } from "../../components/FilePreviewGallery";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -11,7 +11,8 @@ import { videoMimeType } from "@t3tools/shared/video";
 import { Pressable, View } from "react-native";
 import { Image } from "expo-image";
 import { AppText } from "../../components/ui/AppText";
-import { useAssetUrlState, useRefreshAssetUrl } from "../../state/assets";
+import { useAssetUrlResolver, useAssetUrlState, useRefreshAssetUrl } from "../../state/assets";
+import type { MarkdownImageSourceResolver } from "../../native/SelectableMarkdownText.types";
 import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
@@ -44,6 +45,27 @@ export function usePullRequestMediaUrl(url: string) {
     source: pullRequestMediaSource(url, context),
     resolvePlaybackUri: resource ? async () => (await refresh()) ?? null : undefined,
   };
+}
+
+/** Images Enriched keeps inline load natively, so they need the same authorized URL. */
+export function usePullRequestImageSourceResolver(): MarkdownImageSourceResolver {
+  const context = useContext(PullRequestMediaContext);
+  const environmentId = context?.environmentId ?? null;
+  const cwd = context?.cwd ?? null;
+  const resolveAssetUrl = useAssetUrlResolver(environmentId);
+  return useCallback(
+    async (image) => {
+      const { resource } = pullRequestMediaSource(
+        image.href,
+        environmentId && cwd ? { environmentId, cwd } : null,
+      );
+      if (!resource) return null;
+      const uri = await resolveAssetUrl(resource);
+      if (uri === null) throw new Error("Pull request image is unavailable");
+      return { uri };
+    },
+    [cwd, environmentId, resolveAssetUrl],
+  );
 }
 
 export function PullRequestMedia(props: {
