@@ -694,30 +694,28 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       yield* runBackgroundOperations();
 
       expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
-      expect(registrations).not.toContainEqual(
-        expect.objectContaining({
-          preferences: expect.objectContaining({ notificationsEnabled: false }),
-        }),
-      );
+      expect(registrations).toMatchObject([{ preferences: { notificationsEnabled: true } }]);
+      expect(registrations[0]).not.toHaveProperty("pushToken");
     }).pipe(
       Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
       Effect.provide(layerRelayTest),
     );
   });
 
-  it.effect("does not report a device registered when its push token is empty", () => {
+  it.effect("saves a preference change when no push token can be read", () => {
     const registrations = stubAndroidDeviceRelay();
-    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
-      type: "android",
-      data: " ",
-    });
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockRejectedValue(
+      new Error("SERVICE_NOT_AVAILABLE"),
+    );
     setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
+      yield* updateAgentAwarenessRegistrationPreferences({ liveActivitiesEnabled: true });
 
-      expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
-      expect(registrations).toEqual([]);
+      expect(registrations.at(-1)).toMatchObject({
+        preferences: { notificationsEnabled: true, liveActivitiesEnabled: true },
+      });
     }).pipe(
       Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
       Effect.provide(layerRelayTest),

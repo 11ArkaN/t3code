@@ -264,7 +264,7 @@ const nativePushTokenRegistration = Effect.fn("remoteRegistration.nativePushToke
       lastNativePushToken = observedPushToken;
       return { notificationsEnabled: true, pushToken: observedPushToken };
     }
-    const pushToken = yield* Effect.tryPromise({
+    const token = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
       catch: (cause) =>
         new AgentAwarenessOperationError({
@@ -272,33 +272,19 @@ const nativePushTokenRegistration = Effect.fn("remoteRegistration.nativePushToke
           cause,
         }),
     }).pipe(
-      Effect.flatMap((token) => {
-        const data =
-          token.type === Platform.OS && typeof token.data === "string" ? token.data.trim() : "";
-        return data
-          ? Effect.succeed(data)
-          : Effect.fail(
-              new AgentAwarenessOperationError({
-                operation: "read-native-push-token",
-                cause: new Error(
-                  `Native push token lookup returned an unusable ${token.type} token.`,
-                ),
-              }),
-            );
-      }),
-      // Registering without a token would disable notifications the relay already accepted.
-      Effect.catch((error) => {
-        const fallback = lastNativePushToken;
-        if (!fallback) {
-          // Any registration accepted so far in this process had notifications off.
-          setRegistrationStatus("failed");
-          return Effect.fail(error);
-        }
-        logRegistrationError("native push token lookup failed; reusing the last token", error);
-        return Effect.succeed(fallback);
-      }),
+      Effect.tapError((error) =>
+        Effect.sync(() => {
+          logRegistrationError("native push token lookup failed", error);
+        }),
+      ),
+      Effect.orElseSucceed(() => null),
     );
+    const pushToken =
+      token?.type === Platform.OS && typeof token.data === "string" && token.data.trim().length > 0
+        ? token.data.trim()
+        : lastNativePushToken;
     lastNativePushToken = pushToken;
+    // Permission is granted: a missing token must not disable notifications the relay accepted.
     return { notificationsEnabled: true, pushToken };
   },
 );
@@ -334,6 +320,13 @@ function registrationSignature(body: RelayDeviceRegistrationRequest): string {
     body.preferences.notifyOnCompletion,
     body.preferences.notifyOnFailure,
   ].join("|");
+}
+
+// Notifications are not set up until the relay holds a token for them.
+function acceptedRegistrationStatus(
+  body: RelayDeviceRegistrationRequest,
+): AgentAwarenessRegistrationStatus {
+  return body.preferences.notificationsEnabled && !body.pushToken ? "failed" : "registered";
 }
 
 const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWithRelay")(function* (
@@ -382,7 +375,7 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
     persisted.signature === signature &&
     !needsAndroidReplay
   ) {
-    setRegistrationStatus("registered");
+    setRegistrationStatus(acceptedRegistrationStatus(payload));
     return;
   }
 
@@ -398,7 +391,7 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
     return;
   }
   if (body.platform === "android") androidDeviceReplayedAt = Date.now();
-  setRegistrationStatus("registered");
+  setRegistrationStatus(acceptedRegistrationStatus(payload));
   yield* Effect.promise(() =>
     saveAgentAwarenessRegistrationRecord({
       identity,
