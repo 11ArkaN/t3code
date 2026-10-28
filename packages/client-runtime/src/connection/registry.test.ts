@@ -1588,56 +1588,107 @@ describe("EnvironmentRegistry", () => {
     }),
   );
 
-  it.effect("gives a primary platform registration precedence over persisted registrations", () =>
+  it.effect("gives platform registrations precedence over persisted registrations", () =>
     Effect.gen(function* () {
-      const shadowedTarget = new RelayConnectionTarget({
-        environmentId: TARGET.environmentId,
-        label: "Shadowed relay environment",
-      });
-      let failRemoval = true;
-      const harness = yield* makeHarness([shadowedTarget], [], [], {
-        beforeRegistrationRemove: () =>
-          failRemoval
-            ? Effect.fail(
-                new Persistence.ConnectionPersistenceError({
-                  operation: "remove-connection",
-                  message: "Storage unavailable",
-                }),
-              )
-            : Effect.void,
-      });
-      const permissions = yield* makePullRequestRoutingPermissions({
-        read: Effect.succeed([]),
-        write: () => Effect.void,
-      });
-      const shadowedEntry = { target: shadowedTarget, profile: Option.none(), enabled: true };
-      yield* permissions.set(shadowedEntry, "read-write");
+      for (const registration of [
+        new PrimaryConnectionRegistration({ target: TARGET }),
+        new BearerConnectionRegistration({
+          target: BEARER_TARGET,
+          profile: BEARER_PROFILE,
+          credential: new BearerConnectionCredential({ token: "platform-bearer" }),
+        }),
+      ]) {
+        const target = registration.target;
+        const shadowedTarget =
+          registration._tag === "BearerConnectionRegistration"
+            ? registration.target
+            : new RelayConnectionTarget({
+                environmentId: target.environmentId,
+                label: "Shadowed relay environment",
+              });
+        let failRemoval = true;
+        const harness = yield* makeHarness(
+          [shadowedTarget],
+          registration._tag === "BearerConnectionRegistration" ? [registration.profile] : [],
+          registration._tag === "BearerConnectionRegistration"
+            ? [
+                [
+                  registration.target.connectionId,
+                  new BearerConnectionCredential({ token: "saved-bearer" }),
+                ],
+              ]
+            : [],
+          {
+            beforeRegistrationRemove: () =>
+              failRemoval
+                ? Effect.fail(
+                    new Persistence.ConnectionPersistenceError({
+                      operation: "remove-connection",
+                      message: "Storage unavailable",
+                    }),
+                  )
+                : Effect.void,
+          },
+        );
+        const permissions = yield* makePullRequestRoutingPermissions({
+          read: Effect.succeed([]),
+          write: () => Effect.void,
+        });
+        const shadowedEntry = {
+          target: shadowedTarget,
+          profile:
+            registration._tag === "BearerConnectionRegistration"
+              ? Option.some(registration.profile)
+              : Option.none(),
+          enabled: true,
+        };
+        yield* permissions.set(shadowedEntry, "read-write");
 
-      yield* Effect.gen(function* () {
-        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
-        yield* registry.reconcilePlatform([new PrimaryConnectionRegistration({ target: TARGET })]);
-        expect(yield* permissions.get(shadowedEntry)).toBe("off");
-        expect(hasRoutes(yield* Ref.get(harness.storedTargets), TARGET.environmentId)).toBe(true);
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          yield* registry.reconcilePlatform([registration]);
+          expect(yield* permissions.get(shadowedEntry)).toBe("off");
+          expect(hasRoutes(yield* Ref.get(harness.storedTargets), target.environmentId)).toBe(true);
 
-        failRemoval = false;
-        yield* registry.reconcilePlatform([new PrimaryConnectionRegistration({ target: TARGET })]);
+          failRemoval = false;
+          yield* registry.reconcilePlatform([registration]);
 
-        expect(
-          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
-        ).toEqual(TARGET);
-        expect(hasRoutes(yield* Ref.get(harness.storedTargets), TARGET.environmentId)).toBe(false);
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).get(target.environmentId)?.target,
+          ).toEqual(target);
+          expect(hasRoutes(yield* Ref.get(harness.storedTargets), target.environmentId)).toBe(
+            false,
+          );
+          if (registration._tag === "BearerConnectionRegistration") {
+            expect(
+              (yield* Ref.get(harness.storedCredentials)).get(registration.target.connectionId),
+            ).toEqual(registration.credential);
+            expect(yield* registrySpanNames(registry.reconcilePlatform([registration]))).toEqual(
+              [],
+            );
+          }
 
-        yield* registry.register(new RelayConnectionRegistration({ target: shadowedTarget }));
+          yield* registry.register(
+            new RelayConnectionRegistration({
+              target: new RelayConnectionTarget({
+                environmentId: target.environmentId,
+                label: "Shadowed relay environment",
+              }),
+            }),
+          );
 
-        expect(
-          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
-        ).toEqual(TARGET);
-        expect(hasRoutes(yield* Ref.get(harness.storedTargets), TARGET.environmentId)).toBe(false);
-      }).pipe(
-        Effect.provide(harness.layer),
-        Effect.provideService(PullRequestRoutingPermissions, permissions),
-        Effect.scoped,
-      );
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).get(target.environmentId)?.target,
+          ).toEqual(target);
+          expect(hasRoutes(yield* Ref.get(harness.storedTargets), target.environmentId)).toBe(
+            false,
+          );
+        }).pipe(
+          Effect.provide(harness.layer),
+          Effect.provideService(PullRequestRoutingPermissions, permissions),
+          Effect.scoped,
+        );
+      }
     }),
   );
 

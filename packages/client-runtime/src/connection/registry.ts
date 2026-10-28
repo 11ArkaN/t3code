@@ -667,28 +667,13 @@ export const make = Effect.gen(function* () {
           // on their own loopback origin, so they authenticate with a bearer
           // token instead of the primary's same-origin cookie. Stash it where
           // the resolver's bearer broker looks it up.
-          let bearerReplaced = false;
+          let bearerChanged = false;
           if (registration._tag === "BearerConnectionRegistration") {
             const stored = yield* credentials
               .get(registration.target.connectionId)
               .pipe(Effect.orElseSucceed(() => Option.none<ConnectionCredential>()));
-            const changed =
+            bearerChanged =
               Option.isSome(stored) && !Equal.equals(stored.value, registration.credential);
-            const written = yield* credentials
-              .put(registration.target.connectionId, registration.credential)
-              .pipe(
-                Effect.as(true),
-                Effect.catch((error) =>
-                  Effect.logWarning("Could not store the platform bearer credential.", {
-                    environmentId: target.environmentId,
-                    error,
-                  }).pipe(Effect.as(false)),
-                ),
-              );
-            // Only a bearer that was actually stored can be retried with; a
-            // failed write leaves the rejected one in place.
-            bearerReplaced = written && changed;
-            applied = written;
           }
 
           if (persisted) {
@@ -712,6 +697,25 @@ export const make = Effect.gen(function* () {
               ),
             );
             applied &&= removed;
+          }
+
+          let bearerReplaced = false;
+          if (registration._tag === "BearerConnectionRegistration") {
+            const written = yield* credentials
+              .put(registration.target.connectionId, registration.credential)
+              .pipe(
+                Effect.as(true),
+                Effect.catch((error) =>
+                  Effect.logWarning("Could not store the platform bearer credential.", {
+                    environmentId: target.environmentId,
+                    error,
+                  }).pipe(Effect.as(false)),
+                ),
+              );
+            // Only a bearer that was actually stored can be retried with; a
+            // failed write leaves the rejected one in place.
+            bearerReplaced = written && bearerChanged;
+            applied &&= written;
           }
 
           yield* installEntryLocked(entry, { retainEquivalentRuntime: true });
