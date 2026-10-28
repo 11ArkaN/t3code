@@ -320,6 +320,11 @@ layer("GitLabCli.layer", (it) => {
       hosts: ["gitlab.selfhosted.test"],
       remotes: ["git@gitlab.com:team/app.git"],
     },
+    {
+      case: "the checkout has a userless SCP gitlab.com remote",
+      hosts: ["gitlab.selfhosted.test"],
+      remotes: ["gitlab.com:team/app.git"],
+    },
   ])("leaves the host to glab when $case", ({ hosts, remotes }) =>
     Effect.gen(function* () {
       mockGlab(hosts, remotes);

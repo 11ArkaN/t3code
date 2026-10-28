@@ -422,6 +422,12 @@ function parseRepositoryPath(repository: string): {
   return { namespacePath, projectPath };
 }
 
+export function parseGitLabRemoteHost(remoteUrl: string) {
+  // Remote host parsing does not recognize userless SCP remotes.
+  const scpHost = /^([^@:/\\\s]{2,}):\/?[^/\s]+(?:\/[^/\s]+)+$/u.exec(remoteUrl.trim())?.[1];
+  return parseGitRemoteHost(scpHost ? `ssh://${scpHost}` : remoteUrl);
+}
+
 // glab prints a missing project or merge request as a bare 404.
 const classifyGlabFailure = (stderr: string): VcsProcessExitFailureKind | null => {
   const normalized = stderr.toLowerCase();
@@ -477,7 +483,7 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => []),
       );
       const followsRemote = remotes.some((remote) =>
-        knownHosts.has(parseGitRemoteHost(remote.url)?.host ?? ""),
+        knownHosts.has(parseGitLabRemoteHost(remote.url)?.host ?? ""),
       );
       return followsRemote ? undefined : { GITLAB_HOST: only.host };
     },

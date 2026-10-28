@@ -3,10 +3,7 @@ import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
-import {
-  parseGitRemoteHost,
-  unknownRemoteProvider as unknownHostProvider,
-} from "@t3tools/source-control-core/shared/definition";
+import { unknownRemoteProvider as unknownHostProvider } from "@t3tools/source-control-core/shared/definition";
 
 import * as GitLabCli from "./GitLabCli.ts";
 import * as GitLabChangeRequestTemplate from "./gitLabChangeRequestTemplate.ts";
@@ -110,9 +107,7 @@ function refineUnknownGitLabRemote(input: SourceControlUnknownRemoteRefinementIn
 
 /** The caller refines only an identity no host recognised, so its remote is on an unknown host. */
 function unknownRemoteProvider(remoteUrl: string) {
-  // Remote host parsing does not recognize userless SCP remotes.
-  const scpHost = /^([^@:/\\\s]{2,}):\/?[^/\s]+(?:\/[^/\s]+)+$/u.exec(remoteUrl.trim())?.[1];
-  const remote = parseGitRemoteHost(scpHost ? `ssh://${scpHost}` : remoteUrl);
+  const remote = GitLabCli.parseGitLabRemoteHost(remoteUrl);
   return remote === null ? null : unknownHostProvider(remote);
 }
 
