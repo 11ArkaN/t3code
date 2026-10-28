@@ -63,6 +63,7 @@ export function useOpenChangeRequestLink(
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
   const ignoreWhitespace = useClientSettings((settings) => settings.diffIgnoreWhitespace);
+  const browserLinkTarget = useClientSettings((settings) => settings.browserLinkTarget);
   const readDiffPreview = useAtomQueryRunner(reviewEnvironment.diffPreview, {
     reportFailure: false,
     refresh: true,
@@ -185,6 +186,23 @@ export function useOpenChangeRequestLink(
           }
           if (openPullRequest()) return;
           if (onCommitUnavailable) return onCommitUnavailable();
+          // A popup opened after the lookup has lost the click's activation, so browsers block it.
+          if (window.desktopBridge === undefined && browserLinkTarget !== "app") {
+            const toastId = toastManager.add(
+              stackedThreadToast({
+                type: "info",
+                title: "This commit is not in the thread's workspace",
+                actionProps: {
+                  children: "Open link",
+                  onClick: () => {
+                    toastManager.close(toastId);
+                    window.open(targetUrl, "_blank", "noopener,noreferrer");
+                  },
+                },
+              }),
+            );
+            return;
+          }
           return openLink(targetUrl, {
             event: { metaKey: event.metaKey, ctrlKey: event.ctrlKey, button: event.button },
             threadRef: resolvedThreadRef,
