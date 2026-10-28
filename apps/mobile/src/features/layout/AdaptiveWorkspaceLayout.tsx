@@ -1004,12 +1004,7 @@ function AdaptiveWorkspaceLayoutContent(
             value={layout.usesSplitView && Platform.OS !== "android" ? renderedContentWidth : null}
           >
             <WorkspaceSettledContentWidthContext
-              value={
-                // Tracking the sidebar's edge, the feed follows its measured width instead.
-                Platform.OS === "android" && layout.usesSplitView && !keyboardHoldsSidebar
-                  ? contentTargetWidth
-                  : null
-              }
+              value={Platform.OS === "android" && layout.usesSplitView ? contentTargetWidth : null}
             >
               {/* Compact Settings keeps the bottom navigation under all of its pages. */}
               <SafeAreaInsetsContext
