@@ -272,8 +272,7 @@ const applyKiroEffort = Effect.fn("KiroAdapterV2.applyKiroEffort")(function* (
   );
   if (Option.isNone(advertised)) {
     return yield* Effect.logWarning("Kiro did not advertise the model's reasoning effort", {
-      model: appliedModel,
-      value: requested,
+      waitedForWrittenModel: appliedModel !== undefined,
     });
   }
   const effortOption = advertised.value.find((option) => option.id === KIRO_EFFORT_CONFIG_ID);
@@ -282,6 +281,7 @@ const applyKiroEffort = Effect.fn("KiroAdapterV2.applyKiroEffort")(function* (
   }
   yield* runtime.setConfigOption(KIRO_EFFORT_CONFIG_ID, requested).pipe(
     Effect.catchTags({
+      // `requested` is one of the levels Kiro just advertised, so it is safe to log.
       AcpRequestError: (error) =>
         Effect.logWarning("Kiro rejected the reasoning effort", {
           value: requested,
@@ -307,7 +307,9 @@ const applyKiroAgent = Effect.fn("KiroAdapterV2.applyKiroAgent")(function* (
   );
   if (agentOption?.type !== "select" || agentOption.currentValue === requested) return false;
   if (!selectValues(agentOption).includes(requested)) {
-    yield* Effect.logWarning("Kiro does not list the thread's agent", { agent: requested });
+    yield* Effect.logWarning("Kiro does not list the thread's agent", {
+      listedAgents: selectValues(agentOption).length,
+    });
     return false;
   }
   yield* runtime.setConfigOption(KIRO_AGENT_CONFIG_ID, requested);
