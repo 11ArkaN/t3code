@@ -345,6 +345,32 @@ describe("MessagesTimeline messages", () => {
     expect(turns).toEqual(turns.toSorted((a, b) => a - b));
   });
 
+  it("keeps reporting overflow while the composer inset changes under overflowing content", async () => {
+    const props = baseProps();
+    const overflowReports: boolean[] = [];
+    const element = (contentInsetEndAdjustment: number) => (
+      <MessagesTimeline
+        {...props}
+        timelineEntries={Array.from({ length: 40 }, (_, index) =>
+          message(`Turn ${index}:\n\n${"x ".repeat(200)}`, {}, `turn-${index}`),
+        )}
+        contentInsetEndAdjustment={contentInsetEndAdjustment}
+        onContentOverflowChange={(overflows) => overflowReports.push(overflows)}
+      />
+    );
+    // The resting composer's inset; expanding it raises the inset to the taller overlay.
+    await using screen = await renderElement(element(110));
+    await vi.waitFor(() => expect(overflowReports.at(-1)).toBe(true));
+    overflowReports.length = 0;
+
+    await screen.rerender(element(148));
+
+    expect(
+      overflowReports,
+      "a report of no overflow expands the resting composer, which changes the inset again",
+    ).not.toContain(false);
+  });
+
   it("preserves XML-like tags and comparisons in user messages as text", async () => {
     const source = [
       'Without reading a file, do you have <global-agent-instructions scope="workspace">',
