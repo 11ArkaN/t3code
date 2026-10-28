@@ -12,6 +12,7 @@ const reactTests = [
   "src/features/threads/thread-inspector-navigation.test.tsx",
   "src/features/diffs/nativeReviewDiffSurface.test.tsx",
   "src/features/pull-requests/usePullRequestDiff.test.tsx",
+  "src/features/pull-requests/PullRequestMarkdown.test.tsx",
   "src/components/ProjectFavicon.test.tsx",
   "src/components/ui/Dialog.android.test.tsx",
   "src/features/files/ZipArchiveView.test.tsx",
