@@ -86,6 +86,11 @@ describe("renderCliShim", () => {
       encoding: "utf8",
       input: "hello\n",
     });
+    const closed = NodeChildProcess.spawnSync("sh", ["-c", `"$0" once <&-`, shim], {
+      encoding: "utf8",
+    });
+    expect(closed.status).toBe(4);
+    expect(closed.stderr).toBe("");
     expect(piped.stdout).toBe("read: hello\n");
     expect(piped.status).toBe(4);
 

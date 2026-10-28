@@ -114,7 +114,8 @@ export const renderCliShim = (input: {
     "fi",
     // The shell must outlive the CLI to unmount, so it forwards TERM and HUP; the terminal sends
     // Ctrl-C to the CLI directly. A background child would read /dev/null, so pass stdin on fd 3.
-    "exec 3<&0",
+    // With stdin closed, `exec 3<&0` would end the shell; `command` makes it a normal error.
+    "{ command exec 3<&0; } 2>/dev/null || exec 3</dev/null",
     `${run("$mount")} <&3 3<&- &`,
     "cli=$!",
     "exec 3<&-",
