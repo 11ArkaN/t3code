@@ -5455,10 +5455,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (run.status === "failed" || run.status === "interrupted") &&
           run.workspacePreparation?.type === "worktree",
       );
+    // A steer re-dispatched after it could not join its turn was sent before any Stop since.
+    const redispatchedSteer = projection.messages.some(
+      (message) => message.id === command.messageId,
+    );
     const sentByUserFromClient =
       command.createdBy === "user" &&
       (command.creationSource === "web" || command.creationSource === "mobile") &&
-      command.scheduledTaskId === undefined;
+      command.scheduledTaskId === undefined &&
+      !redispatchedSteer;
     const heldRunsToRelease =
       sentByUserFromClient && startsOrQueuesRun && !worktreeSetupUnresolved
         ? projection.runs.filter((run) => run.status === "queued" && run.queueHeld === true)

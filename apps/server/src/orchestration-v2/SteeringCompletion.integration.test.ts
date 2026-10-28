@@ -438,6 +438,9 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
   const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
   const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const steered: string[] = [];
+  // A steer the provider can only run as its own turn waits here, so a test can Stop meanwhile.
+  const steerEntered = yield* Deferred.make<void>();
+  const releaseSteer = yield* Deferred.make<void>();
   const capabilities = {
     ...CodexProviderCapabilitiesV2,
     turns: {
@@ -517,13 +520,18 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
           compactThread: startTurn,
           steerTurn: (turn) =>
             steerRequiresNewTurn
-              ? Effect.fail(
-                  new ProviderAdapter.ProviderAdapterSteerRunError({
-                    driver,
-                    providerThreadId: turn.providerThread.id,
-                    providerTurnId: turn.providerTurnId,
-                    requiresNewTurn: true,
-                  }),
+              ? Deferred.succeed(steerEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseSteer)),
+                  Effect.andThen(
+                    Effect.fail(
+                      new ProviderAdapter.ProviderAdapterSteerRunError({
+                        driver,
+                        providerThreadId: turn.providerThread.id,
+                        providerTurnId: turn.providerTurnId,
+                        requiresNewTurn: true,
+                      }),
+                    ),
+                  ),
                 )
               : Effect.sync(() => {
                   steered.push(turn.message.text);
@@ -583,7 +591,7 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     yield* Fiber.join(running);
     return threadId;
   });
-  return { cwd, events, started, steered, layer, startFirstTurn };
+  return { cwd, events, started, steered, layer, startFirstTurn, steerEntered, releaseSteer };
 });
 
 it.effect("sends a selected held message once and preserves the remaining queue order", () =>
@@ -864,11 +872,9 @@ it.effect("starts a steer that missed the turn on the saved next-turn selection"
 it.effect("queues a steer the provider can only run as its own turn behind the running turn", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { events, started, steered, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
-        "steering-requires-new-turn",
-        false,
-        true,
-      );
+      const { events, started, steered, layer, startFirstTurn, releaseSteer } =
+        yield* nextTurnSelectionHarness("steering-requires-new-turn", false, true);
+      yield* Deferred.succeed(releaseSteer, undefined);
       yield* Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
@@ -931,6 +937,63 @@ it.effect("queues a steer the provider can only run as its own turn behind the r
         assert.deepEqual(steered, []);
         assert.equal(started.length, 2);
         assert.equal(started[1]?.message.messageId, steerId);
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
+it.effect("keeps Stop's held queue when a steer it raced has to wait for a new turn", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { started, layer, startFirstTurn, steerEntered, releaseSteer } =
+        yield* nextTurnSelectionHarness("steering-requires-new-turn-stop", false, true);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* startFirstTurn;
+        const first = started[0]!;
+        const skillId = MessageId.make("message:skill");
+        const laterId = MessageId.make("message:later");
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("steer-skill"),
+          threadId,
+          messageId: skillId,
+          text: "$zebra-probe",
+          attachments: [],
+          dispatchMode: { type: "steer_active", targetRunId: first.runId },
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("queue-later"),
+          threadId,
+          messageId: laterId,
+          text: "later",
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "user",
+          creationSource: "web",
+        });
+        const steering = yield* worker.runOnce.pipe(Effect.forkScoped);
+        yield* Deferred.await(steerEntered);
+        yield* orchestrator.dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make("stop"),
+          threadId,
+          runId: first.runId,
+          holdQueue: true,
+        });
+        yield* Deferred.succeed(releaseSteer, undefined);
+        yield* Fiber.join(steering);
+
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        for (const messageId of [laterId, skillId]) {
+          const run = projection.runs.find((candidate) => candidate.userMessageId === messageId);
+          assert.equal(run?.status, "queued");
+          assert.isTrue(run?.queueHeld, `${messageId} must stay held after Stop`);
+        }
       }).pipe(Effect.provide(layer));
     }),
   ),

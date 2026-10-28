@@ -7695,7 +7695,11 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     const prompt = "run sleep 40";
 
     // Codex injects a skill only on turn/start; a turn/steer carrying `$skill` is plain text.
-    const steerWhileRunning = (scenario: string, steerText: string) =>
+    const steerWhileRunning = (
+      scenario: string,
+      steerText: string,
+      createdBy: "user" | "agent" = "user",
+    ) =>
       Effect.gen(function* () {
         const transcript = makeCodexReplayTranscript({
           scenario,
@@ -7781,6 +7785,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               ...turnInput.message,
               messageId: MessageId.make(`message-${scenario}-steer`),
               text: steerText,
+              createdBy,
             },
           })
           .pipe(Effect.exit);
@@ -7800,6 +7805,24 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const failure = Exit.isFailure(steer) ? Cause.squash(steer.cause) : undefined;
         assert.propertyVal(failure, "_tag", "ProviderAdapterSteerRunError");
         assert.propertyVal(failure, "requiresNewTurn", true);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    );
+
+    it.effect("still steers a skill mention an agent sent", () =>
+      Effect.gen(function* () {
+        const { steer, requests } = yield* steerWhileRunning(
+          "skill-steer-agent",
+          "$zebra-probe",
+          "agent",
+        );
+
+        assert.include(requests, "turn/steer");
+        assert.isTrue(Exit.isSuccess(steer));
       }).pipe(
         Effect.scoped,
         Effect.provide(

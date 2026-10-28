@@ -6983,11 +6983,14 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 );
               }
 
-              const requiresNewTurn = yield* mentionsEnabledCodexSkill(
-                client,
-                turnInput.message.text,
-                activeTurn.input.runtimePolicy.cwd,
-              ).pipe(Effect.orElseSucceed(() => false));
+              // Only a user invokes skills; agent messages and delegated results stay plain steers.
+              const requiresNewTurn =
+                turnInput.message.createdBy === "user" &&
+                (yield* mentionsEnabledCodexSkill(
+                  client,
+                  turnInput.message.text,
+                  activeTurn.input.runtimePolicy.cwd,
+                ).pipe(Effect.orElseSucceed(() => false)));
               if (requiresNewTurn) {
                 return yield* new ProviderAdapter.ProviderAdapterSteerRunError({
                   driver: CODEX_PROVIDER,
