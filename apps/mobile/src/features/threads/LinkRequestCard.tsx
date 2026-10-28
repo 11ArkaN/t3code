@@ -396,7 +396,7 @@ function LinkRequestSheet(props: {
         {useExisting ? (
           <Text className="font-sans text-sm leading-5 text-foreground-muted">
             This environment is already linked to {targetName}. The agent can use that link as it
-            is; change its access in Environments.
+            is; change its access in the web or desktop app under Settings → Environments.
           </Text>
         ) : target.kind === "none" ? null : (
           <>
