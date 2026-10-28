@@ -651,7 +651,6 @@ describe("DesktopBackendManager", () => {
             ...(onReady ? { onReady } : {}),
           }).pipe(Effect.tap((instance) => instance.start));
 
-        // A large state database took about 66 s to migrate and start listening.
         const slowStatus = yield* Ref.make(503);
         const ready = yield* Deferred.make<void>();
         yield* startInstance(slowStatus, Deferred.succeed(ready, undefined).pipe(Effect.asVoid));
@@ -662,7 +661,9 @@ describe("DesktopBackendManager", () => {
         assert.isTrue(Option.isNone(yield* Queue.poll(reports)));
 
         yield* startInstance(yield* Ref.make(503));
-        yield* TestClock.adjust(Duration.minutes(3));
+        yield* TestClock.adjust(Duration.seconds(179));
+        assert.isTrue(Option.isNone(yield* Queue.poll(reports)));
+        yield* TestClock.adjust(Duration.seconds(1));
         const failure = yield* Queue.take(reports);
         assert.equal(failure.reason, "The server started but did not become ready in time.");
       }).pipe(Effect.provide(TestClock.layer())),
