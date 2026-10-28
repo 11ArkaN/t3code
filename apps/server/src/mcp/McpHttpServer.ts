@@ -10,6 +10,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import type * as SchemaAST from "effect/SchemaAST";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
@@ -443,15 +444,21 @@ const saveScreenshot = Effect.fn("McpHttpServer.saveScreenshot")(function* (
   return screenshotPath;
 });
 
-/** Decode with the advertised JSON codec, which permits null for optional fields that the raw schema rejects. */
+/**
+ * Decode with the advertised JSON codec, which permits null for optional fields that the raw schema rejects.
+ * Strict, so an undeclared argument fails instead of being dropped. `Toolkit.handle` ignores `Tool.Strict`,
+ * so the hand-registered tools pass `strictDecode` themselves.
+ */
 const decodeAsAdvertised = <Tools extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<Tools>,
 ): Toolkit.Toolkit<Tools> =>
   Toolkit.make(
     ...Object.values(toolkit.tools).map((tool) =>
-      tool.setParameters(Schema.toCodecJson(tool.parametersSchema)),
+      tool.setParameters(Schema.toCodecJson(tool.parametersSchema)).annotate(Tool.Strict, true),
     ),
   ) as unknown as Toolkit.Toolkit<Tools>;
+
+const strictDecode: SchemaAST.ParseOptions = { onExcessProperty: "error", errors: "all" };
 
 const isPreviewAutomationError = Schema.is(PreviewAutomationError);
 
@@ -524,7 +531,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
           fiber.context,
           McpInvocationContext.McpInvocationContext,
         );
-        return built.handle("preview_snapshot", payload).pipe(
+        return built.handle("preview_snapshot", payload, undefined, strictDecode).pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
@@ -758,7 +765,7 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
     DeviceScreenshotTool,
     (payload) =>
       built
-        .handle("device_screenshot", payload)
+        .handle("device_screenshot", payload, undefined, strictDecode)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) =>
       effect.pipe(
@@ -784,7 +791,7 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
     HtmlPreviewTool,
     (payload) =>
       built
-        .handle("html_preview", payload)
+        .handle("html_preview", payload, undefined, strictDecode)
         .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
     (effect) =>
       effect.pipe(
