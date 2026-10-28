@@ -231,9 +231,17 @@ mkdir -p "$bin_dir"
 if [ -e "${bin_dir}/t3" ] || [ -L "${bin_dir}/t3" ]; then
   existing="$(readlink "${bin_dir}/t3" 2>/dev/null || true)"
   real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
+  # Through a symlinked T3 home the link text names the alias; resolve its folder to compare.
+  existing_dir="$(CDPATH='' cd -P -- "$(dirname -- "${existing:-.}")" 2>/dev/null && pwd || true)"
+  resolved="${existing_dir}/${existing##*/}"
   case "$existing" in
     "$versions_dir"/* | "$real_versions_dir"/* | "${t3_home}/bin/t3") ;;
-    *) fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly." ;;
+    *)
+      case "$resolved" in
+        "$real_versions_dir"/*) ;;
+        *) fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly." ;;
+      esac
+      ;;
   esac
 fi
 ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
@@ -252,7 +260,8 @@ case "$bin_dir" in "$HOME"/*) path_rest="${bin_dir#"$HOME"}" path_prefix='$HOME'
 case "$path_rest" in *[!A-Za-z0-9_./-]*) path_rest= ;; esac
 if [ -n "$path_rest" ]; then
   path_line="export PATH=\"${path_prefix}${path_rest}:\$PATH\""
-  case "${SHELL##*/}" in
+  shell_name="${SHELL:-}"
+  case "${shell_name##*/}" in
     zsh) path_command="printf '\\n%s\\n' '${path_line}' >> ~/.zshrc" ;;
     bash) [ "$platform" = darwin ] || path_command="printf '\\n%s\\n' '${path_line}' >> ~/.bashrc" ;;
     fish) path_command="fish_add_path ${path_prefix}${path_rest}" ;;

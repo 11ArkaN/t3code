@@ -142,6 +142,16 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
         `printf '\\n%s\\n' 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc`,
       );
 
+      // Containers and CI often have no SHELL; `set -u` must not stop the installer there.
+      const noShell = await installOver({
+        script: "install.sh",
+        home,
+        binDir,
+        env: { HOME: root, SHELL: undefined, PATH: "/usr/bin:/bin" },
+      });
+      expect(noShell.code, noShell.output).toBe(0);
+      expect(noShell.output).toContain(`Add ${binDir} to your PATH`);
+
       await NodeFSP.rm(link);
       await NodeFSP.symlink(NodePath.join(home, "bin/t3"), link);
       const overDesktop = await installOver({ script: "install.sh", home, binDir });
