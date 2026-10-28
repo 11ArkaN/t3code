@@ -471,7 +471,7 @@ describe("project identity reset", () => {
 
   it("restores a renamed scratch project's built-in name and icon", async () => {
     setup();
-    state.projects = [asScratch(state.projects[0]!)];
+    state.projects = [{ ...asScratch(state.projects[0]!), faviconPath: null, projectIcon: null }];
     await using screen = await mountPanel();
 
     await userEvent.click(resetButton(screen, "project name")!);
