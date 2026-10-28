@@ -202,7 +202,10 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       expect(installed.shadowedBy).toBeUndefined();
       expect(yield* command.state).toEqual(installed);
 
-      expect((yield* command.uninstall).installedPath).toBeNull();
+      const removed = yield* command.uninstall;
+      expect(removed.installedPath).toBeNull();
+      expect(removed.onPath).toBe(true);
+      expect(yield* command.state).toEqual(removed);
       expect(yield* fs.exists(installed.installedPath!)).toBe(false);
       expect(yield* fs.exists(launcher)).toBe(true);
     }).pipe(Effect.scoped),

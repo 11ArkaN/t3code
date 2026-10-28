@@ -166,12 +166,17 @@ export const make = Effect.gen(function* () {
     const installed = yield* installedAt;
     const shadowedBy = yield* foreignFirstOnPath;
     const shadow = Option.isSome(shadowedBy) ? { shadowedBy: shadowedBy.value } : {};
-    if (Option.isNone(installed)) {
-      return { supported: true, installedPath: null, onPath: false, launcherPath, ...shadow };
-    }
     const first = yield* firstOnPath;
-    const onPath = windows || (Option.isSome(first) && (yield* runsOurLauncher(first.value)));
-    return { supported: true, installedPath: installed.value, onPath, launcherPath, ...shadow };
+    const onPath = windows
+      ? Option.isSome(installed)
+      : Option.isSome(first) && (yield* runsOurLauncher(first.value));
+    return {
+      supported: true,
+      installedPath: Option.getOrNull(installed),
+      onPath,
+      launcherPath,
+      ...shadow,
+    };
   }).pipe(
     Effect.orElseSucceed(() => ({
       supported: false,
