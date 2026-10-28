@@ -1,10 +1,9 @@
 import { KeyboardController, KeyboardEvents } from "react-native-keyboard-controller";
 
-// `useKeyboardState` only flips to hidden on didHide; the accessory must
-// leave as soon as the keyboard starts hiding, so it follows the will-events.
-// Android repairs a nonanimated IME change with didHide then didShow alone. A lone
-// didHide must not hide the accessory, which would clear the terminal's focus, but
-// the next show after it starts a new show so a dismissed accessory comes back.
+// The accessory leaves on willHide, before `useKeyboardState` sees didHide. Android
+// repairs a nonanimated IME change with didHide then didShow alone: that didHide must
+// not hide the accessory (it would clear the terminal's focus), but the didShow after
+// it starts a new show so a dismissed accessory comes back.
 let showEpoch = 1;
 let keyboardShowing = KeyboardController.isVisible();
 let hiddenWithoutWillHide = false;
