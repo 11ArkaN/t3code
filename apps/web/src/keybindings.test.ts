@@ -659,7 +659,7 @@ describe("resolveShortcutCommand", () => {
     );
   });
 
-  it("treats mod and an unshifted layout + as zoom, not its physical key", () => {
+  it('leaves Ctrl+layout "+" to zoom, except on the number row or with Alt', () => {
     assert.isNull(
       resolveShortcutCommand(
         event({ key: "+", code: "BracketRight", ctrlKey: true }),
@@ -682,6 +682,19 @@ describe("resolveShortcutCommand", () => {
         { platform: "Linux", context: { isDesktop: true } },
       ),
       "thread.jump.1",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "+", code: "BracketRight", altKey: true }),
+        compile([
+          {
+            shortcut: modShortcut("]", { modKey: false, altKey: true }),
+            command: "terminal.toggle",
+          },
+        ]),
+        { platform: "Linux" },
+      ),
+      "terminal.toggle",
     );
   });
 
