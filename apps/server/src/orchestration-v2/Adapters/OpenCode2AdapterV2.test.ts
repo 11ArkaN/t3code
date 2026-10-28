@@ -1001,7 +1001,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
     Effect.gen(function* () {
       const calls = new Map<string, { status: string; result: string | null }>();
       const childTurns = new Map<string, string>();
-      const callsAtChildTurnStart = new Map<
+      const callsAtChildTurn = new Map<
         string,
         Record<string, { status: string; result: string | null }>
       >();
@@ -1031,9 +1031,8 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
               event.type === "provider_turn.updated" &&
               id?.startsWith(`${CHILD}:turn:`) === true
             ) {
-              if (!childTurns.has(id)) {
-                callsAtChildTurnStart.set(id, Object.fromEntries(calls));
-              }
+              const key = `${id}:${event.providerTurn.status}`;
+              if (!callsAtChildTurn.has(key)) callsAtChildTurn.set(key, Object.fromEntries(calls));
               childTurns.set(id, event.providerTurn.status);
             }
             yield* Deferred.succeed(wake, undefined);
@@ -1052,7 +1051,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             yield* until(check);
           });
         });
-      return { calls, callsAtChildTurnStart, childTurns, state, until };
+      return { calls, callsAtChildTurn, childTurns, state, until };
     });
   const launchedAndRunning = [
     ...backgroundLaunch(CHILD),
@@ -1163,7 +1162,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       const watch = yield* watchCalls(runtime, thread);
       yield* runtime.startTurn(withLineage(thread));
       yield* watch.until(() => watch.childTurns.has(`${CHILD}:turn:2`));
-      assert.deepEqual(watch.callsAtChildTurnStart.get(`${CHILD}:turn:2`), {
+      assert.deepEqual(watch.callsAtChildTurn.get(`${CHILD}:turn:2:running`), {
         Sleep: { status: "completed", result: "FIRST_OK" },
         Again: { status: "running", result: null },
       });
@@ -1188,9 +1187,33 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       yield* runtime.startTurn(withLineage(thread));
       yield* watch.until(() => watch.state.terminal !== undefined);
       assert.deepEqual(watch.calls.get("Again"), { status: "completed", result: "SECOND_OK" });
-      const sleep = watch.calls.get("Sleep");
-      assert.notEqual(sleep?.status, "running");
-      assert.notEqual(sleep?.result, "SECOND_OK");
+      assert.deepEqual(watch.calls.get("Sleep"), { status: "completed", result: null });
+      assert.deepEqual(watch.state.roster, []);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("keeps a resumed subagent's call running when the previous run reports late", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        ...launchedAndRunning,
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        ...callAgain({ background: true }),
+        event("session.execution.started", { sessionID: CHILD }),
+        // OpenCode delivers run 1's report only after run 2 has started.
+        childReport("msg_report_1", "FIRST_OK"),
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        childReport("msg_report_2", "SECOND_OK"),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const watch = yield* watchCalls(runtime, thread);
+      yield* runtime.startTurn(withLineage(thread));
+      yield* watch.until(() => watch.childTurns.get(`${CHILD}:turn:2`) === "completed");
+      assert.deepEqual(watch.callsAtChildTurn.get(`${CHILD}:turn:2:completed`), {
+        Sleep: { status: "completed", result: "FIRST_OK" },
+        Again: { status: "running", result: null },
+      });
+      yield* watch.until(() => watch.state.terminal !== undefined);
+      assert.deepEqual(watch.calls.get("Again"), { status: "completed", result: "SECOND_OK" });
       assert.deepEqual(watch.state.roster, []);
     }).pipe(Effect.scoped),
   );

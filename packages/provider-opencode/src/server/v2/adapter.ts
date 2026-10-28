@@ -2199,20 +2199,25 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       const open = [...state.calls.values()].filter(
         (candidate) => candidate.child?.sessionId === childId,
       );
-      // A child runs one job at a time, so the report answers the newest call whose run started;
-      // the attached call's pending prompt is cleared only when its run starts. A lone call
-      // settles regardless: a new child's start can precede its call attaching.
-      const last = Math.max(
-        0,
-        open.findLastIndex(
-          (candidate) =>
-            candidate.joined !== undefined ||
-            candidate.child?.subagent?.call !== candidate ||
-            candidate.child.subagent.prompt === undefined,
-        ),
+      // Reports arrive after their run ends, not ordered against the next start: skip calls whose run
+      // has not started (prompt still pending) and, while the child runs, the newest started group.
+      // An idle lone call settles regardless: a new child's start can precede its call attaching.
+      const running = busy.has(childId);
+      const started =
+        open.length === 1 && !running
+          ? open
+          : open.filter(
+              (candidate) =>
+                candidate.joined !== undefined ||
+                candidate.child?.subagent?.call !== candidate ||
+                candidate.child.subagent.prompt === undefined,
+            );
+      const current = running ? started.at(-1) : undefined;
+      const ended = started.filter(
+        (candidate) =>
+          current === undefined || (candidate.joined ?? candidate) !== (current.joined ?? current),
       );
-      const call = open[last]?.joined ?? open[last];
-      const ended = open.slice(0, last + 1);
+      const call = ended.at(-1)?.joined ?? ended.at(-1);
       const outcome = reportOutcome(stringField(payload.metadata, "state"));
       state.reports.set(inboxId, {
         inboxId,
@@ -2234,7 +2239,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             : "completed";
       for (const each of ended) {
         // Older calls belong to earlier runs that ended before this one; their reports were lost.
-        if (each !== call && each.joined !== call) yield* settleCall(each, "completed");
+        if ((each.joined ?? each) !== call) yield* settleCall(each, "completed");
         else yield* settleCall(each, status, subagentOutput(payload.text));
       }
     });
