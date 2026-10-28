@@ -3,6 +3,7 @@ import {
   WorkspacePresentationHostContext,
 } from "./workspace-presentation-context";
 import { useAndroidFloatingTabs } from "../settings/appearance/AppearancePreferencesProvider";
+import { useSoftKeyboardShowing } from "../keyboard/useSoftKeyboardShowing";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
 import { AdaptiveWorkspaceContext, useAdaptiveWorkspaceLayout } from "./adaptive-workspace-context";
 import { threadSelectionDeferral } from "./deferred-navigation";
@@ -17,7 +18,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { NavigationContext, NavigationRouteContext, useNavigation } from "@react-navigation/native";
 import { use, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Keyboard, Platform, useWindowDimensions, View } from "react-native";
-import { KeyboardController, useKeyboardState } from "react-native-keyboard-controller";
+import { KeyboardController } from "react-native-keyboard-controller";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -245,10 +246,11 @@ function AdaptiveWorkspaceLayoutContent(
     usesSplitView: baseLayout.usesSplitView,
   });
   const [composerEditing, setComposerEditing] = useState(false);
-  const softKeyboardVisible = useKeyboardState((state) => state.isVisible);
+  const softKeyboardVisible = useSoftKeyboardShowing();
   // Keyed on the soft keyboard, not focus: a hardware keyboard leaves room for the sidebar, and
-  // Back closes the keyboard while the editor keeps focus. Deferred so the composer commits its
-  // keyboard render first; relaying out in the same commit held it behind the keyboard.
+  // Back closes the keyboard while the editor keeps focus. The sidebar returns as the keyboard
+  // starts hiding, not after. Deferred so the composer commits its keyboard render first;
+  // relaying out in the same commit held it behind the keyboard.
   const composerKeyboardActive = useDeferredValue(
     Platform.OS === "android" && baseLayout.usesSplitView && composerEditing && softKeyboardVisible,
   );

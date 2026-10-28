@@ -68,9 +68,15 @@ export function returnToAndroidWorkspaceList(
 }
 
 // In the split view these destinations swap the detail pane beside the sidebar instead of
-// stacking over Home, so the default slide-in would show a layer that is not there.
-export function androidWorkspaceDestinationAnimation(routeName: string, usesSplitView: boolean) {
-  return usesSplitView && (routeName === "Thread" || routeName === "PullRequest")
-    ? ("none" as const)
-    : undefined;
+// stacking over Home, so the default slide-in would show a layer that is not there. A Settings
+// page picked from the list replaces the page beside it the same way; pages it opens still push.
+export function androidWorkspaceDestinationAnimation(
+  route: { readonly key: string; readonly name: string },
+  routes: readonly { readonly key: string; readonly name: string }[],
+  usesSplitView: boolean,
+) {
+  if (!usesSplitView) return undefined;
+  if (route.name === "Thread" || route.name === "PullRequest") return "none" as const;
+  const below = routes[routes.findIndex((candidate) => candidate.key === route.key) - 1];
+  return below?.name === "Settings" ? ("none" as const) : undefined;
 }
