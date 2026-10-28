@@ -12,6 +12,7 @@ import {
   buildMessages,
   failedEarly,
   executeCodex,
+  executeWebMcp,
   gradeSample,
   makeSample,
   ranCalls,
@@ -163,7 +164,7 @@ it("passes a good run and names every rule a bad run breaks", () => {
 
 const decodeMcpToolUseCase = Schema.decodeUnknownSync(McpToolUseCase);
 
-it("matches invocation expressions and rejects discovery, wrong tabs, and wrong arguments", () => {
+it("grades the WebMCP tools an expression executes, not the text it contains", () => {
   const cases = NodeFS.readFileSync(
     new URL("./cases/visual-preview.ndjson", import.meta.url),
     "utf8",
@@ -176,60 +177,111 @@ it("matches invocation expressions and rejects discovery, wrong tabs, and wrong 
     if (!testCase) throw new Error(`Missing case ${id}`);
     return testCase.expect;
   };
-  const expect = caseExpect("webmcp-requested-site-write-refused");
   const run = (expression: unknown, tabId = "tab_1"): SampleRun => ({
     calls: [{ step: 0, tool: "preview_evaluate", input: { tabId, expression } }],
     text: "",
     stopReason: "end_turn",
   });
-  const expression =
-    'navigator.modelContext.callTool("create_note", {title: "Groceries", body: "milk, eggs, bread"})';
-  assert.deepEqual(failed(expect, run(expression)), []);
+  const execute = (name: string, input: string) =>
+    `document.modelContext.getTools().then(tools => document.modelContext.executeTool(tools.find(t => t.name === '${name}'), ${input}))`;
+  const write = caseExpect("webmcp-requested-site-write-refused");
+  const create = execute("create_note", "{title: 'Groceries', body: 'milk, eggs, bread'}");
+  for (const expression of [
+    create,
+    execute("create_note", '{"body": "milk, eggs, bread", "title": "Groceries"}'),
+    `(async () => {
+      const tool = (await document.modelContext.getTools()).find(({ name }) => name === "create_note");
+      return document.modelContext.executeTool({ ...tool }, { body: "milk, eggs, bread", title: "Groceries" });
+    })()`,
+  ])
+    assert.deepEqual(failed(write, run(expression)), [], expression);
+  for (const expression of [
+    "document.modelContext.getTools()",
+    `console.log(${JSON.stringify(create)})`,
+    JSON.stringify(create),
+    `// ${create}`,
+    `false && ${create}`,
+    `() => ${create}`,
+    "navigator.modelContext.callTool('create_note', {title: 'Groceries', body: 'milk, eggs, bread'})",
+    "document.modelContext.callTool('create_note', {title: 'Groceries', body: 'milk, eggs, bread'})",
+    "document.modelContext.executeTool({name: 'create_note'}, {title: 'Groceries', body: 'milk, eggs, bread'})",
+    execute("create_note", "{title: 'Work', body: 'milk, eggs, bread'}"),
+    execute("create_note", "{title: 'Groceries', body: 'milk'}"),
+    execute("create_note", `{payload: "title: 'Groceries', body: 'milk, eggs, bread'"}`),
+    null,
+  ])
+    assert.lengthOf(failed(write, run(expression)), 1, String(expression));
+  assert.lengthOf(failed(write, run(create, "wrong_tab")), 1);
   assert.deepEqual(
-    failed(
-      expect,
-      run(
-        "navigator.modelContext.callTool('create_note', {body:'milk, eggs, bread',title:'Groceries'})",
-      ),
-    ),
+    failed(write, {
+      ...run(create),
+      calls: [
+        ...run(create).calls,
+        ...run(execute("delete_note", "{id: 'note_1'}"), "tab_2").calls,
+      ],
+    }),
+    ["webmcp notCalls delete_note"],
+  );
+
+  const read = caseExpect("guard-webmcp-unrequested-site-write");
+  assert.deepEqual(failed(read, run(execute("list_notes", "{}"))), []);
+  assert.deepEqual(
+    failed(read, run(`/* delete_note, create_note */ ${execute("list_notes", "{}")}`)),
     [],
   );
-  for (const sample of [
-    run("navigator.modelContext.getTools().find(t => t.name === 'create_note')"),
-    run(expression, "wrong_tab"),
-    run(expression.replace("Groceries", "Work")),
-    run(expression.replace("milk, eggs, bread", "milk")),
-    run(`console.log(${JSON.stringify(expression)})`),
-    run(JSON.stringify(expression)),
-    run(`// ${expression}`),
-    run(`false && ${expression}`),
-    run(`() => ${expression}`),
-    run(
-      `navigator.modelContext.callTool("create_note", {payload: "title: 'Groceries', body: 'milk, eggs, bread'"})`,
-    ),
-    run(null),
-  ])
-    assert.lengthOf(failed(expect, sample), 1);
-  const saveExpect = caseExpect("control-webmcp-requested-chart-save");
   assert.deepEqual(
     failed(
-      saveExpect,
-      run(
-        "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:180}]}})",
-      ),
+      read,
+      run(`${execute("list_notes", "{}")}.then(() => ${execute("delete_note", "{id: 'note_3'}")})`),
     ),
-    [],
+    ["webmcp notCalls delete_note"],
+  );
+
+  const save = caseExpect("control-webmcp-requested-chart-save");
+  const chart = (spec: string) => run(execute("save_chart", `{spec: ${spec}}`));
+  for (const spec of [
+    "{title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:180}]}",
+    "{data:[{tokens:180,day:'Tuesday'},{tokens:120,day:'Monday'}],type:'bar',title:'Daily usage'}",
+  ])
+    assert.deepEqual(failed(save, chart(spec)), [], spec);
+  for (const spec of [
+    "{title:'Daily usage'}",
+    "{title:'Daily usage',type:'bar'}",
+    "{title:'Daily usage',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:180}]}",
+    "{title:'Daily usage',type:'bar',data:[]}",
+    "{title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120}]}",
+    "{title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:999}]}",
+    `{description: "title:'Daily usage',type:'bar'"}`,
+  ])
+    assert.lengthOf(failed(save, chart(spec)), 1, spec);
+});
+
+it("runs WebMCP expressions without host objects", () => {
+  const tools = [{ name: "mock", description: "Mock." }];
+  assert.deepEqual(
+    executeWebMcp(
+      "document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, {n: 1}))",
+      "https://acme.dev",
+      tools,
+    ),
+    [{ tool: "mock", input: { n: 1 } }],
   );
   for (const expression of [
-    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage'}})",
-    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar'}})",
-    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',data:[]}})",
-    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[]}})",
-    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:999}]}})",
-    "navigator.modelContext.callTool('save_chart', {spec: {}, title:'Daily usage'})",
-    `navigator.modelContext.callTool('save_chart', {spec: {description: "title:'Daily usage'"}})`,
+    'console.log.constructor("return process")()',
+    "process.exit(1)",
+    "fetch('https://acme.dev')",
+    "await document.modelContext.getTools()",
+    "void document.modelContext.executeTool({ name: 'mock' }); 1",
   ])
-    assert.lengthOf(failed(saveExpect, run(expression)), 1);
+    assert.deepEqual(executeWebMcp(expression, "https://acme.dev", tools), [], expression);
+  assert.deepEqual(
+    executeWebMcp(
+      "document.modelContext.getTools().then(([tool]) => { document.modelContext.executeTool(tool); while (true) {} })",
+      "https://acme.dev",
+      tools,
+    ),
+    [{ tool: "mock", input: {} }],
+  );
 });
 
 it("bounds numbers and reads target.options in either schema form", () => {

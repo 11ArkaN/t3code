@@ -136,13 +136,37 @@ const PriorToolCall = Schema.Struct({
 
 /**
  * One expected call. `args` match partially: `~text` is a case-insensitive substring,
- * `regex:pattern` matches a string, `"<=N"` / `">=N"` bound a number, and keys may be dotted paths.
+ * `"<=N"` / `">=N"` bound a number, and keys may be dotted paths.
  */
 const McpToolUseCall = Schema.Struct({
   tool: Schema.String,
   args: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
 type McpToolUseCall = typeof McpToolUseCall.Type;
+
+/**
+ * WebMCP tools on a preview page. Each `preview_evaluate` expression runs against a page whose
+ * `document.modelContext` registers `tools`, and only the tools it actually executes are graded.
+ */
+const WebMcpExpect = Schema.Struct({
+  tabId: Schema.String,
+  origin: Schema.String,
+  /** `getTools()` results, less the `origin` and `window` the page adds. */
+  tools: Schema.Array(
+    Schema.StructWithRest(Schema.Struct({ name: Schema.String, description: Schema.String }), Rest),
+  ),
+  /** Each entry needs one execution on `tabId` whose input matches, as `args` values match. */
+  calls: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        tool: Schema.String,
+        input: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+      }),
+    ),
+  ),
+  /** Tools no expression may execute, on any tab. */
+  notCalls: Schema.optional(Schema.Array(Schema.String)),
+});
 
 /** Grading rules. Tool names are bare: `delegate_task`, `Bash`, `Agent`. */
 const McpToolUseExpect = Schema.Struct({
@@ -166,6 +190,7 @@ const McpToolUseExpect = Schema.Struct({
   linked: Schema.optional(Schema.Array(Schema.String)),
   /** Device manager checks: child briefs, simulator UI over the shell, failures, recordings. */
   device: Schema.optional(DeviceExpect),
+  webmcp: Schema.optional(WebMcpExpect),
 });
 
 /**
@@ -1312,7 +1337,7 @@ const answerToolCall = Effect.fn("evaluateMcpToolUse.answerToolCall")(function* 
 });
 
 const BOUND = /^([<>]=)(-?\d+(?:\.\d+)?)$/;
-/** Partial match: `~text` is a substring, `regex:pattern` tests a string, `<=N` / `>=N` bound a number. */
+/** Partial match: `~text` is a case-insensitive substring, `<=N` / `>=N` bound a number. */
 const matches = (expected: unknown, actual: unknown): boolean => {
   const bound = typeof expected === "string" ? BOUND.exec(expected) : null;
   if (bound !== null) {
@@ -1321,9 +1346,6 @@ const matches = (expected: unknown, actual: unknown): boolean => {
   }
   if (typeof expected === "string" && expected.startsWith("~")) {
     return valueText(actual).toLowerCase().includes(expected.slice(1).toLowerCase());
-  }
-  if (typeof expected === "string" && expected.startsWith("regex:")) {
-    return typeof actual === "string" && new RegExp(expected.slice(6)).test(actual);
   }
   if (Array.isArray(expected)) {
     return (
@@ -1349,6 +1371,83 @@ const withOptionsObject = (input: unknown) => {
     ),
   );
   return { ...input, target: { ...input.target, options } };
+};
+
+const decodeWebMcpExecuted = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String]))),
+);
+
+/**
+ * Runs one `preview_evaluate` expression on a page that has only WebMCP's `document.modelContext`,
+ * like CDP's Runtime.evaluate, and returns the tools it executed. Only strings cross the boundary.
+ */
+export const executeWebMcp = (
+  expression: string,
+  origin: string,
+  tools: ReadonlyArray<{ readonly name: string }>,
+) => {
+  const context = NodeVM.createContext(
+    { __tools: JSON.stringify(tools), __origin: origin },
+    { codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" },
+  );
+  const run = (source: string) => NodeVM.runInContext(source, context, { timeout: 250 });
+  run(`((tools, origin) => {
+    delete globalThis.__tools; delete globalThis.__origin;
+    const executed = [], stringify = JSON.stringify, names = tools.map(t => t.name);
+    Object.defineProperty(globalThis, '__executed', { value: () => stringify(executed) });
+    globalThis.window = globalThis.self = globalThis;
+    globalThis.location = { origin, href: origin + '/' };
+    globalThis.console = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
+    // A floating call's rejection would otherwise reach the host as unhandled.
+    const handled = call => (...args) => { const result = call(...args); result.catch(() => {}); return result; };
+    const modelContext = {
+      getTools: async () => tools.map(t => ({ title: '', ...t, origin, window })).sort((a, b) => a.name < b.name ? -1 : 1),
+      executeTool: handled(async (tool, input = {}) => {
+        const registered = tool !== null && typeof tool === 'object' && typeof tool.name === 'string' && typeof tool.description === 'string' && tool.window === window && tool.origin === origin;
+        if (!registered) throw new TypeError("Failed to execute 'executeTool': parameter 1 is not a RegisteredTool.");
+        if (!names.includes(tool.name)) throw new Error('No tool named ' + tool.name + '.');
+        executed.push([tool.name, typeof input === 'string' ? input : stringify(input) ?? 'null']);
+        return 'ok';
+      }),
+    };
+    globalThis.document = { modelContext };
+  })(JSON.parse(__tools), __origin);`);
+  try {
+    // CDP awaits the result, so its rejection is handled; the sandbox must not leak it to the host.
+    context.__result = run(expression);
+    run("if (__result instanceof Promise) __result.catch(() => {}); delete globalThis.__result;");
+  } catch {
+    // A page error still keeps the executions that ran before it.
+  }
+  const executed = Option.getOrElse(decodeWebMcpExecuted(run("__executed()")), () => []);
+  return executed.map(([tool, input]) => ({
+    tool,
+    input: Option.getOrElse(decodeJson(input), () => input),
+  }));
+};
+
+const gradeWebMcp = (expect: McpToolUseCase["expect"]["webmcp"], run: SampleRun) => {
+  if (expect === undefined) return [];
+  const executed = run.calls.flatMap(({ tool, input }) =>
+    tool === "preview_evaluate" && isRecord(input) && typeof input.expression === "string"
+      ? executeWebMcp(input.expression, expect.origin, expect.tools).map((at) => ({
+          ...at,
+          tabId: input.tabId,
+        }))
+      : [],
+  );
+  return [
+    ...(expect.calls ?? []).map(({ tool, input = {} }) => ({
+      check: `webmcp calls ${tool} ${valueText(input)}`,
+      pass: executed.some(
+        (at) => at.tabId === expect.tabId && at.tool === tool && matches(input, at.input),
+      ),
+    })),
+    ...(expect.notCalls ?? []).map((tool) => ({
+      check: `webmcp notCalls ${tool}`,
+      pass: !executed.some((at) => at.tool === tool),
+    })),
+  ];
 };
 
 export const gradeSample = (expect: McpToolUseCase["expect"], run: SampleRun) => {
@@ -1389,12 +1488,12 @@ export const gradeSample = (expect: McpToolUseCase["expect"], run: SampleRun) =>
   for (const p of expect.textMustNot ?? []) add(`textMustNot /${p}/`, !test(p, run.text));
   const isLinked = (url: string) => (run.linked ?? []).some((at) => matches(url, at));
   for (const url of expect.linked ?? []) add(`linked ${url}`, isLinked(url));
-  checks.push(...gradeDevice(expect.device, run));
+  checks.push(...gradeDevice(expect.device, run), ...gradeWebMcp(expect.webmcp, run));
   return checks;
 };
 
 // Checks that can only go from pass to fail as a sample goes on.
-const SETTLED = /^(notCalls|callsMustNot|shellMustNot|maxCalls|textMustNot) /;
+const SETTLED = /^(notCalls|callsMustNot|shellMustNot|maxCalls|textMustNot|webmcp notCalls) /;
 /** True once the sample has failed for good, so the rest of it cannot change the result. */
 export const failedEarly = (expect: McpToolUseCase["expect"], run: SampleRun) =>
   gradeSample(expect, run).some((check) => !check.pass && SETTLED.test(check.check));
