@@ -32,7 +32,10 @@ const itemBase = {
   updatedAt: now,
 } as const;
 
-function toolItem(output: unknown, toolName = "Read"): OrchestrationV2TurnItem {
+function toolItem(
+  output: unknown,
+  toolName = "Read",
+): Extract<OrchestrationV2TurnItem, { readonly type: "dynamic_tool" }> {
   return {
     ...itemBase,
     type: "dynamic_tool",
@@ -123,7 +126,7 @@ describe("stripUnservedToolOutputImageBytes", () => {
 
   // regression: #26591 a subagent's Read keeps its image bytes
   it("strips a Read's content-array image because its preview uses viewedImagePath", () => {
-    const item: OrchestrationV2TurnItem = {
+    const item = {
       ...toolItem({
         content: [
           { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG_BASE64 } },

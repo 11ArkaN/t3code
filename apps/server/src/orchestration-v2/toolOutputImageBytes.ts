@@ -44,14 +44,26 @@ function base64DecodedLength(encoded: string): number {
 
 interface StripContext {
   readonly output: unknown;
-  served: ReadonlyArray<unknown> | undefined;
+  readonly previewedByPath: boolean;
+  listed: ReadonlyArray<unknown> | undefined;
 }
 
-function isServed(context: StripContext, record: UnknownRecord): boolean {
-  context.served ??= toolOutputImageBlocks(context.output);
-  if (!context.served.includes(record)) return false;
+function isListed(context: StripContext, record: UnknownRecord): boolean {
+  context.listed ??= toolOutputImageBlocks(context.output);
+  return context.listed.includes(record);
+}
+
+function isServed(record: UnknownRecord): boolean {
   const data = readToolOutputImage(record)?.data;
   return data === undefined || data.length <= MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH;
+}
+
+/** Drops the mime type too, so no tool-output-image asset lists bytes that are gone. */
+function unlistedImage(record: UnknownRecord): UnknownRecord {
+  const data = readToolOutputImage(record)?.data;
+  return data === undefined
+    ? { type: "image" }
+    : { type: "image", sizeBytes: base64DecodedLength(data) };
 }
 
 function strip(
@@ -76,7 +88,10 @@ function strip(
     return next ?? value;
   }
   const record = value as UnknownRecord;
-  if (record.type === "image" && isServed(context, record)) return record;
+  if (record.type === "image" && isListed(context, record)) {
+    if (context.previewedByPath) return unlistedImage(record);
+    if (isServed(record)) return record;
+  }
   const imageBody = isImageBody(record, key);
   let next: UnknownRecord | undefined;
   let removedBody: string | undefined;
@@ -102,13 +117,22 @@ function strip(
 }
 
 /** Image bytes are stored twice; retain only size-limited toolOutputImageBlocks that are served.
- * Read-file previews use viewedImagePath, and context handoffs skip tools. */
+ * Read-file previews use viewedImagePath, so those items serve none; context handoffs skip tools. */
 export function stripUnservedToolOutputImageBytes(
   item: OrchestrationV2TurnItem,
 ): OrchestrationV2TurnItem {
   if (item.type !== "dynamic_tool" || typeof item.output !== "object" || item.output === null) {
     return item;
   }
-  const output = strip(item.output, undefined, { output: item.output, served: undefined }, 0);
+  const output = strip(
+    item.output,
+    undefined,
+    {
+      output: item.output,
+      previewedByPath: item.viewedImagePath !== undefined,
+      listed: undefined,
+    },
+    0,
+  );
   return output === item.output ? item : { ...item, output };
 }
