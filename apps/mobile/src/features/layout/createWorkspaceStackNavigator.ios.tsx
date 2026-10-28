@@ -34,6 +34,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { whenRootNavigationReady } from "../../lib/rootNavigation";
 import { WorkspaceTabsProvider, useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { isSettingsRoute, settingsOpenIn } from "../settings/settings-navigation";
 import { workspaceRoutesOf } from "./workspace-overlay-routes";
@@ -310,7 +311,8 @@ function WorkspaceColumns(
   const startDraft = useEffectEvent(openNewTask);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an empty thread column opens a new-thread draft route in the navigator
   useEffect(() => {
-    if (startsDraft) startDraft();
+    // At launch this effect runs before the navigator registers with its container.
+    if (startsDraft) whenRootNavigationReady(() => startDraft());
   }, [startsDraft]);
 
   const primary = props.descriptors[props.primary.key];
