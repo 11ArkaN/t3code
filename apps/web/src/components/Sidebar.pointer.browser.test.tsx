@@ -19,6 +19,7 @@ function pointer(type: string, values: PointerEventInit = {}) {
 
 function gesture(
   extraOptions: Partial<ConstructorParameters<typeof SidebarPointerSensor>[0]["options"]> = {},
+  down: PointerEventInit = {},
 ) {
   const callbacks = {
     onStart: vi.fn(),
@@ -31,7 +32,7 @@ function gesture(
   const onFinish = vi.fn();
   const props = {
     active: "thread",
-    event: pointer("pointerdown"),
+    event: pointer("pointerdown", down),
     options: { distance: 6, onAttach: vi.fn(), onFinish, ...extraOptions },
     ...callbacks,
   } as unknown as SensorProps<ConstructorParameters<typeof SidebarPointerSensor>[0]["options"]>;
@@ -84,5 +85,29 @@ describe("sidebar pointer lifecycle", () => {
     expect(drag.onCancel).toHaveBeenCalledOnce();
     expect(drag.onEnd).not.toHaveBeenCalled();
     expect(drag.onFinish).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  // regression: #26548 a stylus tip slides a few pixels during a tap; that must still click
+  it("treats a pen tap that slides 10px as a click, not a drag", () => {
+    using environment = setup();
+    const row = environment.adopt(
+      document.body.appendChild(document.createElement("button")),
+      (node) => node.remove(),
+    );
+    const onClick = vi.fn();
+    row.addEventListener("click", onClick);
+
+    const tap = gesture({}, { pointerType: "pen" });
+    row.dispatchEvent(pointer("pointermove", { pointerType: "pen", clientX: 20 }));
+    row.dispatchEvent(pointer("pointerup", { pointerType: "pen", buttons: 0, clientX: 20 }));
+    row.click();
+
+    expect(tap.onStart).not.toHaveBeenCalled();
+    expect(onClick).toHaveBeenCalledOnce();
+
+    const drag = gesture({}, { pointerType: "mouse" });
+    row.dispatchEvent(pointer("pointermove", { pointerType: "mouse", clientX: 20 }));
+    row.dispatchEvent(pointer("pointerup", { pointerType: "mouse", buttons: 0, clientX: 20 }));
+    expect(drag.onStart).toHaveBeenCalledOnce();
   });
 });
