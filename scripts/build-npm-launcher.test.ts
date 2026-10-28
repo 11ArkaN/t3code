@@ -317,4 +317,54 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         assert.equal(desktop.stdout.trim(), "desktop connect", desktop.stderr);
       }),
   );
+
+  it.effect.skipIf(HostProcess.Platform.defaultValue() !== "win32")(
+    "on Windows, runs the exe a recorded t3.cmd names, or npm's copy with the opt-out",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-win-" });
+        const launcher = path.join(root, "pkg", "bin", "t3.mjs");
+        yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+        yield* fs.copyFile(path.join(import.meta.dirname, "npm-launcher", "t3.mjs"), launcher);
+        yield* fs.writeFileString(
+          path.join(root, "pkg", "package.json"),
+          JSON.stringify({ name: "t3", version: VERSION }),
+        );
+        // A real executable stands in for the installed t3.exe; it prints the user name.
+        const home = path.join(root, "home");
+        const installed = path.join(home, "runtime", "versions", "1.2.4");
+        yield* fs.makeDirectory(installed, { recursive: true });
+        yield* fs.copyFile(
+          path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"),
+          path.join(installed, "t3.exe"),
+        );
+        yield* fs.writeFileString(path.join(installed, ".install-complete"), "1.2.4\n");
+        const shim = path.join(root, "bin", "t3.cmd");
+        yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
+        yield* fs.writeFileString(shim, `@echo off\r\n"${path.join(installed, "t3.exe")}" %*`);
+        yield* fs.writeFileString(path.join(home, "runtime", "launchers"), `${shim}\r\n`);
+
+        const launch = (env: Record<string, string>) =>
+          NodeChildProcess.spawnSync(process.execPath, [launcher], {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              T3CODE_HOME: home,
+              // Any download attempt fails fast, so only the installed exe can succeed.
+              T3CODE_RELEASE_BASE_URL: "http://127.0.0.1:9",
+              ...env,
+            },
+          });
+        const user = process.env.USERNAME?.toLowerCase() ?? "";
+        const deferred = launch({});
+        assert.equal(deferred.status, 0, deferred.stderr);
+        assert.include(deferred.stdout.toLowerCase(), user);
+
+        const optedOut = launch({ T3CODE_USE_NPM: "1" });
+        assert.notEqual(optedOut.status, 0);
+        assert.notInclude(optedOut.stdout.toLowerCase(), user);
+      }),
+  );
 });

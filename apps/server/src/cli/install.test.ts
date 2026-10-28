@@ -9,7 +9,7 @@ import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
 
 import packageJson from "../../package.json" with { type: "json" };
-import { installCli, offerCliInstall } from "./install.ts";
+import { installCli, isForegroundProcStat, isForegroundPs, offerCliInstall } from "./install.ts";
 
 const VERSION = packageJson.version;
 
@@ -233,4 +233,19 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       assert.isFalse(yield* fs.exists(link));
     }).pipe(Effect.scoped),
   );
+
+  it("reads the terminal's foreground group from /proc and ps", () =>
+    Effect.sync(() => {
+      // The command name can hold spaces and parentheses.
+      const stat = (pgrp: number, tpgid: number) =>
+        `4242 (t3 (serve) x) S 100 ${pgrp} 100 34816 ${tpgid} 4194560 0 0`;
+      assert.isTrue(isForegroundProcStat(stat(4242, 4242)));
+      assert.isFalse(isForegroundProcStat(stat(4242, 4300)));
+      assert.isFalse(isForegroundProcStat(stat(4242, -1)));
+      assert.isFalse(isForegroundProcStat(""));
+      assert.isTrue(isForegroundPs("  4242  4242\n"));
+      assert.isFalse(isForegroundPs(" 4300  4242\n"));
+      assert.isFalse(isForegroundPs("   -1  4242\n"));
+      assert.isFalse(isForegroundPs(""));
+    }));
 });

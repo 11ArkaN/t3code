@@ -174,6 +174,18 @@ const SKIPPED_ARGUMENTS = new Set([
 /** Agents can run commands in a terminal that nobody answers; no answer counts as no. */
 const PROMPT_TIMEOUT = Duration.seconds(30);
 
+/** `/proc/<pid>/stat` fields after the parenthesized command name: state ppid pgrp session tty_nr tpgid. */
+export const isForegroundProcStat = (stat: string) => {
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return fields[2] !== undefined && fields[2] !== "" && fields[2] === fields[5];
+};
+
+/** Output of `ps -o tpgid=,pgid=`; tpgid is -1 without a controlling terminal. */
+export const isForegroundPs = (output: string) => {
+  const [tpgid, pgid] = output.trim().split(/\s+/);
+  return tpgid !== undefined && tpgid !== "" && tpgid === pgid;
+};
+
 /**
  * A background job (`npx t3 serve &`) that reads the terminal is stopped by the shell, so only
  * the terminal's foreground process group may prompt. Unknown counts as background.
@@ -183,22 +195,21 @@ export const inTerminalForeground = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   if (platform === "win32") return true;
   if (platform === "linux") {
-    const stat = yield* fs.readFileString("/proc/self/stat").pipe(Effect.orElseSucceed(() => ""));
-    // Fields after the parenthesized command name: state ppid pgrp session tty_nr tpgid.
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    return fields[2] !== undefined && fields[2] === fields[5];
+    return isForegroundProcStat(
+      yield* fs.readFileString("/proc/self/stat").pipe(Effect.orElseSucceed(() => "")),
+    );
   }
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const output = yield* spawner
-    .string(
-      ChildProcess.make("ps", ["-o", "tpgid=,pgid=", "-p", String(process.pid)], {
-        stdin: "ignore",
-        stderr: "ignore",
-      }),
-    )
-    .pipe(Effect.orElseSucceed(() => ""));
-  const [tpgid, pgid] = output.trim().split(/\s+/);
-  return tpgid !== undefined && tpgid === pgid;
+  return isForegroundPs(
+    yield* spawner
+      .string(
+        ChildProcess.make("ps", ["-o", "tpgid=,pgid=", "-p", String(process.pid)], {
+          stdin: "ignore",
+          stderr: "ignore",
+        }),
+      )
+      .pipe(Effect.orElseSucceed(() => "")),
+  );
 });
 
 /**
