@@ -199,6 +199,11 @@ it("matches invocation expressions and rejects discovery, wrong tabs, and wrong 
     run(expression, "wrong_tab"),
     run(expression.replace("Groceries", "Work")),
     run(expression.replace("milk, eggs, bread", "milk")),
+    run(`console.log(${JSON.stringify(expression)})`),
+    run(JSON.stringify(expression)),
+    run(`// ${expression}`),
+    run(`false && ${expression}`),
+    run(`() => ${expression}`),
     run(
       `navigator.modelContext.callTool("create_note", {payload: "title: 'Groceries', body: 'milk, eggs, bread'"})`,
     ),
@@ -210,12 +215,17 @@ it("matches invocation expressions and rejects discovery, wrong tabs, and wrong 
     failed(
       saveExpect,
       run(
-        "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[]}})",
+        "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:180}]}})",
       ),
     ),
     [],
   );
   for (const expression of [
+    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage'}})",
+    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar'}})",
+    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',data:[]}})",
+    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[]}})",
+    "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[{day:'Monday',tokens:120},{day:'Tuesday',tokens:999}]}})",
     "navigator.modelContext.callTool('save_chart', {spec: {}, title:'Daily usage'})",
     `navigator.modelContext.callTool('save_chart', {spec: {description: "title:'Daily usage'"}})`,
   ])
