@@ -51,6 +51,8 @@ export function useCommitDescriptions({
     const batch = shas
       .slice(start, start + COMMIT_DESCRIPTION_BATCH_SIZE)
       .filter((sha) => !skip.has(sha));
+    // A no-op load must not re-render: the boundary row's observer would fire again and loop.
+    if (batch.length === 0 && !retry) return;
     setStored((latest) => {
       const base = latest.scope === scope ? latest : empty(scope);
       const kept = retry ? base.descriptions.keys() : base.requested;
