@@ -1005,7 +1005,10 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
         string,
         Record<string, { status: string; result: string | null }>
       >();
-      const state: { roster: ReadonlyArray<unknown> | undefined } = { roster: undefined };
+      const state: {
+        roster: ReadonlyArray<unknown> | undefined;
+        terminal: string | undefined;
+      } = { roster: undefined, terminal: undefined };
       let wake = yield* Deferred.make<void>();
       yield* runtime.events.pipe(
         Stream.tap((event) =>
@@ -1019,6 +1022,7 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
             if (event.type === "provider_thread.updated" && event.providerThread.id === thread.id) {
               state.roster = event.providerThread.pendingBackgroundTasks;
             }
+            if (event.type === "turn.terminal") state.terminal = event.status;
             const id =
               event.type === "provider_turn.updated"
                 ? event.providerTurn.nativeTurnRef?.nativeId
@@ -1165,6 +1169,29 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       });
       yield* watch.until(() => watch.calls.get("Again")?.status === "completed");
       assert.deepEqual(watch.calls.get("Again"), { status: "completed", result: "SECOND_OK" });
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("settles a resumed subagent's call when an earlier run's report never arrived", () =>
+    Effect.gen(function* () {
+      const { runtime, thread } = yield* resumed([
+        ...launchedAndRunning,
+        // Run 1 ends, but its report never reaches T3.
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        ...callAgain({ background: true }),
+        event("session.execution.started", { sessionID: CHILD }),
+        event("session.execution.succeeded", { sessionID: CHILD }),
+        childReport("msg_report_2", "SECOND_OK"),
+        event("session.execution.succeeded", { sessionID: SESSION }),
+      ]);
+      const watch = yield* watchCalls(runtime, thread);
+      yield* runtime.startTurn(withLineage(thread));
+      yield* watch.until(() => watch.state.terminal !== undefined);
+      assert.deepEqual(watch.calls.get("Again"), { status: "completed", result: "SECOND_OK" });
+      const sleep = watch.calls.get("Sleep");
+      assert.notEqual(sleep?.status, "running");
+      assert.notEqual(sleep?.result, "SECOND_OK");
+      assert.deepEqual(watch.state.roster, []);
     }).pipe(Effect.scoped),
   );
 
