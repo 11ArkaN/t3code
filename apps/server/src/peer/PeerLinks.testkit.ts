@@ -159,7 +159,8 @@ export const layerLinkingEnvironment = (
   machine: Layer.Layer<never> = Layer.empty,
 ) =>
   PeerMcpClient.layer.pipe(
-    Layer.provideMerge(PeerLinks.layer.pipe(Layer.provide(machine))),
+    Layer.provideMerge(PeerLinks.layer),
+    Layer.provide(machine),
     Layer.provideMerge(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
     Layer.provideMerge(Sqlite.layerMemory),
     Layer.provide(Layer.mergeAll(secrets, FetchHttpClient.layer)),

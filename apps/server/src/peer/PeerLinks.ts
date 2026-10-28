@@ -568,15 +568,18 @@ const make = Effect.gen(function* () {
         });
       }
       // The token goes only to an address that proves it is this peer, so a
-      // reused LAN address or a moved hostname never receives it.
+      // reused LAN address or a moved hostname never receives it. Its transport
+      // is checked again: a 100.x address is trusted only while Tailscale runs.
       let fenced = true;
       const url = yield* Effect.findFirst(link.urls, (candidate) =>
-        describe(candidate).pipe(
+        peerOrigin(candidate).pipe(
+          Effect.flatMap(describe),
           Effect.map((found) => {
             if (Option.isNone(found) || found.value.environmentId !== environmentId) return false;
             fenced = linkLimitsHold(found.value);
             return true;
           }),
+          Effect.orElseSucceed(() => false),
         ),
       );
       if (Option.isNone(url)) {

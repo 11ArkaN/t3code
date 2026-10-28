@@ -469,34 +469,35 @@ it.effect(
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-/** A's `tailscale`, whose `status --json` lists `peerIps` as another machine on its tailnet. */
-const layerTailscalePeers = (peerIps: ReadonlyArray<string>) =>
+/** `tailscale status --json` with `peerIps` as another machine on its tailnet. */
+const tailscaleStatus = (backendState: string, peerIps: ReadonlyArray<string>) =>
+  JSON.stringify({
+    BackendState: backendState,
+    Self: { DNSName: "laptop.tail1234.ts.net.", TailscaleIPs: ["100.101.0.1"] },
+    Peer: { "nodekey:box": { DNSName: "box.tail1234.ts.net.", TailscaleIPs: peerIps } },
+  });
+
+/** A's `tailscale`, whose `status --json` prints what `status` holds at each run. */
+const layerTailscale = (status: Ref.Ref<string>) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make(() =>
-      Effect.succeed(
-        ChildProcessSpawner.makeHandle({
-          pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-          isRunning: Effect.succeed(false),
-          kill: () => Effect.void,
-          unref: Effect.succeed(Effect.void),
-          stdin: Sink.drain,
-          stdout: Stream.make(
-            new TextEncoder().encode(
-              JSON.stringify({
-                Self: { DNSName: "laptop.tail1234.ts.net.", TailscaleIPs: ["100.101.0.1"] },
-                Peer: {
-                  "nodekey:box": { DNSName: "box.tail1234.ts.net.", TailscaleIPs: peerIps },
-                },
-              }),
-            ),
-          ),
-          stderr: Stream.empty,
-          all: Stream.empty,
-          getInputFd: () => Sink.drain,
-          getOutputFd: () => Stream.empty,
-        }),
+      Ref.get(status).pipe(
+        Effect.map((json) =>
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.drain,
+            stdout: Stream.make(new TextEncoder().encode(json)),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          }),
+        ),
       ),
     ),
   );
@@ -520,14 +521,26 @@ it.effect(
       Effect.gen(function* () {
         const b = yield* serveB(box);
         const port = new URL(b.url).port;
+        const peerIps = ["100.100.1.2", "fd7a:115c:a1e0::1"];
+        const status = yield* Ref.make(tailscaleStatus("Stopped", peerIps));
         const a = yield* makeA(
           laptop,
           undefined,
-          Layer.mergeAll(
-            layerTailscalePeers(["100.100.1.2", "fd7a:115c:a1e0::1"]),
-            layerRouteHostToLoopback("100.100.1.2"),
-          ),
+          Layer.mergeAll(layerTailscale(status), layerRouteHostToLoopback("100.100.1.2")),
         );
+
+        // A stopped Tailscale still lists its peers, but nothing would encrypt
+        // the traffic to them.
+        const stopped = yield* a.links
+          .link({
+            url: `http://100.100.1.2:${port}`,
+            pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+            access: "auto",
+          })
+          .pipe(Effect.flip);
+        expect(stopped.message).toContain("plain http");
+        expect(yield* linkedSessions(b)).toEqual([]);
+        yield* Ref.set(status, tailscaleStatus("Running", peerIps));
 
         // WARP and carrier-grade NAT share the range; an address Tailscale does
         // not know would carry the code and token in clear.
@@ -552,6 +565,16 @@ it.effect(
           urls: [`http://100.100.1.2:${port}`],
         });
         expect((yield* linkedSessions(b)).length).toBe(1);
+        yield* probe(a);
+        expect((yield* Ref.get(b.bearers)).length).toBeGreaterThan(0);
+
+        // Its token stays here once Tailscale stops, as it would have at link time.
+        yield* Ref.set(status, tailscaleStatus("NeedsLogin", peerIps));
+        yield* Ref.set(b.bearers, []);
+        const refused = yield* a.links.resolve(box.environmentId).pipe(Effect.flip);
+        expect(refused.message).toContain("Box did not answer");
+        yield* probe(a).pipe(Effect.flip);
+        expect(yield* Ref.get(b.bearers)).toEqual([]);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
