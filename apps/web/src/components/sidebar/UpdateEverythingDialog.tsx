@@ -214,17 +214,22 @@ function UpdateEverythingDialogContent({
         </div>
       </ScrollArea>
       <AlertDialogFooter>
+        {/* Thread counts come from client snapshots that can still be loading, so the warning
+            cannot depend on them. */}
         {disabledReason !== null ? (
           <p className="self-center text-sm max-sm:order-1 max-sm:text-center sm:mr-auto">
             {disabledReason}
           </p>
-        ) : running > 0 ? (
+        ) : updating.some((row) => row.app !== null) ? (
           <p className="self-center text-muted-foreground text-sm max-sm:order-1 max-sm:text-center sm:mr-auto">
-            {stopped === 0
-              ? `${threads} will be interrupted and can resume after the restart.`
-              : continuing === 0
-                ? `${threads} will be interrupted.`
-                : `${threads} will be interrupted. ${continuing} can resume after the restart.`}
+            Running tasks and tool calls will be interrupted.
+            {running === 0
+              ? null
+              : stopped === 0
+                ? ` ${threads} can resume after the restart.`
+                : continuing === 0
+                  ? ` ${threads} will not resume automatically.`
+                  : ` ${continuing} of ${threads} can resume after the restart.`}
           </p>
         ) : null}
         <AlertDialogClose ref={cancelRef} render={<Button variant="outline" disabled={busy} />}>
