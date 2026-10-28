@@ -237,7 +237,9 @@ if [ -e "${bin_dir}/t3" ] || [ -L "${bin_dir}/t3" ]; then
     real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
     # Through a symlinked T3 home the link text names the alias; resolve its folder to compare.
     existing_dir="$(CDPATH='' cd -P -- "$(dirname -- "$existing")" 2>/dev/null && pwd || true)"
+    # The text alone counts only without . or .. segments (a pruned version leaves a dangling link).
     case "$existing" in
+      */./* | */../* | */. | */..) ;;
       "$versions_dir"/* | "$real_versions_dir"/* | "${t3_home}/bin/t3") owned=true ;;
     esac
     if [ -n "$existing_dir" ]; then
