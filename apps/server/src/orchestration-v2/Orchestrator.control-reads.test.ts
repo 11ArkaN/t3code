@@ -1343,6 +1343,27 @@ it.effect.each([false, true])(
         };
         yield* eventSink.write({ events: [delayedQuestion] });
         yield* reactor.handle(delayedQuestion);
+        // A stale delivery is accepted without starting work, not rejected.
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("stale-question-redelivery"),
+          threadId: parentThreadId,
+          messageId: MessageId.make("message:stale-question-redelivery"),
+          text: "Answer the delegated question",
+          notification: {
+            source: {
+              kind: "delegated_task",
+              taskIds: [task.id],
+              childThreadId: task.childThreadId!,
+            },
+            outcome: "updated",
+            summary: "Delegated task has a question",
+          },
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "server",
+        });
         assert.equal(
           (yield* projections.getThreadRecords(parentThreadId, ["runs"])).runs.length,
           before,

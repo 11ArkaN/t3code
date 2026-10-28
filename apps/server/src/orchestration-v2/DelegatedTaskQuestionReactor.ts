@@ -72,12 +72,22 @@ const make = Effect.gen(function* () {
         (run) => run.status === "queued" && run.userMessageId === messageId,
       );
       if (queued === undefined) continue;
-      yield* engine.dispatch({
-        type: "queued-run.cancel",
-        commandId: CommandId.make(`server:delegated-task-question-cancel:${key}`),
-        threadId: parentThreadId,
-        runId: queued.id,
-      });
+      yield* engine
+        .dispatch({
+          type: "queued-run.cancel",
+          commandId: CommandId.make(`server:delegated-task-question-cancel:${key}`),
+          threadId: parentThreadId,
+          runId: queued.id,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("cancelling a delegated task question wake failed", {
+              threadId: parentThreadId,
+              requestId,
+              cause,
+            }),
+          ),
+        );
     }
   });
 

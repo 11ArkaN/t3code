@@ -1516,7 +1516,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
       if (
         message === undefined ||
-        !(yield* isStaleQuestionWake(projection, message.id, message.notification))
+        !(yield* isStaleQuestionWake(projection, message.id, message.notification).pipe(
+          // A child thread read must not fail the parent's unrelated next queued run.
+          Effect.catchTags({
+            OrchestratorProjectionError: (cause) =>
+              Effect.logWarning("Failed to check a queued task question wake", {
+                runId: run.id,
+                cause,
+              }).pipe(Effect.as(false)),
+          }),
+        ))
       )
         continue;
       yield* emitQueuedRunCancellation({
@@ -5069,7 +5078,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) {
     let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
-    if (yield* isStaleQuestionWake(projection, command.messageId, command.notification)) return;
+    if (yield* isStaleQuestionWake(projection, command.messageId, command.notification)) {
+      yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.metadata-updated",
+        threadId: command.threadId,
+        occurredAt: yield* DateTime.now,
+        payload: projection.thread,
+      });
+      return;
+    }
     if (command.manualContinuationOfRunId !== undefined) {
       const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
       const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
