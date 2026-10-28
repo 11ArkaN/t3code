@@ -227,12 +227,12 @@ fi
 
 step "Setting up the t3 command..."
 mkdir -p "$bin_dir"
-# Replace only a t3 link into this home's versions; never the desktop app's link or another t3.
+# Replace only this home's own t3 links: into its versions, or the desktop app's launcher.
 if [ -e "${bin_dir}/t3" ] || [ -L "${bin_dir}/t3" ]; then
   existing="$(readlink "${bin_dir}/t3" 2>/dev/null || true)"
   real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
   case "$existing" in
-    "$versions_dir"/* | "$real_versions_dir"/*) ;;
+    "$versions_dir"/* | "$real_versions_dir"/* | "${t3_home}/bin/t3") ;;
     *) fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly." ;;
   esac
 fi
@@ -243,7 +243,28 @@ launchers="${t3_home}/runtime/launchers"
 grep -qxF "$launcher" "$launchers" 2>/dev/null || printf '%s\n' "$launcher" >> "$launchers"
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled T3 Code %s%s\n\n' "$green" "$version" "$reset" >&2
+# A command to paste for zsh, Linux bash, or fish, like `t3 install` prints. macOS bash reads only
+# one of several startup files, so no single file is safe to change there.
+path_command=
+path_rest="$bin_dir"
+path_prefix=
+case "$bin_dir" in "$HOME"/*) path_rest="${bin_dir#"$HOME"}" path_prefix='$HOME' ;; esac
+case "$path_rest" in *[!A-Za-z0-9_./-]*) path_rest= ;; esac
+if [ -n "$path_rest" ]; then
+  path_line="export PATH=\"${path_prefix}${path_rest}:\$PATH\""
+  case "${SHELL##*/}" in
+    zsh) path_command="printf '\\n%s\\n' '${path_line}' >> ~/.zshrc" ;;
+    bash) [ "$platform" = darwin ] || path_command="printf '\\n%s\\n' '${path_line}' >> ~/.bashrc" ;;
+    fish) path_command="fish_add_path ${path_prefix}${path_rest}" ;;
+  esac
+fi
 case ":${PATH}:" in
   *":${bin_dir}:"*) printf '  Run %st3%s to get started.\n\n' "$bold" "$reset" ;;
-  *) printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset" ;;
+  *)
+    if [ -n "$path_command" ]; then
+      printf '  %s is not on your PATH yet. Add it with:\n\n    %s\n\n  Then open a new terminal and run %st3%s.\n\n' "$bin_dir" "$path_command" "$bold" "$reset"
+    else
+      printf '  Add %s to your PATH, then run %st3%s.\n\n' "$bin_dir" "$bold" "$reset"
+    fi
+    ;;
 esac

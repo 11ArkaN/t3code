@@ -111,7 +111,23 @@ export const renderCliShim = (input: {
     '  (cd "$work" && "$app" --appimage-extract >/dev/null) || { echo "Could not open $app." >&2; exit 1; }',
     '  mount="$work/squashfs-root"',
     "fi",
-    run("$mount"),
+    // The shell must outlive the CLI to unmount, so it forwards TERM and HUP; the terminal sends
+    // Ctrl-C to the CLI directly. A background child would read /dev/null, so pass stdin on fd 3.
+    "exec 3<&0",
+    `${run("$mount")} <&3 3<&- &`,
+    "cli=$!",
+    "exec 3<&-",
+    `trap 'kill -TERM "$cli" 2>/dev/null' TERM`,
+    `trap 'kill -HUP "$cli" 2>/dev/null' HUP`,
+    "trap '' INT",
+    "status=0",
+    'wait "$cli" || status=$?',
+    // A trapped signal interrupts wait; wait again for the CLI's own exit status.
+    'while kill -0 "$cli" 2>/dev/null; do',
+    "  status=0",
+    '  wait "$cli" || status=$?',
+    "done",
+    'exit "$status"',
     "",
   ].join("\n");
 };

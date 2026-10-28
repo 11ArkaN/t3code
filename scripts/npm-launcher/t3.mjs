@@ -258,7 +258,7 @@ function run(executable, env, ipc, fallback) {
   child.on("error", (error) => finish(() => (fallback ? fallback() : fail(error))));
   child.on("exit", (code, signal) =>
     finish(() =>
-      // 126 and 127 mean the shell could not run it; t3 itself never exits with them.
+      // 126 and 127 mean the shell could not run it; t3 never exits with them (triage maps them).
       fallback && (code === 126 || code === 127)
         ? fallback()
         : process.exit(code ?? 128 + (os.constants.signals[signal] || 1)),
