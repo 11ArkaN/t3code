@@ -98,7 +98,8 @@ export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function*
       Option.exists(authJson, (json) => isCodexAuthRefreshDue(json, nowMs)),
     ),
   );
-  // Every holder is bounded by the start and refresh timeouts, so waiting here always ends.
+  // Holders free the home after initialize and any refresh, each with a timeout, or when
+  // their open fails; only a spawn that never returns would keep it.
   const gate = yield* Scope.fork(scope);
   yield* Effect.acquireRelease(homeLock.take(1), () => homeLock.release(1), {
     interruptible: true,

@@ -6863,9 +6863,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                         ) {
                           return Effect.fail(cause);
                         }
-                        return client.raw
-                          .request("thread/unarchive", { threadId: nativeThreadId })
-                          .pipe(Effect.andThen(resume));
+                        return retryWhileThreadBusyElsewhere(
+                          client.raw.request("thread/unarchive", { threadId: nativeThreadId }),
+                        ).pipe(Effect.andThen(resume));
                       },
                     }),
                   ),
