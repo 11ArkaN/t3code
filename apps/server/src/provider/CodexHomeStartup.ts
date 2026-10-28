@@ -19,6 +19,7 @@ const REFRESH_LEAD_MS = 10 * 60_000;
 const CHECK_INTERVAL = "5 minutes";
 const LOCK_WAIT = "20 seconds";
 const REFRESH_TIMEOUT = "15 seconds";
+const STARTUP_TIMEOUT = "15 seconds";
 
 const decodeCodexAuthFile = Schema.decodeUnknownOption(
   Schema.fromJsonString(
@@ -62,18 +63,24 @@ export function codexAuthPath(
   return codexHome ? NodePath.join(codexHome, "auth.json") : undefined;
 }
 
+// One lock per Codex home for the whole server; a home's lock lives as long as the server.
 const homeLocks = new Map<string, Semaphore.Semaphore>();
 
 /**
- * Makes one T3-chosen app-server refresh the ChatGPT login per Codex home. Call before spawning
- * the app-server: Codex refreshes at startup, so a due login keeps the home lock until `start`.
- * `start` refreshes through the new client if still due, then rechecks every few minutes.
+ * Starts app-servers on one Codex home one at a time (concurrent first starts break a new home's
+ * databases) and has one of them refresh a due ChatGPT login. Call before spawning; `start` frees
+ * the home once the app-server has initialized, refreshing first when due.
  */
-export const openCodexAuthRefresh = Effect.fn("CodexAuthRefresh.open")(function* (
+export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function* (
   authPath: string | undefined,
 ) {
   if (authPath === undefined) {
-    return { start: <E>(_refresh: Effect.Effect<unknown, E>) => Effect.void };
+    return {
+      start: <E1, E2>(_input: {
+        readonly initialize: Effect.Effect<unknown, E1>;
+        readonly refresh: Effect.Effect<unknown, E2>;
+      }) => Effect.void,
+    };
   }
   const scope = yield* Scope.Scope;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -88,21 +95,26 @@ export const openCodexAuthRefresh = Effect.fn("CodexAuthRefresh.open")(function*
     ),
   );
   const gate = yield* Scope.fork(scope);
-  const holdsLock =
-    (yield* isDue) &&
-    (yield* Effect.acquireRelease(
-      homeLock.take(1).pipe(Effect.timeoutOption(LOCK_WAIT), Effect.map(Option.isSome)),
-      (taken) => (taken ? homeLock.release(1) : Effect.void),
-      { interruptible: true },
-    ).pipe(Scope.provide(gate)));
+  const holdsLock = yield* Effect.acquireRelease(
+    homeLock.take(1).pipe(Effect.timeoutOption(LOCK_WAIT), Effect.map(Option.isSome)),
+    (taken) => (taken ? homeLock.release(1) : Effect.void),
+    { interruptible: true },
+  ).pipe(Scope.provide(gate));
 
   return {
-    start: Effect.fn("CodexAuthRefresh.start")(function* <E>(refresh: Effect.Effect<unknown, E>) {
+    start: Effect.fn("CodexHomeStartup.start")(function* <E1, E2>(input: {
+      readonly initialize: Effect.Effect<unknown, E1>;
+      readonly refresh: Effect.Effect<unknown, E2>;
+    }) {
       // Callers hold the home lock; the reread skips homes another app-server already refreshed.
       // account/read can fail after its refresh succeeds, so auth.json decides the outcome.
       const refreshIfStillDue = Effect.gen(function* () {
         if (!(yield* isDue)) return;
-        const exit = yield* refresh.pipe(Effect.timeout(REFRESH_TIMEOUT), Effect.exit);
+        const exit = yield* input.initialize.pipe(
+          Effect.andThen(input.refresh),
+          Effect.timeout(REFRESH_TIMEOUT),
+          Effect.exit,
+        );
         if (yield* isDue) {
           yield* Effect.logWarning("Codex auth refresh did not update auth.json.", {
             authPath,
@@ -111,7 +123,13 @@ export const openCodexAuthRefresh = Effect.fn("CodexAuthRefresh.open")(function*
         }
       });
       if (holdsLock) {
-        yield* refreshIfStillDue.pipe(Effect.ensuring(Scope.close(gate, Exit.void)));
+        // A failed start surfaces on the session's first request.
+        yield* input.initialize.pipe(
+          Effect.timeout(STARTUP_TIMEOUT),
+          Effect.ignore,
+          Effect.andThen(refreshIfStillDue),
+          Effect.ensuring(Scope.close(gate, Exit.void)),
+        );
       }
       yield* Effect.sleep(CHECK_INTERVAL).pipe(
         Effect.andThen(isDue),

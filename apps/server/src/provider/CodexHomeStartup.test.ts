@@ -6,7 +6,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 
-import { isCodexAuthRefreshDue, openCodexAuthRefresh } from "./CodexAuthRefresh.ts";
+import { isCodexAuthRefreshDue, openCodexHomeStartup } from "./CodexHomeStartup.ts";
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -80,7 +80,7 @@ describe("isCodexAuthRefreshDue", () => {
   });
 });
 
-it.layer(NodeServices.layer)("openCodexAuthRefresh", (it) => {
+it.layer(NodeServices.layer)("openCodexHomeStartup", (it) => {
   it.effect("refreshes a due home through one of the app-servers opening on it", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -98,14 +98,47 @@ it.layer(NodeServices.layer)("openCodexAuthRefresh", (it) => {
         ),
       );
       const openSession = Effect.scoped(
-        openCodexAuthRefresh(authPath).pipe(
-          Effect.flatMap((authRefresh) => authRefresh.start(refresh)),
+        openCodexHomeStartup(authPath).pipe(
+          Effect.flatMap((startup) => startup.start({ initialize: Effect.void, refresh })),
         ),
       );
 
       yield* Effect.all([openSession, openSession, openSession], { concurrency: "unbounded" });
 
       expect(yield* Ref.get(refreshes)).toBe(1);
+    }),
+  );
+
+  it.effect("initializes one app-server at a time on a home", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fileSystem.makeTempDirectoryScoped();
+      const counts = yield* Ref.make({ active: 0, most: 0 });
+      // A real file write keeps each start in flight long enough for others to overlap.
+      const initialize = Ref.update(counts, ({ active, most }) => ({
+        active: active + 1,
+        most: Math.max(most, active + 1),
+      })).pipe(
+        Effect.andThen(fileSystem.writeFileString(path.join(home, "probe"), "start")),
+        Effect.andThen(
+          Ref.update(counts, (current) => ({ ...current, active: current.active - 1 })),
+        ),
+      );
+      const openSession = Effect.scoped(
+        openCodexHomeStartup(path.join(home, "auth.json")).pipe(
+          Effect.flatMap((startup) => startup.start({ initialize, refresh: Effect.void })),
+        ),
+      );
+
+      yield* Effect.all(
+        Array.from({ length: 5 }, () => openSession),
+        {
+          concurrency: "unbounded",
+        },
+      );
+
+      expect((yield* Ref.get(counts)).most).toBe(1);
     }),
   );
 });
