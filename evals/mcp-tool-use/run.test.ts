@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -208,10 +209,19 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
     execute("create_note", "{title: 'Work', body: 'milk, eggs, bread'}"),
     execute("create_note", "{title: 'Groceries', body: 'milk'}"),
     execute("create_note", `{payload: "title: 'Groceries', body: 'milk, eggs, bread'"}`),
+    execute("create_note", "JSON.stringify({title: 'Groceries', body: 'milk, eggs, bread'})"),
     null,
   ])
     assert.lengthOf(failed(write, run(expression)), 1, String(expression));
   assert.lengthOf(failed(write, run(create, "wrong_tab")), 1);
+  const saveTools = "document.modelContext.getTools().then(tools => { window.saved = tools })";
+  const useSaved = `document.modelContext.executeTool(window.saved.find(t => t.name === 'create_note'), {title: 'Groceries', body: 'milk, eggs, bread'})`;
+  const across = (saveTab: string): SampleRun => ({
+    ...run(saveTools, saveTab),
+    calls: [...run(saveTools, saveTab).calls, ...run(useSaved).calls],
+  });
+  assert.deepEqual(failed(write, across("tab_1")), []);
+  assert.lengthOf(failed(write, across("tab_2")), 1);
   assert.deepEqual(
     failed(write, {
       ...run(create),
@@ -258,11 +268,11 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
 
 it("runs WebMCP expressions without host objects", () => {
   const tools = [{ name: "mock", description: "Mock." }];
+  const page = (...expressions: Array<string>) =>
+    executeWebMcp([expressions], "https://acme.dev", tools)[0];
   assert.deepEqual(
-    executeWebMcp(
+    page(
       "document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, {n: 1}))",
-      "https://acme.dev",
-      tools,
     ),
     [{ tool: "mock", input: { n: 1 } }],
   );
@@ -273,15 +283,32 @@ it("runs WebMCP expressions without host objects", () => {
     "await document.modelContext.getTools()",
     "void document.modelContext.executeTool({ name: 'mock' }); 1",
   ])
-    assert.deepEqual(executeWebMcp(expression, "https://acme.dev", tools), [], expression);
+    assert.deepEqual(page(expression), [], expression);
   assert.deepEqual(
-    executeWebMcp(
+    page(
       "document.modelContext.getTools().then(([tool]) => { document.modelContext.executeTool(tool); while (true) {} })",
-      "https://acme.dev",
-      tools,
     ),
     [{ tool: "mock", input: {} }],
   );
+});
+
+it("contains page rejections no expression handles", () => {
+  const grader = new URL("./run.ts", import.meta.url).href;
+  const script = `
+    import { gradeSample } from ${JSON.stringify(grader)};
+    const webmcp = { tabId: "tab_1", origin: "https://acme.dev", tools: [{ name: "mock", description: "Mock." }], calls: [{ tool: "mock" }] };
+    const grade = (expression) => gradeSample({ webmcp }, { calls: [{ step: 0, tool: "preview_evaluate", input: { tabId: "tab_1", expression } }], text: "", stopReason: "end_turn" }).every((check) => check.pass);
+    const first = grade("document.modelContext.getTools().then(() => { throw new Error('page') }); (async () => { throw new Error('page') })(); 1");
+    await new Promise((resolve) => setImmediate(resolve));
+    const later = grade("document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, {}))");
+    process.stdout.write(JSON.stringify([first, later]));
+  `;
+  const child = NodeChildProcess.spawnSync(
+    process.execPath,
+    ["--input-type=module", "--no-warnings", "-e", script],
+    { encoding: "utf8" },
+  );
+  assert.deepEqual([child.status, child.stdout], [0, "[false,true]"], child.stderr);
 });
 
 it("bounds numbers and reads target.options in either schema form", () => {

@@ -145,8 +145,8 @@ const McpToolUseCall = Schema.Struct({
 type McpToolUseCall = typeof McpToolUseCall.Type;
 
 /**
- * WebMCP tools on a preview page. Each `preview_evaluate` expression runs against a page whose
- * `document.modelContext` registers `tools`, and only the tools it actually executes are graded.
+ * WebMCP tools on a preview page. Each tab's `preview_evaluate` expressions replay in order on one
+ * page whose `document.modelContext` registers `tools`, and only the tools they execute are graded.
  */
 const WebMcpExpect = Schema.Struct({
   tabId: Schema.String,
@@ -1374,67 +1374,98 @@ const withOptionsObject = (input: unknown) => {
 };
 
 const decodeWebMcpExecuted = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Array(Schema.Tuple([Schema.String, Schema.String]))),
+  Schema.fromJsonString(Schema.Tuple([Schema.Number, Schema.String, Schema.Unknown])),
 );
 
-/**
- * Runs one `preview_evaluate` expression on a page that has only WebMCP's `document.modelContext`,
- * like CDP's Runtime.evaluate, and returns the tools it executed. Only strings cross the boundary.
- */
-export const executeWebMcp = (
-  expression: string,
-  origin: string,
-  tools: ReadonlyArray<{ readonly name: string }>,
-) => {
-  const context = NodeVM.createContext(
+// Each page is a `node:vm` context like CDP's Runtime.evaluate, with only WebMCP's `document.modelContext`.
+const WEBMCP_PAGES = String.raw`
+const vm = require("node:vm");
+// Its source runs inside each page, so the page never holds a child-process object.
+const setup = (tools, origin) => {
+  delete globalThis.__tools; delete globalThis.__origin;
+  const page = globalThis, stringify = JSON.stringify, parse = JSON.parse, names = tools.map(t => t.name);
+  let executed = [], count = 0;
+  Object.defineProperty(page, "__take", { value: () => { const taken = stringify(executed); executed = []; return taken; } });
+  page.window = page.self = page;
+  page.location = { origin, href: origin + "/" };
+  page.console = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
+  const modelContext = {
+    getTools: async () => tools.map(t => ({ title: "", ...t, origin, window: page })).sort((a, b) => a.name < b.name ? -1 : 1),
+    executeTool: async (tool, input = {}) => {
+      const registered = tool !== null && typeof tool === "object" && typeof tool.name === "string" && typeof tool.description === "string" && tool.window === page && tool.origin === origin;
+      if (!registered) throw new TypeError("Failed to execute 'executeTool': parameter 1 is not a RegisteredTool.");
+      if (!names.includes(tool.name)) throw new Error("No tool named " + tool.name + ".");
+      if (++count > 128) throw new Error("Page exceeded 128 tool executions.");
+      executed[executed.length] = [tool.name, parse(stringify(input) ?? "null")];
+      return "ok";
+    },
+  };
+  page.document = { modelContext };
+};
+const { origin, tools, pages } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+for (const [page, expressions] of pages.entries()) {
+  const context = vm.createContext(
     { __tools: JSON.stringify(tools), __origin: origin },
     { codeGeneration: { strings: false, wasm: false }, microtaskMode: "afterEvaluate" },
   );
-  const run = (source: string) => NodeVM.runInContext(source, context, { timeout: 250 });
-  run(`((tools, origin) => {
-    delete globalThis.__tools; delete globalThis.__origin;
-    const executed = [], stringify = JSON.stringify, names = tools.map(t => t.name);
-    Object.defineProperty(globalThis, '__executed', { value: () => stringify(executed) });
-    globalThis.window = globalThis.self = globalThis;
-    globalThis.location = { origin, href: origin + '/' };
-    globalThis.console = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
-    // A floating call's rejection would otherwise reach the host as unhandled.
-    const handled = call => (...args) => { const result = call(...args); result.catch(() => {}); return result; };
-    const modelContext = {
-      getTools: async () => tools.map(t => ({ title: '', ...t, origin, window })).sort((a, b) => a.name < b.name ? -1 : 1),
-      executeTool: handled(async (tool, input = {}) => {
-        const registered = tool !== null && typeof tool === 'object' && typeof tool.name === 'string' && typeof tool.description === 'string' && tool.window === window && tool.origin === origin;
-        if (!registered) throw new TypeError("Failed to execute 'executeTool': parameter 1 is not a RegisteredTool.");
-        if (!names.includes(tool.name)) throw new Error('No tool named ' + tool.name + '.');
-        executed.push([tool.name, typeof input === 'string' ? input : stringify(input) ?? 'null']);
-        return 'ok';
-      }),
-    };
-    globalThis.document = { modelContext };
-  })(JSON.parse(__tools), __origin);`);
-  try {
-    // CDP awaits the result, so its rejection is handled; the sandbox must not leak it to the host.
-    context.__result = run(expression);
-    run("if (__result instanceof Promise) __result.catch(() => {}); delete globalThis.__result;");
-  } catch {
-    // A page error still keeps the executions that ran before it.
+  const run = (source) => vm.runInContext(source, context, { timeout: 250 });
+  run("(" + setup + ")(JSON.parse(__tools), __origin)");
+  for (const expression of expressions) {
+    try {
+      run(expression);
+    } catch {
+      // A page error still keeps the executions that ran before it.
+    }
+    for (const [tool, input] of JSON.parse(run("__take()")))
+      process.stdout.write(JSON.stringify([page, tool, input]) + "\n");
   }
-  const executed = Option.getOrElse(decodeWebMcpExecuted(run("__executed()")), () => []);
-  return executed.map(([tool, input]) => ({
-    tool,
-    input: Option.getOrElse(decodeJson(input), () => input),
-  }));
+}`;
+
+/**
+ * Replays each page's `preview_evaluate` expressions in order and returns, per page, the tools
+ * they executed. Pages run in a child process, so a rejection the page never handles ends there.
+ */
+export const executeWebMcp = (
+  pages: ReadonlyArray<ReadonlyArray<string>>,
+  origin: string,
+  tools: ReadonlyArray<{ readonly name: string }>,
+) => {
+  const executed = pages.map(() => Array<{ readonly tool: string; readonly input: unknown }>());
+  if (pages.length === 0) return executed;
+  const child = NodeChildProcess.spawnSync(
+    process.execPath,
+    ["--unhandled-rejections=none", "-e", WEBMCP_PAGES],
+    {
+      input: JSON.stringify({ origin, tools, pages }),
+      encoding: "utf8",
+      env: {},
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    },
+  );
+  // A hung or oversized page keeps what it printed; a child that never started is a harness fault.
+  const code = (child.error as NodeJS.ErrnoException | undefined)?.code;
+  if (child.error !== undefined && code !== "ETIMEDOUT" && code !== "ENOBUFS") throw child.error;
+  for (const line of (child.stdout ?? "").split("\n")) {
+    const decoded = decodeWebMcpExecuted(line);
+    if (Option.isSome(decoded)) {
+      const [page, tool, input] = decoded.value;
+      executed[page]?.push({ tool, input });
+    }
+  }
+  return executed;
 };
 
 const gradeWebMcp = (expect: McpToolUseCase["expect"]["webmcp"], run: SampleRun) => {
   if (expect === undefined) return [];
-  const executed = run.calls.flatMap(({ tool, input }) =>
-    tool === "preview_evaluate" && isRecord(input) && typeof input.expression === "string"
-      ? executeWebMcp(input.expression, expect.origin, expect.tools).map((at) => ({
-          ...at,
-          tabId: input.tabId,
-        }))
-      : [],
+  // Expressions on one tab share its page, as in the browser; other tabs never see it.
+  const pages = new Map<unknown, Array<string>>();
+  for (const { tool, input } of run.calls)
+    if (tool === "preview_evaluate" && isRecord(input) && typeof input.expression === "string")
+      pages.set(input.tabId, [...(pages.get(input.tabId) ?? []), input.expression]);
+  const tabs = [...pages.keys()];
+  const executed = executeWebMcp([...pages.values()], expect.origin, expect.tools).flatMap(
+    (page, at) => page.map((execution) => ({ ...execution, tabId: tabs[at] })),
   );
   return [
     ...(expect.calls ?? []).map(({ tool, input = {} }) => ({
