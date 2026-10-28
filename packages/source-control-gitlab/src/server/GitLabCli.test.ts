@@ -207,6 +207,45 @@ layer("GitLabCli.layer", (it) => {
     }),
   );
 
+  it.effect("looks up repositories on the only signed-in host when glab has no default host", () =>
+    Effect.gen(function* () {
+      mockedRun.mockImplementation((input) => {
+        const args = input.args.join(" ");
+        if (args === "config get host") return Effect.succeed(processOutput(""));
+        if (args.startsWith("auth status")) {
+          return Effect.succeed({
+            ...processOutput(""),
+            stderr: `gitlab.selfhosted.test
+  ✓ Logged in to gitlab.selfhosted.test as selfhosted-user
+  ✓ Token found: ******
+`,
+          });
+        }
+        if (input.args[0] === "api" && input.args.includes("projects/team%2Fapp")) {
+          return Effect.succeed(
+            processOutput(
+              JSON.stringify({
+                path_with_namespace: "team/app",
+                web_url: "https://gitlab.selfhosted.test/team/app",
+                http_url_to_repo: "https://gitlab.selfhosted.test/team/app.git",
+                ssh_url_to_repo: "git@gitlab.selfhosted.test:team/app.git",
+              }),
+            ),
+          );
+        }
+        return Effect.die(`unexpected glab ${args}`);
+      });
+
+      const glab = yield* GitLabCli.GitLabCli;
+      yield* glab.getRepositoryCloneUrls({ cwd: "/server", repository: "team/app" });
+
+      const apiArgs = mockedRun.mock.calls
+        .map(([input]) => input.args)
+        .find((args) => args[0] === "api");
+      expect(apiArgs?.join(" ")).toContain("--hostname gitlab.selfhosted.test");
+    }),
+  );
+
   it.effect("preserves rate-limit failures as a distinct error", () =>
     Effect.gen(function* () {
       const cause = new VcsProcessExitError({
