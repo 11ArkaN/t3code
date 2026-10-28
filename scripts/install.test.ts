@@ -180,6 +180,12 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
       expect(foreign.output).toContain("another t3 is already at");
       expect(await NodeFSP.readFile(shim, "utf8")).toBe(desktopShim);
 
+      const climbing = `@echo off\r\n"${NodePath.join(home, "runtime", "versions")}\\..\\other\\t3.exe" %*`;
+      await NodeFSP.writeFile(shim, climbing, "utf8");
+      const outside = await installOver({ script: "install.ps1", home, binDir });
+      expect(outside.code).not.toBe(0);
+      expect(await NodeFSP.readFile(shim, "utf8")).toBe(climbing);
+
       const older = NodePath.join(home, "runtime", "versions", "1.0.0", "t3.exe");
       await NodeFSP.writeFile(shim, `@echo off\r\n"${older}" %*`, "utf8");
       const upgrade = await installOver({ script: "install.ps1", home, binDir });

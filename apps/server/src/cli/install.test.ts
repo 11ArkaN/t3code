@@ -234,7 +234,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it("reads the terminal's foreground group from /proc and ps", () =>
+  it.effect("reads the terminal's foreground group from /proc and ps", () =>
     Effect.sync(() => {
       // The command name can hold spaces and parentheses.
       const stat = (pgrp: number, tpgid: number) =>
@@ -247,5 +247,6 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       assert.isFalse(isForegroundPs(" 4300  4242\n"));
       assert.isFalse(isForegroundPs("   -1  4242\n"));
       assert.isFalse(isForegroundPs(""));
-    }));
+    }),
+  );
 });

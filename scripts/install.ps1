@@ -223,7 +223,9 @@ if (Test-Path -LiteralPath $shim) {
   foreach ($line in [System.IO.File]::ReadAllLines($shim, [System.Text.Encoding]::UTF8)) {
     if ($line -match '^"([^"]+)"') { $existingTarget = $Matches[1]; break }
   }
-  $ownedPrefix = $versionsDir.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  # Full paths, so a target like versions\..\other cannot pass as ours.
+  $ownedPrefix = [System.IO.Path]::GetFullPath($versionsDir).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  if ($existingTarget) { $existingTarget = [System.IO.Path]::GetFullPath($existingTarget) }
   if (-not $existingTarget.StartsWith($ownedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
     Fail "another t3 is already at $shim. Remove it and run this again, or run $(Join-Path $targetDir 't3.exe') directly."
   }

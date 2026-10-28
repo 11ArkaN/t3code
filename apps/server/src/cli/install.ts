@@ -68,6 +68,9 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
 
   // Resolve fully so a link through a symlinked T3 home still counts as ours; a dangling one
   // (a pruned version) falls back to its own text.
+  const realVersionsDir = yield* fs
+    .realPath(versionsDir)
+    .pipe(Effect.orElseSucceed(() => versionsDir));
   const current = windows
     ? yield* fs.readFileString(link).pipe(Effect.map(windowsShimTarget), Effect.option)
     : yield* fs.readLink(link).pipe(
@@ -82,7 +85,8 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
     !(
       Option.isSome(current) &&
       current.value !== undefined &&
-      launcherOwnsVersionsDir(path, versionsDir, current.value)
+      (launcherOwnsVersionsDir(path, versionsDir, current.value) ||
+        launcherOwnsVersionsDir(path, realVersionsDir, current.value))
     )
   ) {
     return yield* new CliInstallError({

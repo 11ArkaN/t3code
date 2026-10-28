@@ -97,7 +97,7 @@ export const renderCliShim = (input: {
     "work=$(mktemp -d) || exit 1",
     '"$app" --appimage-mount >"$work/mount" 2>/dev/null &',
     "mounter=$!",
-    `trap 'kill "$mounter" 2>/dev/null; rm -rf "$work"' EXIT`,
+    `trap 'kill "$mounter" 2>/dev/null; wait "$mounter" 2>/dev/null; rm -rf "$work"' EXIT`,
     "trap 'exit 130' INT TERM",
     "mount=",
     'while kill -0 "$mounter" 2>/dev/null; do',
