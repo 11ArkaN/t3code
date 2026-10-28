@@ -140,6 +140,19 @@ describe("stripUnservedToolOutputImageBytes", () => {
     expect(toolOutputImages(output)).toEqual([]);
   });
 
+  it("lists no image of a previewed Read past the served limit either", () => {
+    const image = {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: PNG_BASE64 },
+    };
+    const item = {
+      ...toolItem(Array.from({ length: MAX_TOOL_OUTPUT_IMAGES + 2 }, () => ({ ...image }))),
+      viewedImagePath: "/tmp/shot.png",
+    };
+
+    expect(outputOf(stripUnservedToolOutputImageBytes(item))).toEqual([]);
+  });
+
   it("strips only the images past the last one an asset can serve", () => {
     const images = Array.from({ length: MAX_TOOL_OUTPUT_IMAGES + 2 }, () => ({
       type: "image",

@@ -68,13 +68,7 @@ function unlistedImage(record: UnknownRecord): UnknownRecord {
 
 /** Removed from their array outright, so work-log text does not show an `[image]` placeholder. */
 function isPreviewedImage(context: StripContext, value: unknown): boolean {
-  return (
-    context.previewedByPath &&
-    typeof value === "object" &&
-    value !== null &&
-    (value as UnknownRecord).type === "image" &&
-    isListed(context, value as UnknownRecord)
-  );
+  return context.previewedByPath && readToolOutputImage(value) !== null;
 }
 
 function strip(
@@ -98,10 +92,8 @@ function strip(
     return next ?? value;
   }
   const record = value as UnknownRecord;
-  if (record.type === "image" && isListed(context, record)) {
-    if (context.previewedByPath) return unlistedImage(record);
-    if (isServed(record)) return record;
-  }
+  if (isPreviewedImage(context, record)) return unlistedImage(record);
+  if (record.type === "image" && isListed(context, record) && isServed(record)) return record;
   const imageBody = isImageBody(record, key);
   let next: UnknownRecord | undefined;
   let removedBody: string | undefined;
