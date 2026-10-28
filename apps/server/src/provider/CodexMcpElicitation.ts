@@ -203,8 +203,9 @@ export function toMcpElicitationResponse(
     const chosenOption = options.find((option) =>
       persist
         ? mcpElicitationPersistenceDecision(option.value) === decision
-        : /^(?:once|accept|approve|allow)(?:[_\s-]*once)?$/i.test(option.value.trim()) &&
-          mcpElicitationPersistenceDecision(option.value) === null,
+        : /^(?:once|accept|approve|allow)(?:[_\s-]*(?:once|this[_\s-]*time))?$/i.test(
+            option.value.trim(),
+          ) && mcpElicitationPersistenceDecision(option.value) === null,
     );
     if (chosenOption) {
       content[key] = chosenOption.value;

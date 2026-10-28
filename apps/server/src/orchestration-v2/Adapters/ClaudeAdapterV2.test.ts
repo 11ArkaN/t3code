@@ -1038,7 +1038,13 @@ describe("ClaudeAdapterV2 MCP elicitation acceptance", () => {
   });
 
   it("picks the one-time choice however the server spells it", () => {
-    for (const choice of ["allow_once", "Allow", "accept_once", "Approve once"]) {
+    for (const choice of [
+      "allow_once",
+      "Allow",
+      "accept_once",
+      "Approve once",
+      "allow_this_time",
+    ]) {
       assert.deepEqual(
         ClaudeAdapterV2.claudeMcpElicitationAcceptance(
           form({ decision: { type: "string", enum: ["disallow", choice, "always"] } }, [
