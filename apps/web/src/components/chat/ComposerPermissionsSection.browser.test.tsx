@@ -1,7 +1,7 @@
 import type { RuntimeMode } from "@t3tools/contracts";
 import { type ReactNode, useRef, useState } from "react";
 import { expect, it, vi } from "vite-plus/test";
-import { page, userEvent } from "vite-plus/test/browser";
+import { cdp, page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
 import { ComposerHandleContext, type ComposerHandleRef } from "../../composerHandleContext";
@@ -103,6 +103,41 @@ it("returns focus to the editor after a pick", async () => {
   await userEvent.keyboard("{ArrowDown}{ArrowDown}{Enter}");
   await expect.element(screen.getByRole("status")).toHaveTextContent("approval-required");
   await vi.waitFor(() => expect(handle.focusAtEnd).toHaveBeenCalled());
+});
+
+// A tablet: Chromium's touch emulation makes (pointer: coarse) and (hover: none) match.
+async function emulateTouchPrimaryDevice(): Promise<AsyncDisposable> {
+  await cdp().send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  return {
+    [Symbol.asyncDispose]: async () => {
+      await cdp().send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    },
+  };
+}
+
+it("leaves focus off the editor after a pick on a touch-primary device", async () => {
+  await using _touch = await emulateTouchPrimaryDevice();
+  expect(window.matchMedia("(pointer: coarse) and (hover: none)").matches).toBe(true);
+  const ref = {
+    current: { focusAtEnd: () => document.getElementById("composer-editor")?.focus() },
+  } as unknown as ComposerHandleRef;
+  await using screen = await render(
+    <ComposerHandleContext value={ref}>
+      <div id="composer-editor" contentEditable />
+      <EffortMenu />
+    </ComposerHandleContext>,
+    { router: false }, // no routes involved
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Effort" }));
+  const supervised = page.getByRole("menuitemradio", { name: "Supervised" });
+  await userEvent.click(supervised);
+  await expect.element(screen.getByRole("status")).toHaveTextContent("approval-required");
+  // The menu restores focus as it unmounts, so once it is gone focus has settled.
+  await expect.element(supervised).not.toBeInTheDocument();
+  // On a phone or tablet a focused editor raises the on-screen keyboard.
+  expect(document.activeElement?.id, "closing a touch menu focused the composer editor").not.toBe(
+    "composer-editor",
+  );
 });
 
 it("opens on the checked permission when composer.mode marked the trigger", async () => {
