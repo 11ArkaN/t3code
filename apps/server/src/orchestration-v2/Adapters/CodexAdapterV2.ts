@@ -117,6 +117,7 @@ import {
 } from "../../provider/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
+import { codexAuthPath, openCodexAuthRefresh } from "../../provider/CodexAuthRefresh.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -1664,13 +1665,18 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     }),
                 ),
               );
+        const settings = resolvedRuntime?.config ?? adapterOptions.settings;
+        const environment = resolvedRuntime?.environment ?? adapterOptions.environment;
+        const authRefresh = yield* openCodexAuthRefresh(
+          codexAuthPath(settings.homePath, environment),
+        ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
         const client = yield* clientFactory.open({
           instanceId: adapterOptions.instanceId,
           threadId: input.threadId,
           providerSessionId: input.providerSessionId,
           runtimePolicy: input.runtimePolicy,
-          settings: resolvedRuntime?.config ?? adapterOptions.settings,
-          environment: resolvedRuntime?.environment ?? adapterOptions.environment,
+          settings,
+          environment,
         });
         const additionalContextByThread = yield* Ref.make(
           new Map<
@@ -1740,6 +1746,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             yield* client.notify("initialized", undefined);
             yield* Ref.set(initialized, true);
           }),
+        );
+        yield* authRefresh.start(
+          ensureInitialized.pipe(
+            Effect.andThen(client.request("account/read", { refreshToken: true })),
+          ),
         );
         const now = yield* DateTime.now;
         const session = providerSession({

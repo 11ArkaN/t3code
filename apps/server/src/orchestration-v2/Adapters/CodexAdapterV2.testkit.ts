@@ -4,6 +4,7 @@ import * as CodexClient from "effect-codex-app-server/client";
 import type * as CodexError from "effect-codex-app-server/errors";
 import * as CodexReplay from "effect-codex-app-server/replay";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Predicate from "effect/Predicate";
@@ -176,13 +177,20 @@ export function layer(input: {
     makeReplayServerConfig(input.transcript.scenario).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));
   const layerRegistry = ProviderAdapterRegistry.layerFromAdaptersEffect(
-    CodexAdapterV2.createCodexAdapterV2({
-      instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
-      displayName: undefined,
-      environment: [],
-      enabled: true,
-      config: DEFAULT_CODEX_SETTINGS,
-    }).pipe(Effect.map((adapter) => [adapter])),
+    Effect.gen(function* () {
+      // Keeps replay sessions away from the developer's real ~/.codex/auth.json.
+      const codexHome = yield* (yield* FileSystem.FileSystem)
+        .makeTempDirectoryScoped()
+        .pipe(Effect.orDie);
+      const adapter = yield* CodexAdapterV2.createCodexAdapterV2({
+        instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+        displayName: undefined,
+        environment: [{ name: "CODEX_HOME", value: codexHome, sensitive: false }],
+        enabled: true,
+        config: DEFAULT_CODEX_SETTINGS,
+      });
+      return [adapter];
+    }),
   ).pipe(
     Layer.provide(
       Layer.mergeAll(
