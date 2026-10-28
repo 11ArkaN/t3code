@@ -675,6 +675,14 @@ describe("resolveShortcutCommand", () => {
       ),
       "preview.zoomIn",
     );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "+", code: "Digit1", ctrlKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "Linux", context: { isDesktop: true } },
+      ),
+      "thread.jump.1",
+    );
   });
 
   it("does not let a punctuation position shadow a Latin layout key", () => {

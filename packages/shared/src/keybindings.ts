@@ -92,8 +92,8 @@ export function shortcutKeyFromEvent(
 ): string {
   const layoutKey = normalizeEventKey(event.key);
   if (/^[a-z]$/.test(layoutKey)) return layoutKey;
-  // An unshifted "+" is a dedicated zoom key (German, Spanish, Nordic), not its physical position.
-  if (layoutKey === "+" && !event.shiftKey) return layoutKey;
+  // An unshifted "+" is a dedicated zoom key (German, Spanish, Nordic); Czech types it on Digit1.
+  if (layoutKey === "+" && !event.shiftKey && !event.code?.startsWith("Digit")) return layoutKey;
   const physicalKey = event.code ? EVENT_CODE_SHORTCUT_KEYS[event.code] : undefined;
   return physicalKey ?? layoutKey;
 }
