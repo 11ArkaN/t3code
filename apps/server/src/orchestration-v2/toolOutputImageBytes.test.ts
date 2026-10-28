@@ -121,6 +121,23 @@ describe("stripUnservedToolOutputImageBytes", () => {
     ]);
   });
 
+  // regression: #26591 a subagent's Read keeps its image bytes
+  it("strips a Read's content-array image because its preview uses viewedImagePath", () => {
+    const item: OrchestrationV2TurnItem = {
+      ...toolItem({
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG_BASE64 } },
+        ],
+      }),
+      viewedImagePath: "/tmp/shot.png",
+    };
+
+    const output = outputOf(stripUnservedToolOutputImageBytes(item));
+
+    expect(JSON.stringify(output)).not.toContain(PNG_BASE64);
+    expect(toolOutputImages(output)).toEqual([]);
+  });
+
   it("strips only the images past the last one an asset can serve", () => {
     const images = Array.from({ length: MAX_TOOL_OUTPUT_IMAGES + 2 }, () => ({
       type: "image",
