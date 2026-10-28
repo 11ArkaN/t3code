@@ -42,6 +42,8 @@ import type {
   EnvironmentId,
   MessageId,
   ProviderInteractionMode,
+  ProviderOptionSelection,
+  RuntimeMode,
   RuntimeRequestId,
   ScopedThreadRef,
   ServerConfig as T3ServerConfig,
@@ -286,6 +288,8 @@ export interface ThreadDetailScreenProps {
   readonly onReconnectEnvironment: () => void;
   readonly canSwitchThreadProvider: boolean;
   readonly onUpdateThreadInteractionMode?: (interactionMode: ProviderInteractionMode) => void;
+  readonly onUpdateThreadModelOptions: (options: ReadonlyArray<ProviderOptionSelection>) => void;
+  readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
   readonly onRespondToApproval: ApprovalResponder;
   readonly onSelectUserInputOption: (
     requestId: RuntimeRequestId,
@@ -1638,6 +1642,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                         onShowUsageLimits={showUsageLimits}
                         canSwitchProvider={props.canSwitchThreadProvider}
                         onUpdateInteractionMode={props.onUpdateThreadInteractionMode}
+                        onUpdateModelOptions={props.onUpdateThreadModelOptions}
+                        onUpdateRuntimeMode={props.onUpdateThreadRuntimeMode}
                         onHeightChange={handleComposerHeightChange}
                         onEditorFocusChange={handleOwnedInputFocusChange}
                       />

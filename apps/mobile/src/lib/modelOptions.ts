@@ -14,6 +14,7 @@ import type {
 import { isProviderDriverKind, resolveProjectProviderInstanceEnabled } from "@t3tools/contracts";
 import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
+  formatModelSlugName,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
 import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
@@ -414,6 +415,15 @@ export function buildModelOptions(
   }
 
   return [...options.values()];
+}
+
+/** The model name a composer chip shows. Without a catalog name (offline, still loading) it reads the slug. */
+export function composerModelName(option: ModelOption | null, selection: ModelSelection): string {
+  if (option?.shortName) return option.shortName;
+  if (option && option.label !== selection.model) return option.label;
+  const name = formatModelSlugName(selection.model);
+  const driver = option?.providerDriver;
+  return resolveModelShortName({ name }, isProviderDriverKind(driver) ? driver : null) ?? name;
 }
 
 export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyArray<ProviderGroup> {

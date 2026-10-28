@@ -5,7 +5,11 @@ import {
 import type { ProviderOptionDescriptor } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { selectableChoices } from "./thread-settings-options";
+import {
+  resolveComposerControlsPresentation,
+  resolveTraitPick,
+  selectableChoices,
+} from "./thread-settings-options";
 
 const effortDescriptor: Extract<ProviderOptionDescriptor, { type: "select" }> = {
   id: "effort",
@@ -85,5 +89,90 @@ describe("prompt-controlled reasoning", () => {
         "ultrathink",
       ),
     ).toEqual({ prompt: "/review" });
+  });
+});
+
+describe("resolveTraitPick", () => {
+  const fastDescriptor: ProviderOptionDescriptor = {
+    id: "fastMode",
+    label: "Fast mode",
+    type: "boolean",
+    currentValue: false,
+  };
+  const descriptors = [effortDescriptor, fastDescriptor];
+
+  it("writes options for a regular pick and only the prompt for Ultrathink", () => {
+    expect(resolveTraitPick({ descriptors, prompt: "fix it", id: "effort", value: "low" })).toEqual(
+      {
+        prompt: "fix it",
+        options: [
+          { id: "effort", value: "low" },
+          { id: "fastMode", value: false },
+        ],
+      },
+    );
+    expect(
+      resolveTraitPick({ descriptors, prompt: "fix it", id: "effort", value: "ultrathink" }),
+    ).toEqual({ prompt: "Ultrathink:\nfix it", options: null });
+    expect(
+      resolveTraitPick({ descriptors, prompt: "fix it", id: "fastMode", value: true })?.options,
+    ).toContainEqual({ id: "fastMode", value: true });
+  });
+
+  it("ignores picks the descriptor cannot take", () => {
+    const pick = (id: string, value: string | boolean, prompt = "fix it") =>
+      resolveTraitPick({ descriptors, prompt, id, value });
+    expect(pick("effort", true)).toBeNull();
+    expect(pick("missing", "low")).toBeNull();
+    expect(pick("effort", "low", "please ultrathink about this")).toBeNull();
+  });
+});
+
+describe("resolveComposerControlsPresentation", () => {
+  const phone = {
+    width: 360,
+    fontScale: 1,
+    modelName: "Opus 5.5",
+    traitsLabel: "High",
+    runtimeMode: "full-access",
+    defaultRuntimeMode: "full-access",
+  } as const;
+
+  it("folds effort into the model chip on a phone and splits it out on wide screens", () => {
+    expect(resolveComposerControlsPresentation(phone)).toEqual({
+      wraps: false,
+      modelLabel: "Opus 5.5 · High",
+      showsTraits: false,
+      showsMode: false,
+    });
+    expect(resolveComposerControlsPresentation({ ...phone, width: 700 })).toEqual({
+      wraps: false,
+      modelLabel: "Opus 5.5",
+      showsTraits: true,
+      showsMode: true,
+    });
+    expect(resolveComposerControlsPresentation({ ...phone, traitsLabel: "" }).modelLabel).toBe(
+      "Opus 5.5",
+    );
+  });
+
+  it("shows Mode on a phone only when it differs from the default", () => {
+    expect(
+      resolveComposerControlsPresentation({ ...phone, runtimeMode: "approval-required" }).showsMode,
+    ).toBe(true);
+    expect(
+      resolveComposerControlsPresentation({
+        ...phone,
+        runtimeMode: "approval-required",
+        defaultRuntimeMode: "approval-required",
+      }).showsMode,
+    ).toBe(false);
+  });
+
+  it("wraps at accessibility text sizes and keeps the whole model name", () => {
+    expect(resolveComposerControlsPresentation({ ...phone, fontScale: 3.5 })).toMatchObject({
+      wraps: true,
+      modelLabel: "Opus 5.5",
+    });
   });
 });

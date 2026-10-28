@@ -12,6 +12,7 @@ import {
 
 import {
   buildModelOptions,
+  composerModelName,
   describeUnavailableModelSelection,
   groupByProvider,
   isModelSelectionUnavailable,
@@ -707,6 +708,47 @@ describe("mobile model options", () => {
         resolveSelectableModelSelection({ ...config, providers: [] }, selection, projectId),
       ).toBeNull();
     });
+  });
+});
+
+describe("composerModelName", () => {
+  const provider = (driver: string, models: ReadonlyArray<readonly [string, string]>) => ({
+    instanceId: driver,
+    driver,
+    enabled: true,
+    installed: true,
+    auth: { status: "authenticated" },
+    models: models.map(([slug, name]) => ({ slug, name, isCustom: false, capabilities: null })),
+  });
+  const config = {
+    providers: [
+      provider("claudeAgent", [["claude-opus-5-5", "Claude Opus 5.5"]]),
+      provider("codex", [
+        ["gpt-6.1", "GPT-6.1"],
+        ["gpt-6.1-sol", "GPT-6.1-Sol"],
+      ]),
+      provider("cursor", [["composer-2", "Composer 2"]]),
+    ],
+  } as unknown as ServerConfig;
+  const nameFor = (instanceId: string, model: string, serverConfig: ServerConfig | null) => {
+    const selection = { instanceId: ProviderInstanceId.make(instanceId), model };
+    const option = buildModelOptions(serverConfig, selection, undefined, null).find(
+      (candidate) => candidate.selection.model === model,
+    );
+    return composerModelName(option ?? null, selection);
+  };
+
+  it("drops the family a provider icon already shows, and nothing a bare name needs", () => {
+    expect(nameFor("claudeAgent", "claude-opus-5-5", config)).toBe("Opus 5.5");
+    expect(nameFor("codex", "gpt-6.1", config)).toBe("GPT-6.1");
+    expect(nameFor("codex", "gpt-6.1-sol", config)).toBe("6.1 Sol");
+    expect(nameFor("cursor", "composer-2", config)).toBe("Composer 2");
+  });
+
+  it("reads the slug, not the raw id, while the catalog has not loaded", () => {
+    expect(nameFor("claudeAgent", "claude-opus-5-5", null)).toBe("Opus 5.5");
+    expect(nameFor("codex", "gpt-6.1-sol", null)).toBe("6.1 Sol");
+    expect(nameFor("my_gateway", "my-model", null)).toBe("my-model");
   });
 });
 

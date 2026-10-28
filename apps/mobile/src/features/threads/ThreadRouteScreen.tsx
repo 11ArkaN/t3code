@@ -1016,6 +1016,8 @@ function ThreadRouteContent(
           onReconnectEnvironment={handleReconnectEnvironment}
           canSwitchThreadProvider={composer.canSwitchThreadProvider}
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
+          onUpdateThreadModelOptions={composer.onUpdateModelOptions}
+          onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
           onRespondToApproval={requests.onRespondToApproval}
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}

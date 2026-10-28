@@ -23,6 +23,8 @@ import {
   type EnvironmentId,
   type ModelSelection,
   type ProviderInteractionMode,
+  type ProviderOptionSelection,
+  type RuntimeMode,
   type ServerProvider,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -43,6 +45,7 @@ import {
   isModelSelectionUnavailable,
 } from "../lib/modelOptions";
 import { resolveProviderInteractionMode } from "./legacy-plan-mode";
+import { rememberModelOptions } from "./use-model-option-memory";
 
 import type { DraftComposerImageAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
@@ -720,6 +723,20 @@ export function useThreadComposerState() {
     });
   };
 
+  // The same writes the thread settings sheet makes.
+  const onUpdateModelOptions = (options: ReadonlyArray<ProviderOptionSelection>) => {
+    if (!selectedThreadKey || !modelSelection) return;
+    rememberModelOptions(modelSelection.instanceId, modelSelection.model, options);
+    updateThreadDraftModelSelection(
+      selectedThreadKey,
+      { ...modelSelection, options },
+      serverConfig?.providers ?? [],
+    );
+  };
+  const onUpdateRuntimeMode = (value: RuntimeMode) => {
+    if (selectedThreadKey) updateComposerDraftSettings(selectedThreadKey, { runtimeMode: value });
+  };
+
   return {
     feedbackSubmissions,
     dismissFeedback,
@@ -755,5 +772,7 @@ export function useThreadComposerState() {
     onRemoveDraftImage,
     onSendMessage,
     onUpdateInteractionMode,
+    onUpdateModelOptions,
+    onUpdateRuntimeMode,
   };
 }

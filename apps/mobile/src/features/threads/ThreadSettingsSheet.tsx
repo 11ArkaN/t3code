@@ -1,7 +1,4 @@
-import {
-  getPromptControlledTraits,
-  getTraitSelectChange,
-} from "@t3tools/client-runtime/model-traits";
+import { getPromptControlledTraits } from "@t3tools/client-runtime/model-traits";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { Toolbar } from "../../components/ui/Toolbar";
 import * as Dialog from "../../components/ui/Dialog";
@@ -66,7 +63,6 @@ import {
   type ModelOption,
   type ProviderGroup,
 } from "../../lib/modelOptions";
-import { applyProviderOptionSelection } from "../../lib/providerOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import {
@@ -109,6 +105,7 @@ import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-
 import { ModelRow, ChoiceRow } from "./ThreadSettingsRows";
 import {
   compatibleRuntimeModeForChoices,
+  resolveTraitPick,
   runtimeModeChoicesForSupportedModes,
   selectableChoices,
 } from "./thread-settings-options";
@@ -535,31 +532,21 @@ function ThreadSettingsSessionProvider(
   };
 
   const applyOptionChange = (id: string, value: string | boolean) => {
-    const descriptor = displayedDescriptors.find((entry) => entry.id === id);
-    const change =
-      descriptor?.type === "select" && typeof value === "string"
-        ? getTraitSelectChange(
-            { ...promptTraits, descriptors: displayedDescriptors },
-            descriptor,
-            displayedPrompt,
-            value,
-          )
-        : null;
-    if (descriptor?.type === "select") {
-      if (!change) return;
-      if (change.prompt !== displayedPrompt) {
-        if (pendingModel) {
-          setPendingPrompt(change.prompt);
-        } else {
-          props.onPromptChange(change.prompt);
-        }
+    const pick = resolveTraitPick({
+      descriptors: displayedDescriptors,
+      prompt: displayedPrompt,
+      id,
+      value,
+    });
+    if (!pick) return;
+    if (pick.prompt !== displayedPrompt) {
+      if (pendingModel) {
+        setPendingPrompt(pick.prompt);
+      } else {
+        props.onPromptChange(pick.prompt);
       }
-      if (!("modelOptions" in change)) return;
     }
-    const next =
-      change && "modelOptions" in change
-        ? (change.modelOptions ?? [])
-        : applyProviderOptionSelection(displayedDescriptors, { id, value });
+    const next = pick.options;
     if (!next) {
       return;
     }
