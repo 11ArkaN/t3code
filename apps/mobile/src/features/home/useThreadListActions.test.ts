@@ -482,6 +482,23 @@ describe("thread actions while another action is pending", () => {
     expect(state.requests.map(({ action }) => action)).toEqual(["settle", "unsettle"]);
     expect(results).toEqual([true, true]);
   });
+
+  it("settles again after un-settling while the first settle is still pending", async () => {
+    const actions = useThreadListActions();
+    const thread = makeThread();
+    const settleResponse = Promise.withResolvers<void>();
+    state.heldActions.set("settle", settleResponse.promise);
+
+    const pending = [
+      actions.settleThread(thread),
+      actions.unsettleThread(thread),
+      actions.settleThread(thread),
+    ];
+    settleResponse.resolve();
+
+    expect(await Promise.all(pending)).toEqual([true, true, true]);
+    expect(state.requests.map(({ action }) => action)).toEqual(["settle", "unsettle", "settle"]);
+  });
 });
 
 describe("thread archive guard", () => {

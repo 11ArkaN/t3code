@@ -90,7 +90,7 @@ function useThreadActionExecutor(
   const deleteMutation = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const settleMutation = useAtomCommand(threadEnvironment.settle, { reportFailure: false });
   const unsettleMutation = useAtomCommand(threadEnvironment.unsettle, { reportFailure: false });
-  const inFlightActionKeys = useRef(new Set<string>());
+  const latestPendingActions = useRef(new Map<string, { readonly action: ThreadListAction }>());
 
   const executeAction = async (
     action: ThreadListAction,
@@ -99,13 +99,13 @@ function useThreadActionExecutor(
   ) => {
     if (!checkThreadOperationPermission(thread, actionFailureTitle(action))) return false;
     const key = scopedThreadKey(thread.environmentId, thread.id);
-    // Only a repeat of the pending action is dropped; other actions queue behind it per thread.
-    const actionKey = JSON.stringify([action, key]);
-    if (inFlightActionKeys.current.has(actionKey)) {
+    // Only a repeat of the latest pending action is dropped; others queue behind it per thread.
+    if (latestPendingActions.current.get(key)?.action === action) {
       return false;
     }
 
-    inFlightActionKeys.current.add(actionKey);
+    const pending = { action };
+    latestPendingActions.current.set(key, pending);
     selectionHaptic();
     const succeeded = await (async () => {
       if (
@@ -164,7 +164,7 @@ function useThreadActionExecutor(
       onCompleted?.(action, thread);
       return true;
     })();
-    inFlightActionKeys.current.delete(actionKey);
+    if (latestPendingActions.current.get(key) === pending) latestPendingActions.current.delete(key);
     return succeeded;
   };
 
