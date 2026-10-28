@@ -1446,6 +1446,11 @@ export const executeWebMcp = (
   // A hung or oversized page keeps what it printed; a child that never started is a harness fault.
   const code = (child.error as NodeJS.ErrnoException | undefined)?.code;
   if (child.error !== undefined && code !== "ETIMEDOUT" && code !== "ENOBUFS") throw child.error;
+  if (child.error === undefined && (child.status !== 0 || child.signal !== null)) {
+    throw new Error(
+      `WebMCP replay terminated with status ${child.status} and signal ${child.signal}.`,
+    );
+  }
   for (const line of (child.stdout ?? "").split("\n")) {
     const decoded = decodeWebMcpExecuted(line);
     if (Option.isSome(decoded)) {

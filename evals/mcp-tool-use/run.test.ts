@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { assert, expect, it } from "@effect/vitest";
+import { vi } from "vite-plus/test";
 import { ComposerContextId, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { projectComposerContextForProvider } from "@t3tools/shared/composerContextReferences";
 
@@ -31,6 +32,8 @@ import {
 } from "./run.ts";
 import { briefRoute, gradeDevice, shellInvocations } from "./device-grading.ts";
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
+
+vi.mock("node:child_process", { spy: true });
 
 it("grades Codex shell and subagent calls with the shared rules", () => {
   const calls = [
@@ -290,6 +293,46 @@ it("runs WebMCP expressions without host objects", () => {
     ),
     [{ tool: "mock", input: {} }],
   );
+});
+
+it("rejects partial WebMCP results from an unexpectedly terminated replay", () => {
+  const partial = '[0,"list_notes",{}]\n';
+  using child = vi.spyOn(NodeChildProcess, "spawnSync");
+  for (const [status, signal] of [
+    [1, null],
+    [null, "SIGKILL"],
+  ] as const) {
+    child.mockReturnValue({
+      pid: 1,
+      output: [null, partial, ""],
+      stdout: partial,
+      stderr: "",
+      status,
+      signal,
+    });
+    assert.throws(
+      () =>
+        gradeSample(
+          {
+            webmcp: {
+              tabId: "tab_1",
+              origin: "https://acme.dev",
+              tools: [{ name: "list_notes", description: "List notes." }],
+              calls: [{ tool: "list_notes" }],
+              notCalls: ["delete_note"],
+            },
+          },
+          {
+            calls: [
+              { step: 0, tool: "preview_evaluate", input: { tabId: "tab_1", expression: "1" } },
+            ],
+            text: "",
+            stopReason: "end_turn",
+          },
+        ),
+      /WebMCP replay terminated/,
+    );
+  }
 });
 
 it("contains page rejections no expression handles", () => {
