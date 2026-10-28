@@ -4,12 +4,12 @@ import { Link } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
-import { APP_DISPLAY_NAME, DESKTOP_DOWNLOAD_URL, t3InstallCommand } from "~/branding";
+import { APP_DISPLAY_NAME, DESKTOP_DOWNLOAD_URL } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "../env";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useRelayEnvironmentDiscovery } from "../state/environments";
-import { CommandBlock } from "./CommandBlock";
+import { InstallT3Commands } from "./InstallT3Commands";
 import { useT3ConnectAuthPrompt } from "./clerk/useT3ConnectAuthPrompt";
 import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
 import { Button } from "./ui/button";
@@ -149,8 +149,7 @@ function RunOnComputer({ command }: { readonly command: string }) {
   return (
     <>
       <p>Run on your computer:</p>
-      <CommandBlock command={t3InstallCommand(navigator.platform)} className="mt-2" />
-      <CommandBlock command={command} className="mt-2" />
+      <InstallT3Commands command={command} className="mt-2" />
       <a
         className="mt-2 inline-block text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         href={DESKTOP_DOWNLOAD_URL}
