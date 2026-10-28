@@ -24,7 +24,8 @@ This installs the `t3` binary to `~/.local/bin`. If that folder is not on your
 `PATH` yet, the installer says so and, for zsh, bash on Linux, and fish, prints
 a command to add it. On Windows, `t3` works in the same PowerShell window right
 away; add the folder to your `PATH` for new windows. If a `t3` that the
-installer did not create is already there, it leaves that one alone and stops. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
+installer or the desktop app did not create is already there, it leaves that
+one alone and stops. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
 `T3CODE_VERSION` to pin an exact version.
 
 | Task                                             | Command                                                                 |

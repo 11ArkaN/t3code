@@ -318,6 +318,64 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
       }),
   );
 
+  it.effect.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+    "stops on SIGTERM while falling back to a download of npm's copy",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-signal-" });
+        const { packageDir } = yield* unpackLauncher(root);
+        const home = path.join(root, "home");
+        const broken = path.join(home, "runtime/versions/1.2.4/t3");
+        yield* fs.makeDirectory(path.dirname(broken), { recursive: true });
+        yield* fs.writeFileString(broken, "#!/no/such/interpreter\n");
+        yield* fs.chmod(broken, 0o755);
+        yield* fs.writeFileString(path.join(path.dirname(broken), ".install-complete"), "1.2.4\n");
+        const link = path.join(root, "bin", "t3");
+        yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+        yield* fs.symlink(broken, link);
+        yield* fs.writeFileString(path.join(home, "runtime/launchers"), `${link}\n`);
+
+        // A release server that takes the download request and never answers it.
+        const requested = Promise.withResolvers<void>();
+        const hanging = NodeHttp.createServer(() => requested.resolve());
+        yield* Effect.acquireRelease(
+          Effect.callback<void>((resume) => {
+            hanging.listen(0, "127.0.0.1", () => resume(Effect.void));
+          }),
+          () =>
+            Effect.callback<void>((resume) => {
+              hanging.closeAllConnections();
+              hanging.close(() => resume(Effect.void));
+            }),
+        );
+        const address = hanging.address();
+        if (address === null || typeof address === "string")
+          return yield* Effect.die("no TCP address");
+
+        const launcher = NodeChildProcess.spawn(
+          process.execPath,
+          [path.join(packageDir, "bin/t3.mjs"), "serve"],
+          {
+            env: {
+              PATH: process.env.PATH,
+              T3CODE_HOME: home,
+              T3CODE_RELEASE_BASE_URL: `http://127.0.0.1:${address.port}`,
+            },
+            stdio: "ignore",
+          },
+        );
+        const exit = yield* Effect.promise(async () => {
+          const exited = NodeEvents.EventEmitter.once(launcher, "exit");
+          await requested.promise;
+          launcher.kill("SIGTERM");
+          return exited;
+        });
+        assert.deepStrictEqual(exit, [null, "SIGTERM"]);
+      }),
+  );
+
   it.effect.skipIf(HostProcess.Platform.defaultValue() !== "win32")(
     "on Windows, runs the exe a recorded t3.cmd names, or npm's copy with the opt-out",
     () =>

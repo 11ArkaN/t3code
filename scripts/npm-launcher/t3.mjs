@@ -252,15 +252,22 @@ function run(executable, env, ipc, fallback) {
     child.on("message", (message) => process.connected && process.send(message));
     process.on("disconnect", () => child.connected && child.disconnect());
   }
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    process.on(signal, () => (ipc || signal !== "SIGINT") && child.kill(signal));
-  }
-  child.on("error", (error) => finish(() => (fallback ? fallback() : fail(error))));
+  const forwards = ["SIGINT", "SIGTERM", "SIGHUP"].map((signal) => {
+    const forward = () => (ipc || signal !== "SIGINT") && child.kill(signal);
+    process.on(signal, forward);
+    return () => process.off(signal, forward);
+  });
+  // Stop forwarding to the dead child, so signals stop the launcher again while npm's copy downloads.
+  const fallBack = () => {
+    for (const stop of forwards) stop();
+    fallback();
+  };
+  child.on("error", (error) => finish(() => (fallback ? fallBack() : fail(error))));
   child.on("exit", (code, signal) =>
     finish(() =>
       // 126 and 127 mean the shell could not run it; t3 never exits with them (triage maps them).
       fallback && (code === 126 || code === 127)
-        ? fallback()
+        ? fallBack()
         : process.exit(code ?? 128 + (os.constants.signals[signal] || 1)),
     ),
   );
