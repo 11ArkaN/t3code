@@ -40,6 +40,48 @@ export type FloatingWorkingStatus =
       readonly onPress: () => void;
     };
 
+/**
+ * Segments of the run status row iOS docks to the composer, in desktop's order. Scroll-to-end
+ * joins a row that is already showing: on its own it must not resize the row, or every drag
+ * at the end of the feed would move the feed.
+ */
+export function runStatusSegments(input: {
+  readonly status: FloatingWorkingStatus | null;
+  readonly hasAgents: boolean;
+  readonly queuedCount: number;
+  readonly previewCount: number;
+  readonly showScrollToEnd: boolean;
+}) {
+  const shown = {
+    status: input.status !== null,
+    agents: input.hasAgents,
+    queue: input.queuedCount > 0,
+    previews: input.previewCount > 0,
+  };
+  const segments = (["status", "agents", "queue", "previews"] as const).filter(
+    (segment) => shown[segment],
+  );
+  return segments.length > 0 && input.showScrollToEnd
+    ? [...segments, "scroll-to-end" as const]
+    : segments;
+}
+
+export type RunStatusSegment = ReturnType<typeof runStatusSegments>[number];
+
+/**
+ * The feed's end inset. The docked iOS row is already inside the measured composer block;
+ * Android's floating capsule draws above the block, so its coverage is added.
+ */
+export function feedEndInset(input: {
+  readonly docksRunStatus: boolean;
+  readonly composerBlock: number;
+  readonly runStatus: number;
+  readonly questionCard: number;
+}): number {
+  "worklet";
+  return input.composerBlock + (input.docksRunStatus ? 0 : input.runStatus) + input.questionCard;
+}
+
 export function connectionFloatingStatus(input: {
   readonly connectionError: string | null;
   readonly connectionState: EnvironmentConnectionPhase;

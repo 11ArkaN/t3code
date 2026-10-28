@@ -12,7 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
 import { memo } from "react";
-import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
 
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -87,6 +87,15 @@ function PopoverSurface(props: { readonly children: React.ReactNode; readonly st
     overflow: "hidden",
     ...props.style,
   };
+
+  // iOS opens this over the moving transcript; a see-through surface makes both unreadable.
+  if (Platform.OS === "ios") {
+    return (
+      <View className="border border-border bg-card" style={baseStyle}>
+        {props.children}
+      </View>
+    );
+  }
 
   return (
     <GlassSurface

@@ -122,7 +122,6 @@ import {
   useNativeColumnLayoutMetrics,
   useNativeLayoutMetrics,
 } from "../../native/native-layout-metrics";
-import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { collectProviderUsageLimits } from "@t3tools/shared/usageLimits";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
@@ -177,7 +176,13 @@ import {
   FLOATING_WORKING_CONTROL_COVERAGE,
   FloatingWorkingControl,
 } from "./floating-working-control";
-import { connectionFloatingStatus, type FloatingWorkingStatus } from "./floating-working-status";
+import {
+  connectionFloatingStatus,
+  feedEndInset,
+  runStatusSegments,
+  type FloatingWorkingStatus,
+} from "./floating-working-status";
+import { COMPOSER_STATUS_ROW_HEIGHT, ComposerStatusRow } from "./composer-status-row";
 import {
   derivePendingUserInputMaxHeight,
   ESTIMATED_KEYBOARD_HEIGHT,
@@ -186,6 +191,7 @@ import {
 import {
   COMPOSER_COLLAPSED_CHROME,
   THREAD_COMPOSER_BOTTOM_GUTTER,
+  THREAD_COMPOSER_TOP_PADDING,
   ThreadComposer,
 } from "./ThreadComposer";
 import { ComposerPopoverHost } from "./ComposerPopoverHost";
@@ -343,6 +349,9 @@ const threadVisitTracker = createThreadVisitTracker({
 
 // Past the composer's 180 ms height animation.
 const COMPOSER_HEIGHT_SETTLE_MS = 220;
+
+// iOS docks run status to the top of the composer block; Android floats it over the feed.
+const DOCKS_RUN_STATUS = Platform.OS === "ios";
 
 // Anchors, the submitted message, follow state and pending scrolls belong to
 // one thread, so the body remounts when the thread changes.
@@ -729,6 +738,23 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     props.selectedThreadFeed.some(
       (entry) => "acknowledged" in entry && entry.acknowledged === true,
     );
+  const showScrollToEndButton =
+    !props.draftMode && contentPresentationKind === "ready" && !endFollowEnabled;
+  const statusRowSegments = runStatusSegments({
+    status: floatingStatus,
+    hasAgents: agentsSegment !== null,
+    queuedCount,
+    previewCount: devicePreviews.length + browserTabs.tabs.length,
+    showScrollToEnd: showScrollToEndButton,
+  });
+  // The docked row's height on iOS; the floating capsule's coverage of the feed on Android.
+  const runStatusTarget = DOCKS_RUN_STATUS
+    ? statusRowSegments.length > 0
+      ? COMPOSER_STATUS_ROW_HEIGHT
+      : 0
+    : showFloatingStatus
+      ? FLOATING_WORKING_CONTROL_COVERAGE
+      : 0;
   const selectedThreadFeed = props.selectedThreadFeed;
   // A palette message result opens the thread at that message: earlier
   // history loads until the message is in the feed, which then scrolls to it.
@@ -873,7 +899,8 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       windowHeight: screenAreaHeight,
       keyboardHeight: keyboardStickyEnabled ? -keyboardTranslation.value : 0,
       navigationHeaderHeight,
-      composerOverlapHeight: composerBottomInset,
+      // The docked row rides above an expanded question card; keep it below the header.
+      composerOverlapHeight: composerBottomInset + (DOCKS_RUN_STATUS ? runStatusTarget : 0),
     }),
   );
   // The usage panel stacks with the composer and any approval card, so it gets
@@ -931,6 +958,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   }, [userInputMotion]);
   const userInputCardCoverage = useSharedValue(0);
   const composerPopoverHeight = useSharedValue(0);
+  const composerOffset = useSharedValue(0);
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   const reduceMotion = useReducedMotion();
   // Repin timers fire after the render that scheduled them, so they read follow
@@ -960,17 +988,16 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     settledFloatingCoverageRef.current = coverage;
     scheduleOverlayRepin(50);
   };
-  const floatingCoverageTarget = showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0;
-  const floatingControlCoverage = useDerivedValue(
+  const runStatusHeight = useDerivedValue(
     () =>
       withTiming(
-        floatingCoverageTarget,
+        runStatusTarget,
         { duration: 180, reduceMotion: ReduceMotion.System },
         (finished) => {
-          if (finished) runOnJS(repinAfterCoverageSettles)(floatingCoverageTarget);
+          if (finished) runOnJS(repinAfterCoverageSettles)(runStatusTarget);
         },
       ),
-    [floatingCoverageTarget],
+    [runStatusTarget],
   );
   // Android measures its expanded card in-flow; only iOS needs extra overlay coverage.
   const userInputCoverageApplies = Platform.OS === "ios" && activeUserInputRequestId !== null;
@@ -979,9 +1006,14 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
   );
   useAnimatedReaction(
     () =>
-      contentInsetEndAdjustment.value +
-      floatingControlCoverage.value +
-      (userInputCoverageApplies ? userInputInsetProgress.value * userInputCardCoverage.value : 0),
+      feedEndInset({
+        docksRunStatus: DOCKS_RUN_STATUS,
+        composerBlock: contentInsetEndAdjustment.value,
+        runStatus: runStatusHeight.value,
+        questionCard: userInputCoverageApplies
+          ? userInputInsetProgress.value * userInputCardCoverage.value
+          : 0,
+      }),
     (value) => {
       combinedContentInsetEndAdjustment.set(value);
     },
@@ -993,11 +1025,12 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
       { duration: 180, easing: Easing.out(Easing.cubic), reduceMotion: ReduceMotion.System },
     ),
   );
-  const floatingControlLift = useDerivedValue(
+  const runStatusLift = useDerivedValue(
     () =>
       Math.max(
         userInputCoverageApplies ? userInputCardProgress.value * userInputCardCoverage.value : 0,
-        composerPopoverLift.value,
+        // iOS popovers open above the whole composer block, so the docked row stays put.
+        DOCKS_RUN_STATUS ? 0 : composerPopoverLift.value,
       ),
     [userInputCoverageApplies],
   );
@@ -1218,10 +1251,36 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
     });
   };
 
-  const showScrollToEndButton =
-    !props.draftMode && contentPresentationKind === "ready" && !endFollowEnabled;
-  const { themeAppearance } = useAppearancePreferences();
-  const isDarkMode = themeAppearance === "dark";
+  const runStatus = {
+    status: floatingStatus,
+    devicePreview:
+      devicePreviews.length > 0
+        ? { count: devicePreviews.length, onPress: openDevicePreview }
+        : null,
+    browserPreview:
+      browserTabs.tabs.length > 0
+        ? { count: browserTabs.tabs.length, onPress: () => openBrowserPreview() }
+        : null,
+    showScrollToEnd: showScrollToEndButton,
+    onScrollToEnd: handleScrollToEnd,
+    agents: agentsSegment,
+    onOpenAgents: () => {
+      Keyboard.dismiss();
+      navigation.navigate("ThreadAgents", {
+        environmentId: props.environmentId,
+        threadId: props.selectedThread.id,
+      });
+    },
+    queuedCount,
+    onOpenQueue: () => {
+      Keyboard.dismiss();
+      navigation.navigate("ThreadQueue", {
+        environmentId: props.environmentId,
+        threadId: props.selectedThread.id,
+      });
+    },
+    lift: runStatusLift,
+  };
 
   const handleFeedTouchStart = (event: GestureResponderEvent) => {
     feedTouchStartRef.current = {
@@ -1323,10 +1382,7 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
               contentInsetEndAdjustment={combinedContentInsetEndAdjustment}
               keyboardOffset={composerKeyboardOffset}
               contentTopInset={0}
-              contentBottomInset={
-                estimatedOverlayHeight +
-                (showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0)
-              }
+              contentBottomInset={estimatedOverlayHeight + runStatusTarget}
               contentMaxWidth={contentMaxWidth}
               historyControls={props.historyControls}
               contentSideInsets={nativeMetrics?.safeArea}
@@ -1362,7 +1418,11 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
           style={{ position: "absolute", bottom: 0, left: 0, right: 0, top: 0 }}
           offset={{ closed: 0, opened: composerKeyboardOffset }}
         >
-          <ComposerPopoverHost hidden={composerSlotHidden} popoverHeight={composerPopoverHeight}>
+          <ComposerPopoverHost
+            hidden={composerSlotHidden}
+            popoverHeight={composerPopoverHeight}
+            composerOffset={composerOffset}
+          >
             {/* The fixed sticky host gives this bottom-anchored child a stable
               coordinate space. Its top and height can then animate together
               instead of the auto-sized host jumping to Yoga's destination. */}
@@ -1386,40 +1446,16 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                 onLayout={handleComposerOverlayLayout}
                 className="w-full"
               >
-                <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
-                  <FloatingWorkingControl
-                    colorScheme={isDarkMode ? "dark" : "light"}
-                    status={floatingStatus}
-                    lift={floatingControlLift}
-                    devicePreview={
-                      devicePreviews.length > 0
-                        ? { count: devicePreviews.length, onPress: openDevicePreview }
-                        : null
-                    }
-                    browserPreview={
-                      browserTabs.tabs.length > 0
-                        ? { count: browserTabs.tabs.length, onPress: () => openBrowserPreview() }
-                        : null
-                    }
-                    showScrollToEnd={showScrollToEndButton}
-                    onScrollToEnd={handleScrollToEnd}
-                    agents={agentsSegment}
-                    onOpenAgents={() => {
-                      Keyboard.dismiss();
-                      navigation.navigate("ThreadAgents", {
-                        environmentId: props.environmentId,
-                        threadId: props.selectedThread.id,
-                      });
-                    }}
-                    queuedCount={queuedCount}
-                    onOpenQueue={() => {
-                      Keyboard.dismiss();
-                      navigation.navigate("ThreadQueue", {
-                        environmentId: props.environmentId,
-                        threadId: props.selectedThread.id,
-                      });
-                    }}
+                {DOCKS_RUN_STATUS ? (
+                  <ComposerStatusRow
+                    {...runStatus}
+                    segments={statusRowSegments}
+                    height={runStatusHeight}
+                    contentMaxWidth={contentMaxWidth}
                   />
+                ) : null}
+                <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+                  {DOCKS_RUN_STATUS ? null : <FloatingWorkingControl {...runStatus} />}
                   {props.queuedRunEdit !== null ? (
                     <Animated.View
                       className="shrink-0"
@@ -1540,7 +1576,12 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                   ) : null}
                 </View>
 
-                <View style={composerSlotHidden ? { display: "none" } : undefined}>
+                <View
+                  onLayout={(event) =>
+                    composerOffset.set(event.nativeEvent.layout.y + THREAD_COMPOSER_TOP_PADDING)
+                  }
+                  style={composerSlotHidden ? { display: "none" } : undefined}
+                >
                   {isProviderSubagent ? (
                     <View
                       className="self-center px-3 pt-1.5"

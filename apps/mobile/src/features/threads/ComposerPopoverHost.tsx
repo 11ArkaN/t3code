@@ -8,6 +8,8 @@ type ComposerPopoverHostValue = {
   readonly setContent: (content: ReactNode) => void;
   readonly layoutVersion: number;
   readonly popoverHeight: SharedValue<number>;
+  /** How far the composer's content sits below the top of its block on iOS. */
+  readonly composerOffset: SharedValue<number>;
 };
 
 const ComposerPopoverHostContext = createContext<ComposerPopoverHostValue | null>(null);
@@ -20,12 +22,19 @@ export function useComposerPopoverHost() {
 export function ComposerPopoverHost(props: {
   readonly hidden: boolean;
   readonly popoverHeight: SharedValue<number>;
+  readonly composerOffset: SharedValue<number>;
   readonly children: ReactNode;
 }) {
   const hostRef = useRef<ViewInstance>(null);
   const [content, setContent] = useState<ReactNode>(null);
   const [layoutVersion, setLayoutVersion] = useState(0);
-  const value = { hostRef, setContent, layoutVersion, popoverHeight: props.popoverHeight };
+  const value = {
+    hostRef,
+    setContent,
+    layoutVersion,
+    popoverHeight: props.popoverHeight,
+    composerOffset: props.composerOffset,
+  };
 
   return (
     <ComposerPopoverHostContext.Provider value={value}>

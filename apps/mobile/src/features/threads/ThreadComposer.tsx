@@ -424,6 +424,7 @@ function ComposerSurface(props: {
 
 /** Space below the composer pill, inside the bottom inset it is given. */
 export const THREAD_COMPOSER_BOTTOM_GUTTER = 6;
+export const THREAD_COMPOSER_TOP_PADDING = 6;
 
 export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps) {
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
@@ -1077,7 +1078,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       onLayout={(event) => props.onHeightChange?.(event.nativeEvent.layout.height)}
       className="px-[12px]"
       style={{
-        paddingTop: 6,
+        paddingTop: THREAD_COMPOSER_TOP_PADDING,
         paddingBottom: (props.bottomInset ?? 0) + THREAD_COMPOSER_BOTTOM_GUTTER,
         backgroundColor:
           Platform.OS === "android" ? themeColorWithAlpha(composerPanel, 1) : undefined,
