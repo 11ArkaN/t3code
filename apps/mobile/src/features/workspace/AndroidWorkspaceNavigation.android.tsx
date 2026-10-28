@@ -22,6 +22,7 @@ import {
 } from "./android-workspace-tabs";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useSoftKeyboardShowing } from "../keyboard/useSoftKeyboardShowing";
+import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
 import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
 import { useNavigationTabOrder, useHiddenNavigationTabs } from "./navigation-tabs";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
@@ -80,6 +81,7 @@ export function AndroidWorkspaceNavigation(props: {
   const toolbar = useToolbarLayout();
   const connectionState = useWorkspaceConnectionState();
   const keyboardVisible = useSoftKeyboardShowing();
+  const { layout } = useAdaptiveWorkspaceLayout();
   const { themeAppearance, themeVariables: colors } = useAppearancePreferences();
   const { scale, fabSize } = useAndroidControlSizing();
   const window = useWindowDimensions();
@@ -143,7 +145,9 @@ export function AndroidWorkspaceNavigation(props: {
           const rootState = rootNavigationRef.getRootState();
           if (root && rootState) {
             navigation.dispatch({
-              ...CommonActions.reset(androidWorkspaceTabNavigationState(rootState, tab, rail)),
+              ...CommonActions.reset(
+                androidWorkspaceTabNavigationState(rootState, tab, layout.usesSplitView),
+              ),
               target: root.key,
             });
           }
