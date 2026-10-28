@@ -1,6 +1,9 @@
 import { assert, it, afterEach, expect, vi } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/process";
 
 import { VcsProcessExitError, VcsProcessTimeoutError } from "@t3tools/contracts";
@@ -10,8 +13,20 @@ import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSour
 import * as GitLabCli from "./GitLabCli.ts";
 
 const mockedRun = vi.fn<SourceControlHost.SourceControlHost["Service"]["process"]["run"]>();
+const mockedRemotes = vi.fn<SourceControlHost.SourceControlHost["Service"]["git"]["remotes"]>();
 const layer = it.layer(
-  GitLabCli.layer.pipe(Layer.provide(TestSourceControlHost.layer({ process: { run: mockedRun } }))),
+  Layer.merge(
+    GitLabCli.layer.pipe(
+      Layer.provide(
+        TestSourceControlHost.layer({
+          process: { run: mockedRun },
+          git: { remotes: mockedRemotes },
+        }),
+      ),
+    ),
+    // Keeps a developer's own GITLAB_HOST out of these tests.
+    ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+  ),
 );
 
 function processOutput(stdout: string): SourceControlHost.SourceControlProcessOutput {
@@ -24,8 +39,50 @@ function processOutput(stdout: string): SourceControlHost.SourceControlProcessOu
   };
 }
 
+function mockGlab(signedInHosts: ReadonlyArray<string>, remoteUrls: ReadonlyArray<string> = []) {
+  mockedRemotes.mockReturnValue(
+    Effect.succeed(
+      Effect.succeed({
+        remotes: remoteUrls.map((url) => ({
+          name: "origin",
+          url,
+          pushUrl: Option.none(),
+          isPrimary: true,
+        })),
+        freshness: {
+          source: "live-local" as const,
+          observedAt: DateTime.makeUnsafe("1970-01-01T00:00:00.000Z"),
+          expiresAt: Option.none(),
+        },
+      }),
+    ),
+  );
+  mockedRun.mockImplementation((input) => {
+    if (input.args[0] === "auth") {
+      return Effect.succeed({
+        ...processOutput(""),
+        stderr: signedInHosts.map((host) => `${host}\n  ✓ Logged in to ${host} as user\n`).join(""),
+      });
+    }
+    if (input.args[1]?.startsWith("namespaces/")) {
+      return Effect.succeed(processOutput(JSON.stringify({ id: 9 })));
+    }
+    return Effect.succeed(
+      processOutput(
+        JSON.stringify({
+          path_with_namespace: "team/app",
+          web_url: "https://gitlab.example.test/team/app",
+          http_url_to_repo: "https://gitlab.example.test/team/app.git",
+          ssh_url_to_repo: "git@gitlab.example.test:team/app.git",
+        }),
+      ),
+    );
+  });
+}
+
 afterEach(() => {
   mockedRun.mockReset();
+  mockedRemotes.mockReset();
 });
 
 layer("GitLabCli.layer", (it) => {
@@ -221,42 +278,78 @@ layer("GitLabCli.layer", (it) => {
     }),
   );
 
-  it.effect("looks up repositories on the only signed-in host", () =>
+  it.effect("looks up repositories on the only signed-in host, spelled as glab prints it", () =>
     Effect.gen(function* () {
-      mockedRun.mockImplementation((input) => {
-        const args = input.args.join(" ");
-        if (args === "config get host") return Effect.succeed(processOutput(""));
-        if (args.startsWith("auth status")) {
-          return Effect.succeed({
-            ...processOutput(""),
-            stderr: `gitlab.selfhosted.test
-  ✓ Logged in to gitlab.selfhosted.test as selfhosted-user
-  ✓ Token found: ******
-`,
-          });
-        }
-        if (input.args[0] === "api" && input.args.includes("projects/team%2Fapp")) {
-          return Effect.succeed(
-            processOutput(
-              JSON.stringify({
-                path_with_namespace: "team/app",
-                web_url: "https://gitlab.selfhosted.test/team/app",
-                http_url_to_repo: "https://gitlab.selfhosted.test/team/app.git",
-                ssh_url_to_repo: "git@gitlab.selfhosted.test:team/app.git",
-              }),
-            ),
-          );
-        }
-        return Effect.die(`unexpected glab ${args}`);
-      });
+      mockGlab(["Git.Example.test:8443"]);
 
       const glab = yield* GitLabCli.GitLabCli;
       yield* glab.getRepositoryCloneUrls({ cwd: "/server", repository: "team/app" });
 
-      const apiArgs = mockedRun.mock.calls
-        .map(([input]) => input.args)
-        .find((args) => args[0] === "api");
-      expect(apiArgs?.join(" ")).toContain("--hostname gitlab.selfhosted.test");
+      expect(mockedRun).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          args: ["api", "projects/team%2Fapp"],
+          env: { GITLAB_HOST: "Git.Example.test:8443" },
+        }),
+      );
+    }),
+  );
+
+  it.effect("leaves an explicit GITLAB_HOST to glab without probing sign-ins", () =>
+    Effect.gen(function* () {
+      mockGlab(["gitlab.selfhosted.test"]);
+
+      const glab = yield* GitLabCli.GitLabCli;
+      yield* glab
+        .getRepositoryCloneUrls({ cwd: "/server", repository: "team/app" })
+        .pipe(
+          Effect.provide(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { GITLAB_HOST: "gitlab.com" } })),
+          ),
+        );
+
+      expect(mockedRun.mock.calls.map(([input]) => [input.args[0], input.env])).toEqual([
+        ["api", undefined],
+      ]);
+    }),
+  );
+
+  it.effect.each([
+    { case: "several hosts are signed in", hosts: ["gitlab.com", "gitlab.selfhosted.test"] },
+    {
+      case: "the checkout has a gitlab.com remote",
+      hosts: ["gitlab.selfhosted.test"],
+      remotes: ["git@gitlab.com:team/app.git"],
+    },
+  ])("leaves the host to glab when $case", ({ hosts, remotes }) =>
+    Effect.gen(function* () {
+      mockGlab(hosts, remotes);
+
+      const glab = yield* GitLabCli.GitLabCli;
+      yield* glab.getRepositoryCloneUrls({ cwd: "/server", repository: "team/app" });
+
+      expect(mockedRun.mock.lastCall?.[0].env).toBeUndefined();
+    }),
+  );
+
+  it.effect("publishes to the only signed-in host", () =>
+    Effect.gen(function* () {
+      mockGlab(["gitlab.selfhosted.test"]);
+
+      const glab = yield* GitLabCli.GitLabCli;
+      yield* glab.createRepository({
+        cwd: "/server",
+        repository: "team/app",
+        visibility: "private",
+      });
+
+      expect(
+        mockedRun.mock.calls
+          .filter(([input]) => input.args[0] === "api")
+          .map(([input]) => [input.args[1], input.env]),
+      ).toEqual([
+        ["namespaces/team", { GITLAB_HOST: "gitlab.selfhosted.test" }],
+        ["--method", { GITLAB_HOST: "gitlab.selfhosted.test" }],
+      ]);
     }),
   );
 

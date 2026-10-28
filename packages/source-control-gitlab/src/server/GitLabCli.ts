@@ -1,3 +1,4 @@
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 
 import { combinedAuthOutput } from "@t3tools/source-control-core/server/discovery";
+import { parseGitRemoteHost } from "@t3tools/source-control-core/shared/definition";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 import { parseGitLabAuthStatusHosts } from "./gitLabAuthStatus.ts";
 import {
@@ -25,6 +27,13 @@ import type * as SourceControlProvider from "@t3tools/source-control-core/server
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const AUTH_STATUS_TIMEOUT_MS = 5_000;
+
+// glab reads its fallback host from these, so a set one means the user chose the host.
+const glabHostIsExplicit = Config.all(
+  ["GITLAB_HOST", "GITLAB_URI", "GL_HOST"].map((name) =>
+    Config.String(name).pipe(Config.withDefault("")),
+  ),
+).pipe(Config.map((hosts) => hosts.some((host) => host.length > 0)));
 
 const gitLabCliExecutionErrorContext = {
   operation: Schema.Literal("execute"),
@@ -421,14 +430,15 @@ const classifyGlabFailure = (stderr: string): VcsProcessExitFailureKind | null =
   return null;
 };
 
+type ExecuteInput = Parameters<GitLabCli["Service"]["execute"]>[0] & {
+  readonly env?: NodeJS.ProcessEnv | undefined;
+};
+
 /** @public */
 export const make = Effect.gen(function* () {
-  const { process } = yield* SourceControlHost.SourceControlHost;
+  const { process, git } = yield* SourceControlHost.SourceControlHost;
 
-  const run = (
-    input: Parameters<GitLabCli["Service"]["execute"]>[0],
-    mapError: (error: VcsError) => GitLabCliError,
-  ) =>
+  const run = (input: ExecuteInput, mapError: (error: VcsError) => GitLabCliError) =>
     process
       .run({
         operation: "GitLabCli.execute",
@@ -440,31 +450,41 @@ export const make = Effect.gen(function* () {
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
         ...(input.maxOutputBytes === undefined ? {} : { maxOutputBytes: input.maxOutputBytes }),
+        ...(input.env === undefined ? {} : { env: input.env }),
       })
       .pipe(Effect.mapError(mapError));
 
-  // Outside a GitLab checkout glab targets gitlab.com, so aim at the only signed-in host.
-  const signedInHostArgs = (cwd: string) =>
-    process
-      .run({
+  // glab takes its host from a remote on a host it knows, else falls back to gitlab.com. Point only
+  // that fallback at the only signed-in host: GITLAB_HOST would override a remote's host too.
+  const signedInHostEnv = Effect.fn("GitLabCli.signedInHostEnv")(
+    function* (cwd: string) {
+      if (yield* glabHostIsExplicit) return undefined;
+      const result = yield* process.run({
         operation: "GitLabCli.authStatus",
         command: "glab",
         args: ["auth", "status"],
         cwd,
         allowNonZeroExit: true,
         timeoutMs: AUTH_STATUS_TIMEOUT_MS,
-      })
-      .pipe(
-        Effect.map((result): ReadonlyArray<string> => {
-          const [only, ...others] = parseGitLabAuthStatusHosts(combinedAuthOutput(result)).filter(
-            (host) => host.account !== null,
-          );
-          return only && others.length === 0 ? ["--hostname", only.host] : [];
-        }),
-        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      });
+      const hosts = parseGitLabAuthStatusHosts(combinedAuthOutput(result));
+      const [only, ...others] = hosts.filter((host) => host.account !== null);
+      if (!only || others.length > 0) return undefined;
+      const knownHosts = new Set(["gitlab.com", ...hosts.map((host) => host.host.toLowerCase())]);
+      const remotes = yield* git.remotes(cwd).pipe(
+        Effect.flatten,
+        Effect.map((result) => result.remotes),
+        Effect.orElseSucceed(() => []),
       );
+      const followsRemote = remotes.some((remote) =>
+        knownHosts.has(parseGitRemoteHost(remote.url)?.host ?? ""),
+      );
+      return followsRemote ? undefined : { GITLAB_HOST: only.host };
+    },
+    Effect.orElseSucceed(() => undefined),
+  );
 
-  const execute: GitLabCli["Service"]["execute"] = (input) =>
+  const execute = (input: ExecuteInput) =>
     run(input, (error) =>
       GitLabCliCommandError.fromVcsError(
         { operation: "execute", command: "glab", cwd: input.cwd },
@@ -558,11 +578,12 @@ export const make = Effect.gen(function* () {
       );
     }),
     getRepositoryCloneUrls: Effect.fn("GitLabCli.getRepositoryCloneUrls")(function (input) {
-      return signedInHostArgs(input.cwd).pipe(
-        Effect.flatMap((hostArgs) =>
+      return signedInHostEnv(input.cwd).pipe(
+        Effect.flatMap((env) =>
           execute({
             cwd: input.cwd,
-            args: ["api", ...hostArgs, `projects/${encodeURIComponent(input.repository)}`],
+            args: ["api", `projects/${encodeURIComponent(input.repository)}`],
+            env,
           }),
         ),
         Effect.map((result) => result.stdout.trim()),
@@ -584,12 +605,13 @@ export const make = Effect.gen(function* () {
       );
     }),
     createRepository: Effect.fn("GitLabCli.createRepository")(function* (input) {
-      const hostArgs = yield* signedInHostArgs(input.cwd);
+      const env = yield* signedInHostEnv(input.cwd);
       const { namespacePath, projectPath } = parseRepositoryPath(input.repository);
       const namespaceId: Effect.Effect<number | null, GitLabCliError> = namespacePath
         ? execute({
             cwd: input.cwd,
-            args: ["api", ...hostArgs, `namespaces/${encodeURIComponent(namespacePath)}`],
+            args: ["api", `namespaces/${encodeURIComponent(namespacePath)}`],
+            env,
           }).pipe(
             Effect.map((result) => result.stdout.trim()),
             Effect.flatMap((raw) =>
@@ -616,7 +638,6 @@ export const make = Effect.gen(function* () {
             cwd: input.cwd,
             args: [
               "api",
-              ...hostArgs,
               "--method",
               "POST",
               "projects",
@@ -630,6 +651,7 @@ export const make = Effect.gen(function* () {
                 ? []
                 : ["--raw-field", `namespace_id=${resolvedNamespaceId}`]),
             ],
+            env,
           }),
         ),
         Effect.map((result) => result.stdout.trim()),
