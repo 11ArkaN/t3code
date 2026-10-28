@@ -21,20 +21,19 @@ function emit(name: string) {
 }
 
 // Android's syncKeyboardPosition repairs a nonanimated IME inset change with
-// keyboardDidHide then keyboardDidShow, and no keyboardWillShow.
-it("brings the accessory back when Android restores the keyboard with keyboardDidShow alone", () => {
+// keyboardDidHide then keyboardDidShow, and no will-events.
+it("follows Android's nonanimated hide and show, which send only the did-events", () => {
   const onChange = vi.fn();
   const unsubscribe = subscribeKeyboardShowing(onChange);
   emit("keyboardWillShow");
-  emit("keyboardWillHide");
-  emit("keyboardDidHide");
-  onChange.mockClear();
 
+  emit("keyboardDidHide");
+  const hidden = { showing: getKeyboardShowing(), notified: onChange.mock.calls.length };
   emit("keyboardDidShow");
 
-  expect({ showing: getKeyboardShowing(), notified: onChange.mock.calls.length }).toEqual({
-    showing: true,
-    notified: 1,
-  });
+  expect({
+    hidden,
+    shown: { showing: getKeyboardShowing(), notified: onChange.mock.calls.length },
+  }).toEqual({ hidden: { showing: false, notified: 2 }, shown: { showing: true, notified: 3 } });
   unsubscribe();
 });
