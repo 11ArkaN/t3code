@@ -13,6 +13,10 @@ import * as Path from "effect/Path";
 
 import { discoverClaudeSkills } from "./ClaudeSkills.ts";
 import { planClaudeSkillDispatch } from "./ClaudeSkillDispatch.ts";
+import * as Layer from "effect/Layer";
+import * as ProjectFileReader from "../../project/ProjectFileReader.ts";
+
+const layerNodeServices = ProjectFileReader.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
 const writeSkill = Effect.fn(function* (
   skillsDir: string,
@@ -26,7 +30,7 @@ const writeSkill = Effect.fn(function* (
   yield* fs.writeFileString(path.join(skillDir, "SKILL.md"), contents);
 });
 
-it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
+it.layer(layerNodeServices)("discoverClaudeSkills", (it) => {
   it.effect("discovers enabled plugin skills with manifest names and ignores skill overrides", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -946,7 +950,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
             ),
             "an unrelated fs read hung: discovery left libuv pool threads stuck in open()",
           );
-        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+        }).pipe(Effect.scoped, Effect.provide(layerNodeServices)),
     );
   },
 );

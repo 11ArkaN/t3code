@@ -16,6 +16,9 @@ import { TestClock } from "effect/testing";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./T3ProjectFileLoader.ts";
+import * as ProjectFileReader from "./ProjectFileReader.ts";
+
+const layerNodeServices = ProjectFileReader.layer.pipe(Layer.provideMerge(NodeServices.layer));
 
 const layerTest = Layer.empty.pipe(
   Layer.provideMerge(
@@ -24,7 +27,7 @@ const layerTest = Layer.empty.pipe(
       Layer.provide(T3ProjectFileLoader.layer),
     ),
   ),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(layerNodeServices),
 );
 
 const makeTempDir = Effect.gen(function* () {

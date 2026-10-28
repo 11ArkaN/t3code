@@ -133,6 +133,7 @@ import {
   type ClaudeSkillTarget,
 } from "../../provider/Drivers/ClaudeSkillDispatch.ts";
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
+import * as ProjectFileReader from "../../project/ProjectFileReader.ts";
 import {
   compileClaudeModelSelection,
   type CompiledClaudeModelSelection,
@@ -4303,6 +4304,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
 ) {
   const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const projectFiles = yield* ProjectFileReader.ProjectFileReader;
   const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
   const { attachmentsDir, fileSystem, path, crypto, idAllocator, queryRunner } = adapterOptions;
   const subagentModelCatalog = scopeClaudeModelCatalog(
@@ -4380,32 +4382,34 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     },
   );
 
-  const readToolSearchSetting = (filePath: string) =>
-    fileSystem.readFileString(filePath).pipe(
-      Effect.flatMap(decodeClaudeEnvSettings),
-      Effect.map((settings) => {
-        const value = settings.env?.ENABLE_TOOL_SEARCH;
-        return typeof value === "string" ? value : undefined;
-      }),
-      Effect.orElseSucceed(() => undefined),
-    );
+  const readToolSearchSetting = Effect.fn("ClaudeAdapterV2.readToolSearchSetting")(function* (
+    filePath: string,
+    projectControlled: boolean,
+  ) {
+    const contents = projectControlled
+      ? yield* projectFiles.readFileString(filePath)
+      : yield* fileSystem.readFileString(filePath).pipe(Effect.orElseSucceed(() => undefined));
+    if (contents === undefined) return undefined;
+    const settings = yield* decodeClaudeEnvSettings(contents).pipe(Effect.option);
+    const value = Option.getOrUndefined(settings)?.env?.ENABLE_TOOL_SEARCH;
+    return typeof value === "string" ? value : undefined;
+  });
   // A worktree's .git file points at <main>/.git/worktrees/<name>, whose commondir leads back to
   // <main>/.git. A bare repository has no main checkout, so its worktree keeps its own file.
-  const mainCheckoutRoot = (checkout: string) =>
-    fileSystem.readFileString(path.join(checkout, ".git")).pipe(
-      Effect.flatMap((pointer) => {
-        const gitDir = /^gitdir:\s*(.+)$/m.exec(pointer)?.[1]?.trim();
-        if (gitDir === undefined) return Effect.succeed(checkout);
-        const worktreeGitDir = path.resolve(checkout, gitDir);
-        return fileSystem.readFileString(path.join(worktreeGitDir, "commondir")).pipe(
-          Effect.map((commonDir) => {
-            const common = path.resolve(worktreeGitDir, commonDir.trim());
-            return path.basename(common) === ".git" ? path.dirname(common) : checkout;
-          }),
-        );
-      }),
-      Effect.orElseSucceed(() => checkout),
-    );
+  // Only a worktree's .git is a file; the reader never opens a repository's .git directory.
+  const mainCheckoutRoot = Effect.fn("ClaudeAdapterV2.mainCheckoutRoot")(function* (
+    checkout: string,
+  ) {
+    const pointer = yield* projectFiles.readFileString(path.join(checkout, ".git"));
+    const gitDir =
+      pointer === undefined ? undefined : /^gitdir:\s*(.+)$/m.exec(pointer)?.[1]?.trim();
+    if (gitDir === undefined) return checkout;
+    const worktreeGitDir = path.resolve(checkout, gitDir);
+    const commonDir = yield* projectFiles.readFileString(path.join(worktreeGitDir, "commondir"));
+    if (commonDir === undefined) return checkout;
+    const common = path.resolve(worktreeGitDir, commonDir.trim());
+    return path.basename(common) === ".git" ? path.dirname(common) : checkout;
+  });
   // Claude Code keeps .claude/settings.local.json at the repository root, or in cwd outside a
   // repository, on Windows, or when the root is home. Its owner check is skipped: missing it only
   // leaves tool search on, Claude Code's default.
@@ -4432,18 +4436,20 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       const launchValue = launchArgSettings?.env?.ENABLE_TOOL_SEARCH;
       if (typeof launchValue === "string") return claudeToolSearchOverride(launchValue);
       const localDirectory = cwd === null ? null : yield* localSettingsDirectory(cwd);
-      const settingsFiles = [
-        ...(cwd === null || localDirectory === null
+      const projectSettingsFiles =
+        cwd === null || localDirectory === null
           ? []
           : [
               path.join(localDirectory, ".claude", "settings.local.json"),
               ...(localDirectory === cwd ? [] : [path.join(cwd, ".claude", "settings.local.json")]),
               path.join(cwd, ".claude", "settings.json"),
-            ]),
-        path.join(homePath, "settings.json"),
+            ];
+      const settingsFiles = [
+        ...projectSettingsFiles.map((file) => [file, true] as const),
+        [path.join(homePath, "settings.json"), false] as const,
       ];
-      for (const settingsFile of settingsFiles) {
-        const value = yield* readToolSearchSetting(settingsFile);
+      for (const [settingsFile, projectControlled] of settingsFiles) {
+        const value = yield* readToolSearchSetting(settingsFile, projectControlled);
         if (value !== undefined) return claudeToolSearchOverride(value);
       }
       return claudeToolSearchOverride(adapterOptions.environment.ENABLE_TOOL_SEARCH);
@@ -4466,6 +4472,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       ),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
+      Effect.provideService(ProjectFileReader.ProjectFileReader, projectFiles),
     );
 
   return ProviderAdapter.ProviderAdapterV2.of({
@@ -11086,6 +11093,7 @@ export type ClaudeAdapterV2DriverEnv =
   | IdAllocator.IdAllocatorV2
   | McpProviderSessions.McpProviderSessions
   | Path.Path
+  | ProjectFileReader.ProjectFileReader
   | ServerConfig.ServerConfig;
 
 export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
