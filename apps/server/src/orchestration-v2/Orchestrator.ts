@@ -5455,7 +5455,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (run.status === "failed" || run.status === "interrupted") &&
           run.workspacePreparation?.type === "worktree",
       );
-    // A steer re-dispatched after it could not join its turn was sent before any Stop since.
+    // A steer re-dispatched after it could not join its turn was sent before any Stop since, and
+    // was meant to go before the queue.
     const redispatchedSteer = projection.messages.some(
       (message) => message.id === command.messageId,
     );
@@ -5607,7 +5608,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ? { queueHeld: true }
           : {}),
         queuePosition:
-          goalStopRunId !== undefined
+          goalStopRunId !== undefined || redispatchedSteer
             ? 1
             : Math.max(
                 0,
@@ -5758,7 +5759,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           },
         });
       }
-      if (goalStopRunId !== undefined) {
+      if (goalStopRunId !== undefined || redispatchedSteer) {
         return yield* stopRunForQueuedCommand({
           command,
           events,

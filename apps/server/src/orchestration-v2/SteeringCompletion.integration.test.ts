@@ -24,6 +24,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import { queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -994,6 +995,61 @@ it.effect("keeps Stop's held queue when a steer it raced has to wait for a new t
           assert.equal(run?.status, "queued");
           assert.isTrue(run?.queueHeld, `${messageId} must stay held after Stop`);
         }
+        assert.deepEqual(
+          queuedRunsInDeliveryOrder(projection).map((run) => run.userMessageId),
+          [skillId, laterId],
+        );
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
+it.effect("sends a promoted message first when it cannot steer the running turn", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { started, steered, layer, startFirstTurn, releaseSteer } =
+        yield* nextTurnSelectionHarness("steering-requires-new-turn-promote", false, true);
+      yield* Deferred.succeed(releaseSteer, undefined);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* startFirstTurn;
+        const first = started[0]!;
+        const earlierId = MessageId.make("message:earlier");
+        const skillId = MessageId.make("message:skill");
+        for (const [messageId, text] of [
+          [earlierId, "earlier"],
+          [skillId, "$zebra-probe"],
+        ] as const) {
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make(`queue-${text}`),
+            threadId,
+            messageId,
+            text,
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "user",
+            creationSource: "web",
+          });
+        }
+        const queued = yield* orchestrator.getThreadProjection(threadId);
+        const skillRun = queued.runs.find((run) => run.userMessageId === skillId)!;
+        yield* orchestrator.dispatch({
+          type: "queued-message.promote-to-steer",
+          commandId: CommandId.make("promote-skill"),
+          threadId,
+          queuedRunId: skillRun.id,
+          targetRunId: first.runId,
+        });
+        yield* worker.drain();
+
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(steered, []);
+        assert.deepEqual(
+          queuedRunsInDeliveryOrder(projection).map((run) => run.userMessageId),
+          [skillId, earlierId],
+        );
       }).pipe(Effect.provide(layer));
     }),
   ),
