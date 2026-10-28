@@ -796,7 +796,10 @@ export default function DiffPanel({
             <DropdownMenuSub
               onOpenChange={(open) => {
                 setOpenCommitMenu(open ? (branchCommitsQuery.data ?? null) : null);
-                if (open) commitDescriptions.loadFirst();
+                if (!open) return;
+                commitDescriptions.loadFirst();
+                // The menu keeps the list it opened with; the refreshed one shows next time.
+                branchCommitsQuery.refresh();
               }}
             >
               <DropdownMenuSubTrigger>Commits</DropdownMenuSubTrigger>

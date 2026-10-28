@@ -11,16 +11,14 @@ committed it, or fixed a conflict in it. Use the branch comparison to review eve
 against your base branch. Restore still returns the complete saved workspace.
 
 On web and desktop, open the Diff pane source picker and choose **Commits** to review one local
-commit at a time. The list shows up to 100 of the newest commits in the current branch comparison. A merge
-commit shows its changes against its first parent. If the branch changes, select a commit again to
-refresh the view.
+commit at a time. The list shows the newest 100 commits in the branch comparison, each with a short
+description written by your text generation model. A merge commit shows its changes against its
+first parent.
 
-The selected commit shows its name and a clickable source link. Short descriptions use your
-text generation model and load as you browse the commit list. Hover over a cut-off description
-to read it in full.
-
-Commit links from supported code hosts open in the Diff pane when the current thread belongs to the same repository.
-Use Command/Ctrl+Click to open the original link in your browser.
+A commit link from a supported code host opens in the Diff pane when the current thread's workspace
+has that commit. Otherwise a pull request commit link opens the pull request, and any other commit
+link opens in your browser. Command/Ctrl+Click always opens the link in your browser. Commit links
+follow the **Open pull requests in T3 Code** setting in **Settings → Diffs**.
 
 ## Connect an account
 

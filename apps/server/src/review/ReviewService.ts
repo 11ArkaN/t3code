@@ -37,6 +37,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
+type PendingDescription = Deferred.Deferred<string, TextGenerationError | GitCommandError>;
 const encodeModelSelection = Schema.encodeSync(Schema.fromJsonString(ModelSelection));
 
 export class ReviewService extends Context.Service<
@@ -69,11 +70,8 @@ export const make = Effect.gen(function* () {
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
-  const cachedDescriptions = new Map<string, string>();
-  const pendingDescriptions = new Map<
-    string,
-    Deferred.Deferred<string, TextGenerationError | GitCommandError>
-  >();
+  // Finished descriptions and in-flight requests by repository, sha and model, least recent first.
+  const descriptionsByKey = new Map<string, PendingDescription>();
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -199,31 +197,29 @@ export const make = Effect.gen(function* () {
       });
       const descriptions = yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          const requested = yield* Effect.forEach(resolved.commits, (commit) =>
-            Effect.gen(function* () {
-              const key = `${resolved.repositoryKey}\0${commit.sha}\0${modelKey}`;
-              const fresh = yield* Deferred.make<string, TextGenerationError | GitCommandError>();
-              return yield* Effect.sync(() => {
-                const cached = cachedDescriptions.get(key);
-                if (cached !== undefined) {
-                  cachedDescriptions.delete(key);
-                  cachedDescriptions.set(key, cached);
-                  return { kind: "cached" as const, commit, key, description: cached };
-                }
-                const pending = pendingDescriptions.get(key);
-                if (pending) return { kind: "pending" as const, commit, key, pending };
-                pendingDescriptions.set(key, fresh);
-                return { kind: "claimed" as const, commit, key, pending: fresh };
-              });
-            }),
-          );
-          const claimed = requested.filter((item) => item.kind === "claimed");
+          const claimed: Array<{ sha: string; key: string; description: PendingDescription }> = [];
+          const requested = resolved.commits.map(({ sha }) => {
+            const key = `${resolved.repositoryKey}\0${sha}\0${modelKey}`;
+            const known = descriptionsByKey.get(key);
+            if (known) {
+              descriptionsByKey.delete(key);
+              descriptionsByKey.set(key, known);
+              return { sha, description: known };
+            }
+            const description: PendingDescription = Deferred.makeUnsafe();
+            descriptionsByKey.set(key, description);
+            if (descriptionsByKey.size > 512) {
+              descriptionsByKey.delete(descriptionsByKey.keys().next().value!);
+            }
+            claimed.push({ sha, key, description });
+            return { sha, description };
+          });
           if (claimed.length > 0) {
             const generated = yield* restore(
               git
                 .getReviewCommitDescriptionContext({
                   cwd: input.cwd,
-                  shas: claimed.map((item) => item.commit.sha),
+                  shas: claimed.map((item) => item.sha),
                 })
                 .pipe(
                   Effect.flatMap((context) =>
@@ -233,48 +229,35 @@ export const make = Effect.gen(function* () {
                       modelSelection,
                     }),
                   ),
-                  Effect.flatMap((result) => {
-                    const descriptions = new Map(
-                      result.descriptions.map((item) => [item.sha, item.description]),
-                    );
-                    return descriptions.size === claimed.length &&
-                      claimed.every((item) => descriptions.get(item.commit.sha)?.trim()) &&
-                      result.descriptions.length === claimed.length
-                      ? Effect.succeed(descriptions)
-                      : Effect.fail(
-                          new TextGenerationError({
-                            operation: "generateCommitDescriptions",
-                            detail: "The model returned incomplete commit descriptions.",
-                          }),
-                        );
-                  }),
                 ),
             ).pipe(Effect.exit);
+            const bySha = Exit.isSuccess(generated)
+              ? new Map(generated.value.descriptions.map((item) => [item.sha, item.description]))
+              : null;
             for (const item of claimed) {
-              pendingDescriptions.delete(item.key);
-              if (Exit.isSuccess(generated)) {
-                const description = generated.value
-                  .get(item.commit.sha)!
-                  .trim()
-                  .replace(/\s+/g, " ")
-                  .slice(0, 80);
-                cachedDescriptions.set(item.key, description);
-                if (cachedDescriptions.size > 512) {
-                  cachedDescriptions.delete(cachedDescriptions.keys().next().value!);
-                }
-                yield* Deferred.succeed(item.pending, description);
-              } else {
-                yield* Deferred.failCause(item.pending, generated.cause);
+              const description = bySha?.get(item.sha);
+              if (description !== undefined) {
+                yield* Deferred.succeed(item.description, description);
+                continue;
               }
+              // A failure is not cached, so the next request asks the model again.
+              if (descriptionsByKey.get(item.key) === item.description) {
+                descriptionsByKey.delete(item.key);
+              }
+              yield* Exit.isFailure(generated)
+                ? Deferred.failCause(item.description, generated.cause)
+                : Deferred.fail(
+                    item.description,
+                    new TextGenerationError({
+                      operation: "generateCommitDescriptions",
+                      detail: "The model returned incomplete commit descriptions.",
+                    }),
+                  );
             }
           }
           return yield* restore(
-            Effect.forEach(requested, (item) =>
-              item.kind === "cached"
-                ? Effect.succeed({ sha: item.commit.sha, description: item.description })
-                : Deferred.await(item.pending).pipe(
-                    Effect.map((description) => ({ sha: item.commit.sha, description })),
-                  ),
+            Effect.forEach(requested, ({ sha, description }) =>
+              Deferred.await(description).pipe(Effect.map((text) => ({ sha, description: text }))),
             ),
           );
         }),

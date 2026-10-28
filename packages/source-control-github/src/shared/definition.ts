@@ -7,6 +7,7 @@ import {
   isChangeRequestInProjectRepository,
   isChangeRequestOnProjectHost,
   parseChangeRequestPath,
+  parseCommitPath,
   projectChangeRequestHost,
   remoteWebOrigin,
 } from "@t3tools/source-control-core/shared/definition";
@@ -22,8 +23,7 @@ const CHANGE_REQUEST_REFERENCE =
 // GitHub Enterprise Server runs on any hostname, so the `<owner>/<repo>/pull/<n>` route alone
 // identifies a GitHub pull request.
 const CHANGE_REQUEST_PATH = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/|$)/u;
-const COMMIT_PATH =
-  /^\/([^/]+\/[^/]+)\/(?:commit|pull\/[1-9]\d*\/commits)\/([0-9a-f]{40}|[0-9a-f]{64})\/?$/iu;
+const COMMIT_PATH = /^\/([^/]+\/[^/]+)\/(?:commit|pull\/\d+\/commits)\/([0-9a-f]+)\/?$/iu;
 const ISSUE_PATH = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u;
 
 const KIND = SourceControlProviderKind.make("github");
@@ -84,18 +84,7 @@ export const definition = defineSourceControl({
   },
   commitUrl: (input) =>
     isRepositoryPath(input.repository) ? buildCommitUrl(input, "commit") : null,
-  parseCommitUrl: (url) => {
-    if ((url.protocol !== "https:" && url.protocol !== "http:") || !isGitHubHost(url.hostname))
-      return null;
-    const match = COMMIT_PATH.exec(url.pathname);
-    return match?.[1] && match[2]
-      ? {
-          host: url.hostname.toLowerCase(),
-          repository: match[1].toLowerCase(),
-          sha: match[2].toLowerCase(),
-        }
-      : null;
-  },
+  parseCommitUrl: (url) => (isGitHubHost(url.hostname) ? parseCommitPath(url, COMMIT_PATH) : null),
   parseChangeRequestUrl: (url) => parseChangeRequestPath(url, CHANGE_REQUEST_PATH),
   // GitHub writes every bare reference through `/issues/`, including pull requests.
   changeRequestUrlFromReferenceAutolink: (url) => {

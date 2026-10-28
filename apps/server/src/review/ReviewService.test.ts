@@ -7,6 +7,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   ProjectId,
   ProviderInstanceId,
+  TextGenerationError,
   ThreadId,
   type OrchestrationProjectShell,
   type OrchestrationV2ThreadShell,
@@ -36,6 +37,7 @@ function layer(input: {
   readonly threadCwd?: string;
   readonly projectModel?: string;
   readonly generationCalls?: Array<string>;
+  readonly failFirstGeneration?: boolean;
 }) {
   const projectRoots = input.projectRoots ?? [];
   return ReviewService.layer.pipe(
@@ -100,16 +102,22 @@ function layer(input: {
     ),
     Layer.provide(
       Layer.mock(TextGeneration.TextGeneration)({
-        generateCommitDescriptions: (request) =>
-          Effect.sync(() => {
-            input.generationCalls?.push(request.modelSelection.model);
-            return {
-              descriptions: request.commits.map((commit) => ({
-                sha: commit.sha,
-                description: `${request.modelSelection.model}: ${commit.subject}`,
-              })),
-            };
-          }),
+        generateCommitDescriptions: (request) => {
+          input.generationCalls?.push(request.modelSelection.model);
+          return input.failFirstGeneration && input.generationCalls?.length === 1
+            ? Effect.fail(
+                new TextGenerationError({
+                  operation: "generateCommitDescriptions",
+                  detail: "model unavailable",
+                }),
+              )
+            : Effect.succeed({
+                descriptions: request.commits.map((commit) => ({
+                  sha: commit.sha,
+                  description: `${request.modelSelection.model}: ${commit.subject}`,
+                })),
+              });
+        },
       }),
     ),
     Layer.provide(
@@ -197,6 +205,62 @@ describe("ReviewService", () => {
             threadCwd: workspaceRoot,
             projectModel: "project-model",
             generationCalls,
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("asks the model once for concurrent requests and again after a failure", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const generationCalls: Array<string> = [];
+
+      yield* Effect.gen(function* () {
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const git = (...args: ReadonlyArray<string>) =>
+          driver
+            .execute({ operation: "ReviewService.test.git", cwd: workspaceRoot, args })
+            .pipe(Effect.map((result) => result.stdout.trim()));
+        yield* driver.initRepo({ cwd: workspaceRoot });
+        yield* git("config", "user.email", "test@test.com");
+        yield* git("config", "user.name", "Test");
+        yield* git("commit", "--allow-empty", "-m", "add the parser");
+        const sha = yield* git("rev-parse", "HEAD");
+
+        const review = yield* ReviewService.ReviewService;
+        const describe = review.generateCommitDescriptions({
+          cwd: workspaceRoot,
+          threadId: ThreadId.make("thread-0"),
+          shas: [sha],
+        });
+        const failed = yield* Effect.all([describe, describe], { concurrency: 2 }).pipe(
+          Effect.flip,
+        );
+        assert.strictEqual(failed._tag, "TextGenerationError");
+        assert.deepStrictEqual(generationCalls, ["project-model"]);
+
+        const results = yield* Effect.all([describe, describe], { concurrency: 2 });
+        assert.deepStrictEqual(
+          results.map((result) => result.descriptions),
+          [
+            [{ sha, description: "project-model: add the parser" }],
+            [{ sha, description: "project-model: add the parser" }],
+          ],
+        );
+        assert.deepStrictEqual(generationCalls, ["project-model", "project-model"]);
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot,
+            baseDir,
+            realGit: true,
+            threadCwd: workspaceRoot,
+            projectModel: "project-model",
+            generationCalls,
+            failFirstGeneration: true,
           }),
         ),
       );
