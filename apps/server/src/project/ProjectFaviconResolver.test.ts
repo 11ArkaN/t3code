@@ -1,8 +1,15 @@
+// @effect-diagnostics nodeBuiltinImport:off - FIFO gates must be released with a synchronous
+// open on the main thread, because the Effect FileSystem queues behind the pinned libuv pool.
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import { it, describe, expect } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { TestClock } from "effect/testing";
 
@@ -257,3 +264,75 @@ it.layer(layerTest)("ProjectFaviconResolverLive", (it) => {
     );
   });
 });
+
+const LIBUV_POOL_SIZE = Number(process.env.UV_THREADPOOL_SIZE ?? 4);
+
+/**
+ * Opening a FIFO for reading waits in `open()` until a writer appears, like a
+ * TCC-protected file in a headless macOS daemon, and pins one libuv pool thread
+ * that fiber interruption cannot free. The finalizer opens it for writing on the
+ * main thread, which releases every waiting reader even with the pool exhausted.
+ */
+const makeOpenGate = Effect.fn("ProjectFaviconResolver.test.makeOpenGate")(function* (
+  gatePath: string,
+) {
+  NodeChildProcess.execFileSync("mkfifo", [gatePath]);
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      try {
+        NodeFS.closeSync(
+          NodeFS.openSync(gatePath, NodeFS.constants.O_WRONLY | NodeFS.constants.O_NONBLOCK),
+        );
+      } catch {
+        // ENXIO: no reader is waiting.
+      }
+    }),
+  );
+});
+
+/**
+ * Racing a stuck fs call against a timer waits for the loser's interruption,
+ * which never comes, so the work runs detached and only the join is timed.
+ * The gate finalizer later lets the abandoned fiber finish.
+ */
+const awaitWithinDeadline = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.forkDetach(effect).pipe(
+    Effect.flatMap((fiber) => Fiber.join(fiber).pipe(Effect.timeoutOption("5 seconds"))),
+  );
+
+describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
+  "ProjectFaviconResolver with an icon source open() that never returns",
+  () => {
+    it.live(
+      "resolves every project and leaves the libuv pool free when public/index.html is a FIFO",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
+          const attempts = LIBUV_POOL_SIZE + 1;
+          // The resolver caches lookups per workspace, so each pins a thread of its own.
+          for (let attempt = 1; attempt <= attempts; attempt++) {
+            const cwd = yield* makeTempDir;
+            yield* fileSystem.makeDirectory(path.join(cwd, "public")).pipe(Effect.orDie);
+            const sourcePath = path.join(cwd, "public", "index.html");
+            yield* makeOpenGate(sourcePath);
+            expect(
+              yield* awaitWithinDeadline(resolver.resolvePath(cwd)),
+              `project ${attempt} of ${attempts} hung reading ${sourcePath}`,
+            ).toEqual(Option.some(null));
+          }
+          const unrelatedCwd = yield* makeTempDir;
+          yield* writeTextFile(unrelatedCwd, "index.html", "<html></html>");
+          expect(
+            Option.isSome(
+              yield* awaitWithinDeadline(
+                fileSystem.readFileString(path.join(unrelatedCwd, "index.html")),
+              ),
+            ),
+            "an unrelated fs read hung: favicon resolution left libuv pool threads stuck in open()",
+          ).toBe(true);
+        }).pipe(Effect.scoped, Effect.provide(layerTest)),
+    );
+  },
+);
