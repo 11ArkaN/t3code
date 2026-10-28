@@ -59,6 +59,7 @@ export async function openUrlInPreview<E>(input: {
   readonly url: string;
   readonly openPreview: OpenPreviewMutation<E>;
   readonly profileId?: PreviewOpenInput["profileId"];
+  readonly openerTabId?: PreviewOpenInput["openerTabId"];
   readonly background?: boolean;
 }): Promise<AtomCommandResult<void, E | BrowserSettingsReadError>> {
   const defaults = await resolveBrowserDefaults().catch(
@@ -82,6 +83,7 @@ export async function openUrlInPreview<E>(input: {
       viewport: browserDefaultOpenViewport(defaults),
       profileId: input.profileId ?? browserDefaultOpenProfileId(defaults),
       ...(runtime === undefined ? {} : { runtime }),
+      ...(input.openerTabId === undefined ? {} : { openerTabId: input.openerTabId }),
     },
   });
   return mapAtomCommandResult(result, (snapshot) => {

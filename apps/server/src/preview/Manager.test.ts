@@ -272,6 +272,27 @@ it.layer(layer)("PreviewManager", (it) => {
     }),
   );
 
+  it.effect("does not take an owner from an opener in another thread", () =>
+    Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const opener = yield* manager.open({
+        threadId: freshThreadId(),
+        url: "http://localhost:8765/popup.html",
+        runtime: "server",
+        automationOwner: "agent-1",
+      });
+
+      const popup = yield* manager.open({
+        threadId: freshThreadId(),
+        url: "https://example.org/",
+        runtime: "server",
+        openerTabId: opener.tabId,
+      });
+
+      expect(popup.automationOwner).toBeUndefined();
+    }),
+  );
+
   it.effect("close with explicit tabId removes only that tab", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();
