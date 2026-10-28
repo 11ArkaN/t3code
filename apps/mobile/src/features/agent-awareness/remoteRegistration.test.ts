@@ -750,6 +750,34 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     );
   });
 
+  it.effect("saves a preference change when the push token cannot be re-read", () => {
+    const registrations = stubAndroidDeviceRelay();
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "android",
+      data: "fcm-token",
+    });
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+      vi.mocked(Notifications.getDevicePushTokenAsync).mockRejectedValueOnce(
+        new Error("SERVICE_NOT_AVAILABLE"),
+      );
+      yield* updateAgentAwarenessRegistrationPreferences({ liveActivitiesEnabled: true });
+
+      expect(registrations).toMatchObject([
+        { preferences: { notificationsEnabled: true } },
+        {
+          pushToken: "fcm-token",
+          preferences: { notificationsEnabled: true, liveActivitiesEnabled: true },
+        },
+      ]);
+    }).pipe(
+      Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
+      Effect.provide(layerRelayTest),
+    );
+  });
+
   it.effect("preserves relay rejection errors with React Native response headers", () => {
     vi.spyOn(Platform, "OS", "get").mockReturnValue("android");
     vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({

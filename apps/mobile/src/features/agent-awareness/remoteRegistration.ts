@@ -84,6 +84,7 @@ const LIVE_ACTIVITY_STALE_AFTER_MS = 10 * 60_000;
 const liveActivityStaleDate = () => new Date(Date.now() + LIVE_ACTIVITY_STALE_AFTER_MS);
 const registeredActivityPushTokens = new Map<string, number>();
 let androidDeviceReplayedAt: number | null = null;
+let lastNativePushToken: string | null = null;
 let pushTokenSubscription: { remove: () => void } | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
 
@@ -260,24 +261,40 @@ const nativePushTokenRegistration = Effect.fn("remoteRegistration.nativePushToke
       return { notificationsEnabled: false, pushToken: null };
     }
     if (observedPushToken) {
+      lastNativePushToken = observedPushToken;
       return { notificationsEnabled: true, pushToken: observedPushToken };
     }
-    const token = yield* Effect.tryPromise({
+    const pushToken = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
       catch: (cause) =>
         new AgentAwarenessOperationError({
           operation: "read-native-push-token",
           cause,
         }),
-    });
-    const pushToken =
-      token.type === Platform.OS && typeof token.data === "string" ? token.data.trim() : "";
-    if (!pushToken) {
-      return yield* new AgentAwarenessOperationError({
-        operation: "read-native-push-token",
-        cause: new Error(`Native push token lookup returned an unusable ${token.type} token.`),
-      });
-    }
+    }).pipe(
+      Effect.flatMap((token) => {
+        const data =
+          token.type === Platform.OS && typeof token.data === "string" ? token.data.trim() : "";
+        return data
+          ? Effect.succeed(data)
+          : Effect.fail(
+              new AgentAwarenessOperationError({
+                operation: "read-native-push-token",
+                cause: new Error(
+                  `Native push token lookup returned an unusable ${token.type} token.`,
+                ),
+              }),
+            );
+      }),
+      // Registering without a token would disable notifications the relay already accepted.
+      Effect.catch((error) => {
+        const fallback = lastNativePushToken;
+        if (!fallback) return Effect.fail(error);
+        logRegistrationError("native push token lookup failed; reusing the last token", error);
+        return Effect.succeed(fallback);
+      }),
+    );
+    lastNativePushToken = pushToken;
     return { notificationsEnabled: true, pushToken };
   },
 );
@@ -799,6 +816,7 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   pendingDeviceRegistration = null;
   registrationStatus = "unknown";
   androidDeviceReplayedAt = null;
+  lastNativePushToken = null;
   registrationStatusListeners.clear();
   registeredActivityPushTokens.clear();
   activityPushTokenLocks.clear();
