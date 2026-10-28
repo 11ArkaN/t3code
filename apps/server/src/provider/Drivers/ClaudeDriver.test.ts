@@ -98,10 +98,11 @@ const noSpawn = ChildProcessSpawner.make(() =>
   Effect.die("Version advisory resolution must not spawn a process"),
 );
 
-// A native launcher at 2.1.308 with the given user and managed settings.json contents.
-const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (input: {
+// A native launcher at 2.1.308 with the given user, managed and managed drop-in settings.
+const makeNativeInstall = Effect.fn("makeNativeInstall")(function* (input: {
   readonly user: object;
   readonly managed?: object;
+  readonly managedDropIns?: Record<string, object>;
   readonly unavailableTags?: ReadonlyArray<string>;
 }) {
   const fs = yield* FileSystem.FileSystem;
@@ -111,21 +112,28 @@ const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (inpu
   const versionPath = NodePath.join(home, ".local", "share", "claude", "versions", "2.1.308");
   const launcherPath = NodePath.join(home, ".local", "bin", "claude");
   const managedDirectory = NodePath.join(home, "managed");
+  const writeUserSettings = (settings: object) =>
+    fs.writeFileString(NodePath.join(home, ".claude", "settings.json"), JSON.stringify(settings));
   yield* fs.makeDirectory(NodePath.dirname(versionPath), { recursive: true });
   yield* fs.writeFileString(versionPath, "#!/bin/sh\n");
   yield* fs.chmod(versionPath, 0o755);
   yield* fs.makeDirectory(NodePath.dirname(launcherPath), { recursive: true });
   yield* fs.symlink(versionPath, launcherPath);
   yield* fs.makeDirectory(NodePath.join(home, ".claude"));
-  yield* fs.writeFileString(
-    NodePath.join(home, ".claude", "settings.json"),
-    JSON.stringify(input.user),
-  );
-  yield* fs.makeDirectory(managedDirectory);
+  yield* writeUserSettings(input.user);
+  yield* fs.makeDirectory(NodePath.join(managedDirectory, "managed-settings.d"), {
+    recursive: true,
+  });
   if (input.managed) {
     yield* fs.writeFileString(
       NodePath.join(managedDirectory, "managed-settings.json"),
       JSON.stringify(input.managed),
+    );
+  }
+  for (const [name, settings] of Object.entries(input.managedDropIns ?? {})) {
+    yield* fs.writeFileString(
+      NodePath.join(managedDirectory, "managed-settings.d", name),
+      JSON.stringify(settings),
     );
   }
   const requestedTags: Array<string> = [];
@@ -139,30 +147,38 @@ const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (inpu
   }).pipe(
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
     Effect.provideService(HostProcess.HomeDirectory, home),
+    Effect.provideService(HostProcess.Environment, { HOME: home }),
     Effect.provideService(ClaudeManagedConfigDirectory, managedDirectory),
     Effect.provideService(
       HttpClient.HttpClient,
       makeNpmRegistry(requestedTags, input.unavailableTags),
     ),
   );
-  const capabilities = yield* instance.snapshot.resolveMaintenance();
-  const latestVersion = yield* resolveLatestProviderVersion(capabilities).pipe(
-    Effect.provideServiceEffect(
-      ProviderLatestVersions.ProviderLatestVersions,
-      ProviderLatestVersions.make(),
-    ),
-  );
+  const latestVersions = yield* ProviderLatestVersions.make();
 
-  expect(capabilities.update).toMatchObject({ executable: launcherPath, args: ["update"] });
-  return {
-    requestedTags,
-    advisory: createProviderVersionAdvisory({
+  const resolveAdvisory = Effect.fn("resolveAdvisory")(function* (options?: {
+    readonly fresh?: boolean;
+  }) {
+    const capabilities = yield* instance.snapshot.resolveMaintenance(options);
+    const latestVersion = yield* resolveLatestProviderVersion(capabilities).pipe(
+      Effect.provideService(ProviderLatestVersions.ProviderLatestVersions, latestVersions),
+    );
+    expect(capabilities.update).toMatchObject({ executable: launcherPath, args: ["update"] });
+    return createProviderVersionAdvisory({
       driver: ClaudeDriver.driverKind,
       currentVersion: "2.1.308",
       latestVersion,
       maintenanceCapabilities: capabilities,
-    }),
-  };
+    });
+  });
+  return { requestedTags, writeUserSettings, resolveAdvisory };
+});
+
+const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (
+  input: Parameters<typeof makeNativeInstall>[0],
+) {
+  const install = yield* makeNativeInstall(input);
+  return { requestedTags: install.requestedTags, advisory: yield* install.resolveAdvisory() };
 });
 
 it.layer(layerTest)("ClaudeDriver", (it) => {
@@ -207,6 +223,52 @@ it.layer(layerTest)("ClaudeDriver", (it) => {
         expect(advisory).toMatchObject({
           status: "behind_latest",
           latestVersion: "2.1.312",
+        });
+      }).pipe(Effect.scoped),
+    { skip: windowsHost },
+  );
+
+  it.effect(
+    "follows the last managed drop-in's update channel over the base managed file",
+    () =>
+      Effect.gen(function* () {
+        const { advisory } = yield* resolveNativeAdvisory({
+          user: {},
+          managed: { autoUpdatesChannel: "stable" },
+          managedDropIns: {
+            "10-telemetry.json": { env: {} },
+            "20-updates.json": { autoUpdatesChannel: "latest" },
+            "30-notes.txt": { autoUpdatesChannel: "stable" },
+          },
+        });
+        expect(advisory).toMatchObject({
+          status: "behind_latest",
+          latestVersion: "2.1.312",
+        });
+      }).pipe(Effect.scoped),
+    { skip: windowsHost },
+  );
+
+  it.effect(
+    "follows a switched update channel after a fresh maintenance resolution",
+    () =>
+      Effect.gen(function* () {
+        const install = yield* makeNativeInstall({ user: { autoUpdatesChannel: "stable" } });
+        expect(yield* install.resolveAdvisory()).toMatchObject({
+          status: "current",
+          latestVersion: "2.1.308",
+        });
+
+        yield* install.writeUserSettings({ autoUpdatesChannel: "latest" });
+        expect(yield* install.resolveAdvisory({ fresh: true })).toMatchObject({
+          status: "behind_latest",
+          latestVersion: "2.1.312",
+        });
+
+        yield* install.writeUserSettings({ autoUpdatesChannel: "stable" });
+        expect(yield* install.resolveAdvisory({ fresh: true })).toMatchObject({
+          status: "current",
+          latestVersion: "2.1.308",
         });
       }).pipe(Effect.scoped),
     { skip: windowsHost },

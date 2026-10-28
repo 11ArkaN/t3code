@@ -49,6 +49,7 @@ import {
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
+  type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
@@ -57,7 +58,7 @@ import {
   type ProviderSnapshotSettings,
 } from "@t3tools/provider-core/server/snapshotSettings";
 import {
-  claudeManagedConfigPath,
+  ClaudeManagedConfigDirectory,
   makeClaudeCapabilitiesCacheKey,
   makeClaudeContinuationGroupKey,
   resolveClaudeHomePath,
@@ -84,6 +85,17 @@ function isClaudeNativeCommandPath(commandPath: string): boolean {
 }
 
 const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
+
+const CLAUDE_NATIVE_UPDATE = {
+  args: ["update"],
+  isCommandPath: isClaudeNativeCommandPath,
+};
+
+const UPDATE = makePackageManagedProviderMaintenanceResolver({
+  provider: DRIVER_KIND,
+  npmPackageName: CLAUDE_NPM_PACKAGE,
+  nativeUpdate: CLAUDE_NATIVE_UPDATE,
+});
 
 const ClaudeUpdateChannelSettings = Schema.fromJsonString(
   Schema.Struct({ autoUpdatesChannel: Schema.optional(Schema.String) }),
@@ -144,38 +156,58 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
     } satisfies ClaudeSettings;
     // The updater runs with the server's env, not this instance's, so it reads the server's config dir.
-    const updateSettingsPaths = [
-      yield* claudeManagedConfigPath("managed-settings.json"),
-      path.join(
-        yield* resolveClaudeHomePath({ homePath: "" }, yield* HostProcess.Environment),
-        "settings.json",
-      ),
-    ];
+    const userSettingsPath = path.join(
+      yield* resolveClaudeHomePath({ homePath: "" }, yield* HostProcess.Environment),
+      "settings.json",
+    );
+    const managedDirectory = yield* ClaudeManagedConfigDirectory;
+    const managedDropInDirectory = path.join(managedDirectory, "managed-settings.d");
     const readUpdateChannel = (settingsPath: string) =>
       fileSystem.readFileString(settingsPath).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(ClaudeUpdateChannelSettings)),
         Effect.map((settings) => settings.autoUpdatesChannel),
         Effect.orElseSucceed(() => undefined),
       );
-    // `claude update` installs the `stable` dist-tag when managed, else user, settings opt in.
-    const lookupLatestVersion = Effect.forEach(updateSettingsPaths, readUpdateChannel).pipe(
-      Effect.flatMap((channels) =>
-        fetchNpmLatestVersion(
-          CLAUDE_NPM_PACKAGE,
-          channels.find((channel) => channel !== undefined) === "stable" ? "stable" : "latest",
-        ),
-      ),
-      Effect.provideService(HttpClient.HttpClient, httpClient),
+    // Drop-ins merge after managed-settings.json in name order; later values win.
+    const managedSettingsPaths = fileSystem.readDirectory(managedDropInDirectory).pipe(
+      Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      Effect.map((names) => [
+        path.join(managedDirectory, "managed-settings.json"),
+        ...names
+          .filter((name) => name.endsWith(".json") && !name.startsWith("."))
+          .toSorted()
+          .map((name) => path.join(managedDropInDirectory, name)),
+      ]),
     );
-    const update = makePackageManagedProviderMaintenanceResolver({
+    // `claude update` follows `autoUpdatesChannel` from managed, else user, settings.
+    const updateChannel = managedSettingsPaths.pipe(
+      Effect.flatMap((paths) => Effect.forEach(paths, readUpdateChannel)),
+      Effect.flatMap((channels) => {
+        const managed = channels.findLast((channel) => channel !== undefined);
+        return managed === undefined
+          ? readUpdateChannel(userSettingsPath)
+          : Effect.succeed(managed);
+      }),
+    );
+    const stableUpdate = makePackageManagedProviderMaintenanceResolver({
       provider: DRIVER_KIND,
       npmPackageName: CLAUDE_NPM_PACKAGE,
       nativeUpdate: {
-        args: ["update"],
-        isCommandPath: isClaudeNativeCommandPath,
-        lookupLatestVersion,
+        ...CLAUDE_NATIVE_UPDATE,
+        lookupLatestVersion: fetchNpmLatestVersion(CLAUDE_NPM_PACKAGE, "stable").pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+        ),
       },
     });
+    // Read per resolution so a refresh follows a channel switch.
+    const update: ProviderMaintenanceCapabilitiesResolver = {
+      resolve: (context) =>
+        updateChannel.pipe(
+          Effect.flatMap((channel) =>
+            (channel === "stable" ? stableUpdate : UPDATE).resolve(context),
+          ),
+        ),
+    };
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
       resolveProviderMaintenanceCapabilitiesEffect(update, {
         binaryPath: effectiveConfig.binaryPath,
