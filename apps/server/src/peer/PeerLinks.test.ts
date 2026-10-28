@@ -470,9 +470,10 @@ it.effect(
 );
 
 /** `tailscale status --json` with `peerIps` as another machine on its tailnet. */
-const tailscaleStatus = (backendState: string, peerIps: ReadonlyArray<string>) =>
+const tailscaleStatus = (backendState: string, peerIps: ReadonlyArray<string>, tun = true) =>
   JSON.stringify({
     BackendState: backendState,
+    TUN: tun,
     Self: { DNSName: "laptop.tail1234.ts.net.", TailscaleIPs: ["100.101.0.1"] },
     Peer: { "nodekey:box": { DNSName: "box.tail1234.ts.net.", TailscaleIPs: peerIps } },
   });
@@ -539,6 +540,18 @@ it.effect(
           })
           .pipe(Effect.flip);
         expect(stopped.message).toContain("plain http");
+        expect(yield* linkedSessions(b)).toEqual([]);
+
+        // In userspace networking it runs and lists them, but the OS has no route to them.
+        yield* Ref.set(status, tailscaleStatus("Running", peerIps, false));
+        const userspace = yield* a.links
+          .link({
+            url: `http://100.100.1.2:${port}`,
+            pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+            access: "auto",
+          })
+          .pipe(Effect.flip);
+        expect(userspace.message).toContain("plain http");
         expect(yield* linkedSessions(b)).toEqual([]);
         yield* Ref.set(status, tailscaleStatus("Running", peerIps));
 

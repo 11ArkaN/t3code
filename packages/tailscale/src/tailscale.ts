@@ -290,6 +290,7 @@ export const readTailscaleStatus = readTailscaleOutput("status", ["status", "--j
 
 const TailscalePeersJson = Schema.Struct({
   BackendState: Schema.optional(Schema.Unknown),
+  TUN: Schema.optional(Schema.Unknown),
   Self: Schema.optional(Schema.Struct({ TailscaleIPs: Schema.optional(Schema.Unknown) })),
   ExitNodeStatus: Schema.optional(Schema.Struct({ Online: Schema.optional(Schema.Unknown) })),
   Peer: Schema.optional(
@@ -342,8 +343,8 @@ export const readTailscaleExitNode = readTailscaleOutput("status", ["status", "-
 
 /**
  * The addresses of this machine and every other machine on its tailnet. Empty
- * unless Tailscale is running: a stopped one still lists them, but traffic to
- * them would leave unencrypted.
+ * unless Tailscale runs with its TUN device: stopped or in userspace networking,
+ * it still lists them, but the OS would send traffic to them unencrypted.
  */
 export const readTailnetAddresses = readTailscaleOutput("status", ["status", "--json"]).pipe(
   Effect.flatMap((rawStatusJson) =>
@@ -354,7 +355,7 @@ export const readTailnetAddresses = readTailscaleOutput("status", ["status", "--
   Effect.map(
     (parsed) =>
       new Set(
-        (parsed.BackendState === "Running"
+        (parsed.BackendState === "Running" && parsed.TUN === true
           ? [
               ...(parsed.Self === undefined ? [] : [parsed.Self]),
               ...Object.values(parsed.Peer ?? {}),
