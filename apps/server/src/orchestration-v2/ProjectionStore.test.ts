@@ -29,6 +29,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1472,8 +1473,9 @@ it.effect.each([
         userTurnLimit: THREAD_HISTORY_PAGE_POLICY.maxUserTurns,
       })
       .pipe(Effect.withTracer(tracer));
+    const sqlClient = yield* Effect.serviceOption(SqlClient.SqlClient);
     if (storeKind === "SQL") {
-      const sql = yield* SqlClient.SqlClient;
+      const sql = Option.getOrThrow(sqlClient);
       const query = statements.find(
         (statement) =>
           statement.includes("FROM orchestration_v2_projection_runtime_requests AS request") &&
