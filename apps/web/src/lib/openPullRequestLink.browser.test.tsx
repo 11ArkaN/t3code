@@ -1,0 +1,119 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { AsyncResult } from "effect/reactivity";
+import { expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
+
+import { act, render, stubGlobal } from "../../test/render";
+
+const state = vi.hoisted(() => ({ preview: vi.fn(), openLink: vi.fn() }));
+vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => state.preview }));
+vi.mock("../browser/useOpenLink", () => ({ useOpenLink: () => state.openLink }));
+vi.mock(import("../state/environments"), async (original) => ({
+  ...(await original()),
+  usePrimaryEnvironmentId: () => EnvironmentId.make("local"),
+}));
+vi.mock("../state/entities", async (original) => ({
+  ...(await original<typeof import("../state/entities")>()),
+  readProjects: () => [project],
+  useProjects: () => [project],
+  readProject: () => project,
+  readThreadShell: () => ({ projectId: "project", worktreePath: null }),
+}));
+vi.mock("../state/server", async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  return {
+    ...(await original<typeof import("../state/server")>()),
+    environmentServerConfigsAtom: Atom.make(new Map()),
+  };
+});
+
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
+import { __setClientSettingsForTests } from "../hooks/useSettings";
+import { ToastProvider } from "../components/ui/toast";
+import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
+import { useRightPanelStore } from "../rightPanelStore";
+import { useDiffPanelStore } from "../diffPanelStore";
+import { useOpenChangeRequestLink } from "./openPullRequestLink";
+
+const environmentId = EnvironmentId.make("local");
+const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
+const project = {
+  id: "project",
+  environmentId,
+  workspaceRoot: "/repo",
+  repositoryIdentity: {
+    provider: "github",
+    canonicalKey: "github.com/effect-ts/effect",
+    displayName: "Effect-TS/effect",
+    locator: {
+      source: "git-remote",
+      remoteName: "origin",
+      remoteUrl: "https://github.com/Effect-TS/effect.git",
+    },
+  },
+};
+const commitUrl = `https://github.com/Effect-TS/effect/commit/${"a".repeat(40)}?plain=1#diff-original`;
+
+function CommitLink() {
+  const open = useOpenChangeRequestLink(threadRef);
+  return (
+    <a href={commitUrl} onClick={(event) => open(event, commitUrl)}>
+      Commit
+    </a>
+  );
+}
+
+function setup() {
+  state.preview.mockReset().mockResolvedValue(AsyncResult.success({ sources: [] }));
+  state.openLink.mockReset().mockResolvedValue(undefined);
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    pullRequestLinksOpenInApp: true,
+    browserLinkTarget: "system",
+  });
+  useDiffPanelStore.setState({ byThreadKey: {}, branchBaseRefByThreadKey: {} });
+  useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
+}
+
+it.each(["shiftKey", "altKey"] as const)("keeps %s commit clicks native", async (modifier) => {
+  setup();
+  await using screen = await render(
+    <AppAtomRegistryProvider>
+      <CommitLink />
+    </AppAtomRegistryProvider>,
+  );
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true, [modifier]: true });
+  const defaults: boolean[] = [];
+  screen.container.addEventListener(
+    "click",
+    (nativeEvent) => {
+      defaults.push(nativeEvent.defaultPrevented);
+      nativeEvent.preventDefault();
+    },
+    { once: true },
+  );
+  await act(() => screen.getByRole("link", { name: "Commit" }).element().dispatchEvent(event));
+  expect(defaults).toEqual([false]);
+  expect(state.preview).not.toHaveBeenCalled();
+  expect(useRightPanelStore.getState().byThreadKey).toEqual({});
+});
+
+it("offers the original unavailable commit URL when web popups are blocked", async () => {
+  setup();
+  using _desktop = stubGlobal("desktopBridge", undefined);
+  await using screen = await render(
+    <AppAtomRegistryProvider>
+      <ToastProvider>
+        <CommitLink />
+      </ToastProvider>
+    </AppAtomRegistryProvider>,
+  );
+  using open = vi.spyOn(window, "open").mockReturnValue(null);
+  await screen.getByRole("link", { name: "Commit" }).click();
+  await expect.element(page.getByRole("button", { name: "Open link", exact: true })).toBeVisible();
+  expect(open).not.toHaveBeenCalled();
+  await page.getByRole("button", { name: "Open link", exact: true }).click();
+  expect(open).toHaveBeenCalledExactlyOnceWith(commitUrl, "_blank", "noopener,noreferrer");
+  expect(state.openLink).not.toHaveBeenCalled();
+});
