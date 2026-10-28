@@ -39,14 +39,17 @@ function processOutput(stdout: string): SourceControlHost.SourceControlProcessOu
   };
 }
 
-function mockGlab(signedInHosts: ReadonlyArray<string>, remoteUrls: ReadonlyArray<string> = []) {
+function mockGlab(
+  signedInHosts: ReadonlyArray<string>,
+  remoteUrls: ReadonlyArray<string | { readonly url: string; readonly pushUrl: string }> = [],
+) {
   mockedRemotes.mockReturnValue(
     Effect.succeed(
       Effect.succeed({
-        remotes: remoteUrls.map((url) => ({
+        remotes: remoteUrls.map((remote) => ({
           name: "origin",
-          url,
-          pushUrl: Option.none(),
+          url: typeof remote === "string" ? remote : remote.url,
+          pushUrl: typeof remote === "string" ? Option.none() : Option.some(remote.pushUrl),
           isPrimary: true,
         })),
         freshness: {
@@ -324,6 +327,16 @@ layer("GitLabCli.layer", (it) => {
       case: "the checkout has a userless SCP gitlab.com remote",
       hosts: ["gitlab.selfhosted.test"],
       remotes: ["gitlab.com:team/app.git"],
+    },
+    {
+      case: "the checkout has a userless SCP gitlab.com remote with a trailing slash",
+      hosts: ["gitlab.selfhosted.test"],
+      remotes: ["gitlab.com:team/app.git/"],
+    },
+    {
+      case: "the checkout fetches from a mirror and pushes to gitlab.com",
+      hosts: ["gitlab.selfhosted.test"],
+      remotes: [{ url: "/srv/mirror/app.git", pushUrl: "git@gitlab.com:team/app.git" }],
     },
   ])("leaves the host to glab when $case", ({ hosts, remotes }) =>
     Effect.gen(function* () {

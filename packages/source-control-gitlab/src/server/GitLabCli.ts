@@ -424,7 +424,7 @@ function parseRepositoryPath(repository: string): {
 
 export function parseGitLabRemoteHost(remoteUrl: string) {
   // Remote host parsing does not recognize userless SCP remotes.
-  const scpHost = /^([^@:/\\\s]{2,}):\/?[^/\s]+(?:\/[^/\s]+)+$/u.exec(remoteUrl.trim())?.[1];
+  const scpHost = /^([^@:/\\\s]{2,}):\/?[^/\s]+(?:\/[^/\s]+)+\/?$/u.exec(remoteUrl.trim())?.[1];
   return parseGitRemoteHost(scpHost ? `ssh://${scpHost}` : remoteUrl);
 }
 
@@ -483,7 +483,9 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => []),
       );
       const followsRemote = remotes.some((remote) =>
-        knownHosts.has(parseGitLabRemoteHost(remote.url)?.host ?? ""),
+        [remote.url, ...Option.toArray(remote.pushUrl)].some((url) =>
+          knownHosts.has(parseGitLabRemoteHost(url)?.host ?? ""),
+        ),
       );
       return followsRemote ? undefined : { GITLAB_HOST: only.host };
     },
