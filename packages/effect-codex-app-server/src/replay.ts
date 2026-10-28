@@ -48,15 +48,17 @@ export const CodexAppServerReplayTranscript = Schema.Struct({
 });
 export type CodexAppServerReplayTranscript = typeof CodexAppServerReplayTranscript.Type;
 
-/** Splits a recording of concurrent app-server processes into one transcript per process. */
+/** Splits a recording of concurrent app-server connections into one transcript per connection, in connection order. */
 export function splitReplayConnections(
   transcript: CodexAppServerReplayTranscript,
 ): ReadonlyArray<CodexAppServerReplayTranscript> {
-  const count = 1 + Math.max(0, ...transcript.entries.map((entry) => entry.connection ?? 0));
-  return Array.from({ length: count }, (_, connection) => ({
-    ...transcript,
-    entries: transcript.entries.filter((entry) => (entry.connection ?? 0) === connection),
-  }));
+  const connections = [...new Set(transcript.entries.map((entry) => entry.connection ?? 0))];
+  return connections
+    .toSorted((left, right) => left - right)
+    .map((connection) => ({
+      ...transcript,
+      entries: transcript.entries.filter((entry) => (entry.connection ?? 0) === connection),
+    }));
 }
 const decodeOutboundJsonFrame = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 

@@ -862,6 +862,51 @@ describe("CodexAdapterV2 process exit", () => {
   );
 });
 
+describe("CodexAdapterV2 replay testkit", () => {
+  it.effect("gives each session its own recorded connection and continues it on reopen", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const initialize = (userAgent: string, connection?: number) =>
+          [
+            {
+              type: "expect_outbound",
+              label: "initialize",
+              frame: { id: 1, method: "initialize", params: {} },
+              ...(connection === undefined ? {} : { connection }),
+            },
+            {
+              type: "emit_inbound",
+              label: "initialize",
+              frame: { id: 1, result: { userAgent } },
+              ...(connection === undefined ? {} : { connection }),
+            },
+          ] satisfies Array<CodexReplay.CodexAppServerReplayEntry>;
+        const transcript = makeCodexReplayTranscript({
+          scenario: "testkit-session-connections",
+          entries: [
+            ...initialize("session A, first process"),
+            { type: "runtime_exit", status: "success" },
+            ...initialize("session A, after restart"),
+            ...initialize("session B", 1),
+          ],
+        });
+        const factory = yield* CodexAdapterV2Testkit.makeReplayClientFactory({ transcript });
+        const userAgent = (providerSessionId: string) =>
+          factory
+            .open({ providerSessionId: ProviderSessionId.make(providerSessionId) } as never)
+            .pipe(
+              Effect.flatMap((client) => client.raw.request("initialize", {})),
+              Effect.map((result) => (result as { readonly userAgent: string }).userAgent),
+            );
+
+        assert.equal(yield* userAgent("session-a"), "session A, first process");
+        assert.equal(yield* userAgent("session-b"), "session B");
+        assert.equal(yield* userAgent("session-a"), "session A, after restart");
+      }),
+    ),
+  );
+});
+
 describe("CodexAdapterV2 thread writer", () => {
   const writerError = (message: string) =>
     CodexError.CodexAppServerRequestError.fromProtocolError(
