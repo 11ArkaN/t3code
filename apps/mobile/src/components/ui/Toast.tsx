@@ -1,6 +1,7 @@
 import { MOBILE_MOTION, MOBILE_SHAPE } from "../../lib/designTokens";
+import { useLargeText } from "../../lib/useLargeText";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { AccessibilityInfo, Platform, StyleSheet, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Platform, StyleSheet, View } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
@@ -43,11 +44,11 @@ export function Toast(props: ToastProps) {
 }
 
 function ToastContent(props: ToastProps & { readonly glassReady?: boolean }) {
-  const { fontScale } = useWindowDimensions();
+  const largeText = useLargeText();
   const { colorScheme } = useControlTheme();
   const borderRadius = Platform.OS === "ios" ? 31 : MOBILE_SHAPE.toast;
   // Explicit single-line notices reserve the action's width and truncate the text.
-  const inlineAction = props.singleLine || (!props.description && fontScale < 1.5);
+  const inlineAction = props.singleLine || (!props.description && !largeText);
   const message =
     props.singleLine && props.description
       ? `${props.message}: ${props.description}`

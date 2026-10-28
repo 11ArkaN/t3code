@@ -1,5 +1,6 @@
-import { Pressable, ScrollView } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { useLargeText } from "../../lib/useLargeText";
 import { ListFilterMenu } from "../workspace/ListFilterMenu";
 import type { HomeHeaderProps } from "./HomeHeader.types";
 
@@ -17,19 +18,17 @@ export function ThreadListFilters(
     readonly gutter: number;
   },
 ) {
+  // Accessibility sizes stack the pills so each label wraps in the list's width.
+  const stacked = useLargeText();
   const selectedEnvironment = props.environments.find(
     (environment) => environment.environmentId === props.selectedEnvironmentId,
   );
   const selectedProject = props.projects.find(
     (project) => project.key === props.selectedProjectKey,
   );
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={{ marginHorizontal: -props.gutter }}
-      contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 2, paddingBottom: 10, gap: 8 }}
-    >
+  const padding = { paddingHorizontal: 20, paddingTop: 2, paddingBottom: 10, gap: 8 };
+  const filters = (
+    <>
       <ListFilterMenu
         label={selectedEnvironment?.label ?? "All environments"}
         accessibilityLabel="Filter threads by environment"
@@ -98,6 +97,20 @@ export function ThreadListFilters(
           <SymbolView name="xmark.circle.fill" size={18} tintColorClassName="accent-icon-muted" />
         </Pressable>
       ) : null}
+    </>
+  );
+  return stacked ? (
+    <View className="items-start" style={{ marginHorizontal: -props.gutter, ...padding }}>
+      {filters}
+    </View>
+  ) : (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={{ marginHorizontal: -props.gutter }}
+      contentContainerStyle={padding}
+    >
+      {filters}
     </ScrollView>
   );
 }

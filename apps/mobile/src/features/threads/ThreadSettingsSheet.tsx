@@ -57,6 +57,7 @@ import { IconButton } from "../../components/ui/IconButton";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { cn } from "../../lib/cn";
+import { useLargeText } from "../../lib/useLargeText";
 import {
   buildModelOptions,
   groupByProvider,
@@ -205,6 +206,7 @@ function DisclosureRow(props: {
   readonly onPress: () => void;
   readonly isLast?: boolean;
 }) {
+  const stacked = useLargeText();
   return (
     <Pressable
       accessibilityRole="button"
@@ -214,13 +216,24 @@ function DisclosureRow(props: {
         !props.isLast && "border-b border-border-subtle",
       )}
     >
-      <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
-      <View className="flex-1" />
-      {props.value ? (
-        <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-          {props.value}
-        </Text>
-      ) : null}
+      {stacked ? (
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
+          {props.value ? (
+            <Text className="text-sm text-foreground-muted">{props.value}</Text>
+          ) : null}
+        </View>
+      ) : (
+        <>
+          <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
+          <View className="flex-1" />
+          {props.value ? (
+            <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+              {props.value}
+            </Text>
+          ) : null}
+        </>
+      )}
       <SymbolView
         name="chevron.right"
         size={12}
@@ -237,14 +250,18 @@ function SwitchRow(props: {
   readonly onValueChange: (value: boolean) => void;
   readonly isLast?: boolean;
 }) {
+  const wraps = useLargeText();
   return (
     <View
       className={cn(
         "min-h-11 flex-row items-center justify-between bg-grouped-card px-4 py-1",
+        wraps && "gap-3",
         !props.isLast && "border-b border-border-subtle",
       )}
     >
-      <Text className="text-sm font-t3-medium text-foreground">{props.label}</Text>
+      <Text className={cn("text-sm font-t3-medium text-foreground", wraps && "shrink")}>
+        {props.label}
+      </Text>
       <ThemedSwitch
         accessibilityLabel={props.label}
         onValueChange={props.onValueChange}

@@ -1,5 +1,5 @@
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { use } from "react";
+import { use, useState } from "react";
 import { View, useWindowDimensions } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import {
   useNativeLayoutMetrics,
 } from "../../native/native-layout-metrics";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { useLargeText } from "../../lib/useLargeText";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { HomeRouteScreen } from "../home/HomeRouteScreen";
 import { WorkspaceConnectionTitle } from "../home/WorkspaceConnectionTitle";
@@ -98,8 +99,10 @@ export function WorkspaceRootScreen() {
   const bottomInset = Math.max(insets.bottom, columnMetrics?.safeArea.bottom ?? 0);
   // The soft keyboard covers the footer, so it steps aside while typing.
   const footer = page === null && keyboardHeight === 0;
-  const bottomClearance =
-    Math.max(bottomInset, keyboardHeight) + (footer ? WORKSPACE_SIDEBAR_FOOTER_HEIGHT : 0) + 16;
+  const largeText = useLargeText();
+  const [stackedFooterHeight, setStackedFooterHeight] = useState(WORKSPACE_SIDEBAR_FOOTER_HEIGHT);
+  const footerHeight = largeText ? stackedFooterHeight : WORKSPACE_SIDEBAR_FOOTER_HEIGHT;
+  const bottomClearance = Math.max(bottomInset, keyboardHeight) + (footer ? footerHeight : 0) + 16;
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
       columnWidth={width}
@@ -147,6 +150,7 @@ export function WorkspaceRootScreen() {
             bottomInset={bottomInset}
             surfaceClassName={surfaceClassName}
             onSelect={selectTab}
+            onStackedHeightChange={setStackedFooterHeight}
           />
         ) : null}
       </View>

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Platform, Pressable, View } from "react-native";
 
 import { cn } from "../../lib/cn";
+import { useLargeText } from "../../lib/useLargeText";
 import { SymbolView, type AppSymbolName } from "./AppSymbol";
 import { AppText as Text } from "./AppText";
 import { NavigationRow } from "./NavigationRow";
@@ -22,6 +23,8 @@ export function SelectionRow(props: {
   readonly title: string;
 }) {
   const role = props.role ?? "radio";
+  // iOS names wrap at accessibility sizes instead of cutting to a few letters.
+  const lines = useLargeText() ? undefined : 1;
   const row =
     Platform.OS === "android" ? (
       <NavigationRow
@@ -69,11 +72,11 @@ export function SelectionRow(props: {
           (props.leading ?? null)
         )}
         <View className="min-w-0 flex-1 gap-0.5">
-          <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
+          <Text className="text-base font-t3-medium text-foreground" numberOfLines={lines}>
             {props.title}
           </Text>
           {props.subtitle ? (
-            <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+            <Text className="text-xs text-foreground-muted" numberOfLines={lines}>
               {props.subtitle}
             </Text>
           ) : null}

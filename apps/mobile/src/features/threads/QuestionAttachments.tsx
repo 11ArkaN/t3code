@@ -3,6 +3,7 @@ import { AsyncResult } from "effect/reactivity";
 import * as Dialog from "../../components/ui/Dialog";
 import { TextInputWrapper } from "expo-paste-input";
 import { AppTextInput as TextInput } from "../../components/ui/AppText";
+import { useLargeText } from "../../lib/useLargeText";
 import { useNativePaste } from "../../lib/useNativePaste";
 import { convertPastedImagesToAttachments } from "../../lib/composerImages";
 import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS, type UserInputQuestion } from "@t3tools/contracts";
@@ -46,6 +47,7 @@ export function QuestionAttachments(props: {
   const configs = useServerConfigs();
   const drafts = useAtomValue(composerDraftsAtom);
   const focusedRef = useRef(false);
+  const largeText = useLargeText();
   const onInputFocusChange = props.onInputFocusChange;
   // The caller keys this component by request and question, so unmounting ends any open
   // picker's scope.
@@ -196,8 +198,15 @@ export function QuestionAttachments(props: {
       <TextInputWrapper onPaste={paste}>
         <TextInput
           value={props.value}
-          multiline={props.question.initialAnswer !== undefined}
-          submitBehavior={props.question.initialAnswer !== undefined ? "newline" : undefined}
+          // Accessibility sizes wrap the answer and placeholder; Return still only dismisses.
+          multiline={props.question.initialAnswer !== undefined || largeText}
+          submitBehavior={
+            props.question.initialAnswer !== undefined
+              ? "newline"
+              : largeText
+                ? "blurAndSubmit"
+                : undefined
+          }
           editable={!props.disabled}
           onChangeText={props.onChangeText}
           onFocus={() => {

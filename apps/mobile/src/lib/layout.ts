@@ -18,6 +18,8 @@ export const CHAT_CONTENT_MAX_WIDTH = 960;
 export const ANDROID_READING_MAX_WIDTH = 640;
 // min-h-8 uses the 14px rem configured in metro.config.js.
 export const THREAD_WORK_ROW_MIN_HEIGHT = 28;
+// iOS scales its largest standard text size by 1.35 and its first accessibility size by 1.79.
+export const LARGE_TEXT_FONT_SCALE = 1.5;
 
 export function deriveThreadWorkLogSizing(input: {
   readonly baseFontSize: number;

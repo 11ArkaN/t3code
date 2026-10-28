@@ -8,6 +8,7 @@ import type {
   RuntimeMode,
 } from "@t3tools/contracts";
 
+import { LARGE_TEXT_FONT_SCALE } from "../../lib/layout";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 
 export const RUNTIME_MODE_CHOICES: ReadonlyArray<{
@@ -93,8 +94,6 @@ export function resolveTraitPick(input: {
 
 // Below this width the iOS composer folds Traits into the model chip.
 const WIDE_COMPOSER_MIN_WIDTH = 520;
-// Accessibility text sizes, the same point where list rows stack their detail.
-const LARGE_TEXT_FONT_SCALE = 1.5;
 
 /** The iOS composer's chips: model first, then Traits and Mode, in desktop order. */
 export function resolveComposerControlsPresentation(input: {

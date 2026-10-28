@@ -3,6 +3,7 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { cn } from "../../lib/cn";
+import { useLargeText } from "../../lib/useLargeText";
 import type { ModelOption } from "../../lib/modelOptions";
 
 export type ModelRowProps = {
@@ -39,6 +40,9 @@ export function ModelRowContent(
       readonly selectedClassName?: string;
     },
 ) {
+  // Accessibility sizes wrap the name and flow its badges below it, so names are never cut.
+  const wraps = useLargeText();
+  const labelNumberOfLines = wraps ? undefined : props.labelNumberOfLines;
   return (
     <View
       style={props.minimumHeight === undefined ? undefined : { minHeight: props.minimumHeight }}
@@ -62,10 +66,10 @@ export function ModelRowContent(
       >
         {props.leadingSelection}
         <View className="min-w-0 flex-1">
-          <View className="flex-row items-center gap-2">
+          <View className={cn("flex-row items-center gap-2", wraps && "flex-wrap")}>
             <Text
               className="min-w-0 shrink text-base font-t3-medium text-foreground"
-              numberOfLines={props.labelNumberOfLines}
+              numberOfLines={labelNumberOfLines}
             >
               {props.option.label}
             </Text>
@@ -87,10 +91,7 @@ export function ModelRowContent(
             ) : null}
           </View>
           {props.option.subtitle ? (
-            <Text
-              className="text-xs text-foreground-muted"
-              numberOfLines={props.labelNumberOfLines}
-            >
+            <Text className="text-xs text-foreground-muted" numberOfLines={labelNumberOfLines}>
               {props.option.subtitle}
             </Text>
           ) : null}

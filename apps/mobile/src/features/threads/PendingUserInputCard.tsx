@@ -20,6 +20,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { cn } from "../../lib/cn";
+import { useLargeText } from "../../lib/useLargeText";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
 import { useMarkdownPreviewStyles } from "../files/FileMarkdownPreview";
@@ -114,6 +115,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
   );
   const question = page.question;
   const draft = question ? props.drafts[question.id] : undefined;
+  const largeText = useLargeText();
 
   const cardCoverage = props.cardCoverage;
   const barHeightRef = useRef(0);
@@ -167,10 +169,15 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         onPress={props.onToggleCollapsed}
         className="min-h-10 flex-1 flex-row items-center gap-2 active:opacity-70"
       >
-        <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
+        <Text
+          className={cn(
+            "font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary",
+            largeText && "shrink",
+          )}
+        >
           User input needed
         </Text>
-        <Text className="font-sans text-xs text-foreground-muted">
+        <Text className={cn("font-sans text-xs text-foreground-muted", largeText && "shrink")}>
           {questionCount} question{questionCount === 1 ? "" : "s"}
         </Text>
         <View className="flex-1" />
@@ -193,6 +200,67 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       ) : null}
     </View>
   ) : null;
+  const backButton =
+    page.index > 0 ? (
+      <Button
+        label="Back"
+        accessibilityLabel="Previous question"
+        fullWidth={largeText}
+        disabled={isResponding}
+        onPress={() => setQuestionIndex(page.index - 1)}
+      />
+    ) : null;
+  const forwardButton = page.isLast ? (
+    <Button
+      label="Submit"
+      accessibilityLabel={questionCount > 1 ? "Submit answers" : "Submit answer"}
+      tone="primary"
+      fullWidth={largeText}
+      loading={isResponding}
+      disabled={!props.canOperateThread || !canRespond || props.answers === null}
+      onPress={() => void props.onSubmit()}
+    />
+  ) : (
+    <Button
+      label="Next"
+      accessibilityLabel="Next question"
+      tone="primary"
+      fullWidth={largeText}
+      disabled={isResponding || !page.canAdvance}
+      onPress={() => setQuestionIndex(page.index + 1)}
+    />
+  );
+  // Accessibility sizes stack the actions and scroll them with the question, so the card's
+  // height limit cannot clip them.
+  const actions = (
+    <>
+      {largeText ? (
+        <View className="gap-2.5">
+          {forwardButton}
+          {backButton}
+        </View>
+      ) : (
+        <View className="flex-row items-center gap-2.5">
+          {backButton}
+          <View className="flex-1" />
+          {forwardButton}
+        </View>
+      )}
+      {props.pendingUserInput.dismissible ? (
+        <Button
+          label="Dismiss without answering"
+          tone="text"
+          disabled={isResponding}
+          onPress={() => void props.onDismiss()}
+        />
+      ) : null}
+      {!props.canOperateThread ? (
+        <Text className="font-sans text-xs text-foreground-tertiary">
+          This connection cannot submit answers.
+        </Text>
+      ) : null}
+    </>
+  );
   const card = renderCard ? (
     <Animated.View
       onLayout={handleCardLayout}
@@ -307,49 +375,9 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
             ) : null}
           </>
         ) : null}
+        {largeText ? actions : null}
       </ScrollView>
-      <View className="flex-row items-center gap-2.5">
-        {page.index > 0 ? (
-          <Button
-            label="Back"
-            accessibilityLabel="Previous question"
-            disabled={isResponding}
-            onPress={() => setQuestionIndex(page.index - 1)}
-          />
-        ) : null}
-        <View className="flex-1" />
-        {page.isLast ? (
-          <Button
-            label="Submit"
-            accessibilityLabel={questionCount > 1 ? "Submit answers" : "Submit answer"}
-            tone="primary"
-            loading={isResponding}
-            disabled={!props.canOperateThread || !canRespond || props.answers === null}
-            onPress={() => void props.onSubmit()}
-          />
-        ) : (
-          <Button
-            label="Next"
-            accessibilityLabel="Next question"
-            tone="primary"
-            disabled={isResponding || !page.canAdvance}
-            onPress={() => setQuestionIndex(page.index + 1)}
-          />
-        )}
-      </View>
-      {props.pendingUserInput.dismissible ? (
-        <Button
-          label="Dismiss without answering"
-          tone="text"
-          disabled={isResponding}
-          onPress={() => void props.onDismiss()}
-        />
-      ) : null}
-      {!props.canOperateThread ? (
-        <Text className="font-sans text-xs text-foreground-tertiary">
-          This connection cannot submit answers.
-        </Text>
-      ) : null}
+      {largeText ? null : actions}
     </Animated.View>
   ) : null;
   return (

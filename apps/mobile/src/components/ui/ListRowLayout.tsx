@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Platform, useWindowDimensions, View } from "react-native";
+import { Platform, View } from "react-native";
 
 import { cn } from "../../lib/cn";
+import { useLargeText } from "../../lib/useLargeText";
 import { AppText } from "./AppText";
 import { SymbolView, type AppSymbolName } from "./AppSymbol";
 
@@ -22,8 +23,7 @@ export function ListRowLayout({
   accessory,
   tone = "default",
 }: ListRowContentProps & { readonly accessory?: ReactNode; readonly tone?: "default" | "danger" }) {
-  const { fontScale } = useWindowDimensions();
-  const stackDetail = fontScale >= 1.5;
+  const stackDetail = useLargeText();
   return (
     <View
       className={cn(
