@@ -289,7 +289,11 @@ const nativePushTokenRegistration = Effect.fn("remoteRegistration.nativePushToke
       // Registering without a token would disable notifications the relay already accepted.
       Effect.catch((error) => {
         const fallback = lastNativePushToken;
-        if (!fallback) return Effect.fail(error);
+        if (!fallback) {
+          // Any registration accepted so far in this process had notifications off.
+          setRegistrationStatus("failed");
+          return Effect.fail(error);
+        }
         logRegistrationError("native push token lookup failed; reusing the last token", error);
         return Effect.succeed(fallback);
       }),

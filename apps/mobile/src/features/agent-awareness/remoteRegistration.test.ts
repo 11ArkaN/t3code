@@ -750,6 +750,33 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     );
   });
 
+  it.effect(
+    "does not report notifications enabled after permission is granted without a token",
+    () => {
+      const registrations = stubAndroidDeviceRelay();
+      vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({
+        granted: false,
+      } as never);
+      vi.mocked(Notifications.getDevicePushTokenAsync).mockRejectedValue(
+        new Error("Default FirebaseApp is not initialized"),
+      );
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+
+      return Effect.gen(function* () {
+        yield* runBackgroundOperations();
+        expect(registrations).toMatchObject([{ preferences: { notificationsEnabled: false } }]);
+        expect(getAgentAwarenessRegistrationStatus()).toBe("registered");
+
+        yield* refreshAgentAwarenessRegistration();
+
+        expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
+      }).pipe(
+        Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
+        Effect.provide(layerRelayTest),
+      );
+    },
+  );
+
   it.effect("saves a preference change when the push token cannot be re-read", () => {
     const registrations = stubAndroidDeviceRelay();
     vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
