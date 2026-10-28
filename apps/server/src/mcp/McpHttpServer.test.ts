@@ -422,6 +422,9 @@ it.effect("rejects a hand-registered tool's undeclared argument before asking th
 
       expect(inputs).toEqual([]);
       expect(snapshot.isError).toBe(true);
+      expect(snapshot.content).toEqual([
+        { type: "text", text: expect.stringContaining('Unknown argument "includeImages"') },
+      ]);
     }),
   ).pipe(Effect.provide(layerTest)),
 );
@@ -446,16 +449,32 @@ it.effect("decodes null optional arguments the way it decodes omitted ones", () 
 it.effect("rejects arguments a tool does not declare instead of dropping them", () => {
   const calls: Array<unknown> = [];
   return Effect.gen(function* () {
-    const launch = yield* Effect.exit(
+    const launch = yield* Effect.flip(
       callTool("t3_thread_launch", { title: "Repro", scratch: true, prompt: "say hi" }),
     );
-    const wait = yield* Effect.exit(
+    const wait = yield* Effect.flip(
       callTool("t3_thread_wait", { threadId: "thread-excess-arguments", timeout: 5_000 }),
     );
 
     expect(calls).toEqual([]);
-    expect(String(launch)).toContain('"prompt"');
-    expect(String(wait)).toContain('"timeout"');
+    expect(launch.message).toContain('Unknown argument "prompt"');
+    expect(wait.message).toContain('Unknown argument "timeout"');
+  }).pipe(Effect.provide(layerRecordingTools(calls)));
+});
+
+it.effect("still drops nested keys the merged advertised schema shows", () => {
+  const calls: Array<unknown> = [];
+  return Effect.gen(function* () {
+    yield* Effect.exit(
+      callTool("t3_thread_launch", {
+        title: "Root",
+        projectId: "project-1",
+        message: "say hi",
+        workspaceStrategy: { type: "root", baseRef: "main" },
+      }),
+    );
+
+    expect(calls).toHaveLength(1);
   }).pipe(Effect.provide(layerRecordingTools(calls)));
 });
 

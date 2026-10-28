@@ -244,6 +244,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
   dependencies,
 })
   .annotate(Tool.Title, "Read a T3 thread")
+  .annotate(Tool.Strict, true)
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
