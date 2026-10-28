@@ -35,7 +35,10 @@ function createStorageStub(initial: Record<string, string> = {}): Storage {
 async function bootWithFailingMainChunk(storage: Storage) {
   vi.resetModules();
   mocks.showBootError.mockClear();
-  const { promise: settled, resolve } = Promise.withResolvers<void>();
+  let resolve!: () => void;
+  const settled = new Promise<void>((done) => {
+    resolve = done;
+  });
   const reload = vi.fn(() => resolve()).mockName("location.reload");
   mocks.showBootError.mockImplementation(() => resolve());
   vi.stubGlobal(
