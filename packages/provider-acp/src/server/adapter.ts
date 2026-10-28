@@ -358,6 +358,22 @@ export interface AcpAdapterV2Flavor {
       notification: EffectAcpSchema.SessionNotification,
     ) => string | undefined;
   };
+  /**
+   * Native fork from an earlier turn. `nativeTurnId` reads the agent's id for a running
+   * turn's prompt, which the turn keeps as its native ref; forking from that turn sends
+   * `forkMeta(id)` as the `session/fork` `_meta`.
+   */
+  readonly forkFromTurn?: {
+    readonly supported: (
+      initializeResult: AcpSessionRuntime.AcpSessionRuntimeStartResult["initializeResult"],
+    ) => boolean;
+    readonly nativeTurnId: (
+      notification: EffectAcpSchema.SessionNotification,
+    ) => string | undefined;
+    readonly forkMeta: (
+      nativeTurnId: string,
+    ) => NonNullable<EffectAcpSchema.ForkSessionRequest["_meta"]>;
+  };
   /** Compacts with the agent's own request, for agents that answer a `/compact` prompt as chat. */
   readonly compactSession?: (
     runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -622,6 +638,38 @@ export const AcpProviderCapabilitiesV2 = {
 
 const STEER_DELIVERY_BOUND = "2 seconds";
 
+/**
+ * `session/fork` `_meta` for a fork from `providerTurnId`: none for the session head,
+ * the flavor's meta for a turn the agent named, or `null` when the agent can't fork there.
+ */
+function forkFromTurnMetaFor(input: {
+  readonly driver: ProviderDriverKind;
+  readonly flavor: Pick<AcpAdapterV2Flavor, "forkFromTurn">;
+  readonly canForkFromTurn: boolean;
+  readonly forkInput: ProviderAdapter.ProviderAdapterV2ForkThreadInput;
+}): NonNullable<EffectAcpSchema.ForkSessionRequest["_meta"]> | undefined | null {
+  const { forkInput } = input;
+  if (forkInput.providerTurnId === undefined) return undefined;
+  const turns = (forkInput.sourceProviderTurns ?? []).filter(
+    (turn) => turn.providerThreadId === forkInput.sourceProviderThread.id,
+  );
+  const target = turns.find((turn) => turn.id === forkInput.providerTurnId);
+  if (target === undefined) return null;
+  if (turns.every((turn) => turn.ordinal <= target.ordinal)) return undefined;
+  const ref = target.nativeTurnRef;
+  if (
+    input.flavor.forkFromTurn === undefined ||
+    !input.canForkFromTurn ||
+    ref === null ||
+    ref.driver !== input.driver ||
+    ref.strength !== "strong" ||
+    ref.nativeId === null
+  ) {
+    return null;
+  }
+  return input.flavor.forkFromTurn.forkMeta(ref.nativeId);
+}
+
 function isCompactionMessage(message: ProviderAdapter.ProviderAdapterV2TurnMessage): boolean {
   return message.text.trim() === "/compact" && message.attachments.length === 0;
 }
@@ -630,6 +678,7 @@ function negotiatedCapabilities(
   base: OrchestrationV2ProviderCapabilities,
   started: AcpSessionRuntime.AcpSessionRuntimeStartResult,
   modelOptionArrivesLate: boolean,
+  forksFromTurn: boolean,
 ): OrchestrationV2ProviderCapabilities {
   const agent = started.initializeResult.agentCapabilities ?? {};
   const session = agent.sessionCapabilities;
@@ -650,7 +699,7 @@ function negotiatedCapabilities(
       ...base.threads,
       canReadThreadSnapshot: canLoad,
       canForkThread: canFork,
-      canForkFromTurn: false,
+      canForkFromTurn: canFork && forksFromTurn,
     },
     tools: {
       ...base.tools,
@@ -1167,6 +1216,8 @@ interface ActiveAcpTurn {
   /** Completed when an update after dispatch matches `cancelAfterPromptStarts.isStart`. */
   readonly promptStarted: Deferred.Deferred<void, never>;
   backgroundFinalizeGeneration: number;
+  /** The agent's own id for this turn's prompt, from `forkFromTurn.nativeTurnId`. */
+  nativePromptId: string | undefined;
 }
 
 type AcpRuntimeTeardownState =
@@ -5912,6 +5963,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           Effect.fnUntraced(
             function* (rawNotification: EffectAcpSchema.SessionNotification) {
               if (flavor.ignoreSessionUpdate?.(rawNotification) === true) return;
+              const nativePromptId = flavor.forkFromTurn?.nativeTurnId(rawNotification);
+              if (nativePromptId !== undefined) {
+                const context = yield* Ref.get(activeTurn);
+                if (context !== null && context.nativeThreadId === rawNotification.sessionId) {
+                  context.nativePromptId ??= nativePromptId;
+                }
+              }
               const injectedSteerId = flavor.steering?.injectedSteerId(rawNotification);
               if (injectedSteerId !== undefined) {
                 yield* Deferred.succeed(steerInjection(injectedSteerId), undefined);
@@ -6768,6 +6826,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           flavor.capabilities,
           started,
           flavor.modelOptionArrivesLate === true,
+          flavor.forkFromTurn?.supported(started.initializeResult) === true,
         );
         const canLoadSession = started.initializeResult.agentCapabilities?.loadSession === true;
         const canResumeSession =
@@ -7059,11 +7118,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerThreadId: context.input.providerThread.id,
           nodeId: context.input.rootNodeId,
           runAttemptId: context.input.attemptId,
-          nativeTurnRef: {
-            driver,
-            nativeId: context.nativeTurnId,
-            strength: "weak",
-          },
+          nativeTurnRef:
+            context.nativePromptId === undefined
+              ? { driver, nativeId: context.nativeTurnId, strength: "weak" }
+              : { driver, nativeId: context.nativePromptId, strength: "strong" },
           ordinal: context.input.providerTurnOrdinal,
           status,
           startedAt: context.startedAt,
@@ -7639,6 +7697,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               promptSentAt: null,
               promptStarted,
               backgroundFinalizeGeneration: 0,
+              nativePromptId: undefined,
             };
             const carryover = yield* Ref.getAndSet(carryoverSubagents, null);
             let rehydratedCarryoverSubagents: ReadonlyArray<ActiveAcpSubagent> = [];
@@ -8736,7 +8795,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       detail: "ACP driver did not negotiate session/fork",
                     });
                   }
-                  if (forkInput.providerTurnId !== undefined) {
+                  const forkMeta = forkFromTurnMetaFor({
+                    driver,
+                    flavor,
+                    canForkFromTurn: capabilities.threads.canForkFromTurn,
+                    forkInput,
+                  });
+                  if (forkMeta === null) {
                     return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                       driver,
                       detail: "ACP session/fork can only fork the current session head",
@@ -8751,6 +8816,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   const forked = yield* runtime.forkSession(
                     sourceSessionId,
                     acpMcpActivation(mcpContext),
+                    forkMeta,
                   );
                   rememberTerminalEnvironment(
                     forked.sessionId,

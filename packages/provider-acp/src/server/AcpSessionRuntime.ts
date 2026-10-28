@@ -1139,6 +1139,7 @@ export class AcpSessionRuntime extends Context.Service<
     readonly forkSession: (
       sessionId: string,
       options?: AcpSessionActivationOptions,
+      meta?: NonNullable<EffectAcpSchema.ForkSessionRequest["_meta"]>,
     ) => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
     readonly listSessions: (
       cursor?: string,
@@ -2469,13 +2470,14 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         }),
         Effect.flatMap((response) => adoptSession(sessionId, response)),
       ),
-    forkSession: (sessionId, activationOptions) =>
+    forkSession: (sessionId, activationOptions, meta) =>
       start.pipe(
         Effect.flatMap((started) => {
           const requestPayload = {
             sessionId,
             cwd: options.cwd,
             mcpServers: sessionMcpServers(started.initializeResult, activationOptions),
+            ...(meta === undefined ? {} : { _meta: meta }),
           } satisfies EffectAcpSchema.ForkSessionRequest;
           return runLoggedRequest(
             "session/fork",

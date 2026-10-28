@@ -38,6 +38,8 @@ import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
 import { assertClaudeResultIsErrorOutput } from "./claude_result_is_error/output.ts";
 import { grokAutoBlockedCommandInput } from "./grok_auto_blocked_command/input.ts";
 import { kiroCompactionInput } from "./kiro_compaction/input.ts";
+import { kiroForkFromTurnInput } from "./kiro_fork_from_turn/input.ts";
+import { assertKiroForkFromTurnOutput } from "./kiro_fork_from_turn/output.ts";
 import { kiroMessageSteeringInput } from "./kiro_message_steering/input.ts";
 import { assertKiroMessageSteeringOutput } from "./kiro_message_steering/output.ts";
 import { assertKiroCompactionOutput } from "./kiro_compaction/output.ts";
@@ -557,6 +559,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./kiro_message_steering/kiro_transcript.ndjson", import.meta.url),
         modelSelection: KIRO_MODEL_SELECTION,
         assertOutput: assertKiroMessageSteeringOutput,
+      },
+    ],
+  },
+  {
+    name: "kiro_fork_from_turn",
+    buildInput: kiroForkFromTurnInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("kiro"),
+        transcriptFile: new URL("./kiro_fork_from_turn/kiro_transcript.ndjson", import.meta.url),
+        modelSelection: KIRO_MODEL_SELECTION,
+        assertOutput: assertKiroForkFromTurnOutput,
       },
     ],
   },

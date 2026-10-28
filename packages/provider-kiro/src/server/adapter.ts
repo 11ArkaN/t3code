@@ -65,6 +65,12 @@ const KiroProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.sessions,
     supportsModelSwitchInSession: true,
   },
+  // Kiro 2.27 and later fork at a turn's prompt (`_meta.kiro.messageId`); see kiroForkFromTurn.
+  threads: {
+    ...AcpProviderCapabilitiesV2.threads,
+    canForkThread: true,
+    canForkFromTurn: true,
+  },
   // `_session/steer` waits for the running tool, then Kiro reads the message at its next step.
   turns: {
     ...AcpProviderCapabilitiesV2.turns,
@@ -139,6 +145,39 @@ const kiroSteering = {
     notification.update.sessionUpdate === "session_info_update"
       ? Option.getOrUndefined(decodeKiroSteeringInjected(notification.update._meta))?.kiro.messageId
       : undefined,
+};
+
+const decodeKiroForkCapability = Schema.decodeUnknownOption(
+  Schema.Struct({ kiro: Schema.Struct({ messageId: Schema.Literal(true) }) }),
+);
+const decodeKiroUserMessageId = Schema.decodeUnknownOption(
+  Schema.Struct({
+    kiro: Schema.Struct({
+      kind: Schema.Literal("user_message_id_assigned"),
+      userMessageId: Schema.String,
+    }),
+  }),
+);
+
+/**
+ * Kiro assigns each prompt a `userMessageId`, and `session/fork` with that id keeps the
+ * session up to and including the reply to that prompt.
+ */
+const kiroForkFromTurn = {
+  supported: (
+    initializeResult: AcpSessionRuntime.AcpSessionRuntimeStartResult["initializeResult"],
+  ) =>
+    Option.isSome(
+      decodeKiroForkCapability(
+        initializeResult.agentCapabilities?.sessionCapabilities?.fork?._meta,
+      ),
+    ),
+  nativeTurnId: (notification: EffectAcpSchema.SessionNotification) =>
+    notification.update.sessionUpdate === "session_info_update"
+      ? Option.getOrUndefined(decodeKiroUserMessageId(notification.update._meta))?.kiro
+          .userMessageId
+      : undefined,
+  forkMeta: (messageId: string) => ({ kiro: { messageId } }),
 };
 
 export interface KiroAdapterV2Options {
@@ -527,6 +566,7 @@ function makeKiroAcpAdapterFlavor(options: KiroAdapterV2Options): AcpAdapterV2Fl
     approvalOptions: kiroApprovalOptions,
     compactSession: compactKiroSession,
     steering: kiroSteering,
+    forkFromTurn: kiroForkFromTurn,
     // Kiro V3 advertises `promptCapabilities.image`; the shared adapter reads it.
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };

@@ -204,6 +204,12 @@ export type OrchestratorFixtureInputStep =
       readonly attachments?: ReadonlyArray<ChatAttachment>;
     }
   | {
+      /** Forks the thread at a run into a second thread, then sends `text` there. */
+      readonly type: "fork";
+      readonly fromRunIndex: number;
+      readonly text: string;
+    }
+  | {
       readonly type: "queue_message";
       readonly text: string;
       readonly attachments?: ReadonlyArray<ChatAttachment>;
@@ -525,6 +531,7 @@ export function materializeFixtureInput(input: {
     const steps: Array<OrchestratorV2ScenarioStep> = [];
     let messageIndex = 0;
     let runIndex = 0;
+    let forkThreadId: ThreadId | undefined;
     const activeRunDispatchKeys = new Set<string>();
 
     const runIdFor = (runOrdinal: number) =>
@@ -918,6 +925,44 @@ export function materializeFixtureInput(input: {
             modelSelection,
           });
           break;
+        case "fork":
+          {
+            const targetThreadId = yield* idAllocator.allocate.thread({
+              fixtureName: `${input.scenario}-fork`,
+              projectId: ids.projectId,
+            });
+            forkThreadId = targetThreadId;
+            pushDispatch({
+              type: "thread.fork",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: yield* idAllocator.allocate.command({
+                fixtureName: input.scenario,
+                commandName: "thread-fork",
+              }),
+              sourceThreadId: ids.threadId,
+              targetThreadId,
+              sourcePoint: { type: "run", runId: runIdFor(step.fromRunIndex) },
+              title: "Forked thread",
+            });
+            pushDispatch(
+              dispatchMessageCommand({
+                commandId: yield* idAllocator.allocate.command({
+                  fixtureName: input.scenario,
+                  commandName: "fork-message",
+                }),
+                ids: { ...ids, threadId: targetThreadId },
+                modelSelection,
+                messageId: yield* idAllocator.allocate.message({
+                  threadId: targetThreadId,
+                  ordinal: 1,
+                }),
+                text: step.text,
+              }),
+            );
+            steps.push({ type: "await_thread_idle", threadId: targetThreadId });
+          }
+          break;
         case "rollback":
           {
             const scopeId = yield* idAllocator.allocate.checkpointScope({
@@ -951,7 +996,8 @@ export function materializeFixtureInput(input: {
     return {
       commands,
       steps,
-      projectionThreadIds: [ids.threadId],
+      projectionThreadIds:
+        forkThreadId === undefined ? [ids.threadId] : [ids.threadId, forkThreadId],
     };
   });
 }
