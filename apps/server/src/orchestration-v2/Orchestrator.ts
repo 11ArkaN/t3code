@@ -5438,7 +5438,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       projection.thread.worktreePath === null
         ? latestRun
         : undefined;
-    const queueBehindRun = activeRun ?? worktreeMissingRun;
+    // A steer re-dispatched after it could not join its turn was sent before any Stop since, and
+    // was meant to go before the queue. If a Stop reached its run, it waits held, even once that
+    // run has ended.
+    const redispatchedMessage = projection.messages.find(
+      (message) => message.id === command.messageId,
+    );
+    const redispatchedSteer = redispatchedMessage !== undefined;
+    const steerRunId = redispatchedMessage?.runId ?? null;
+    const stoppedSteerRun =
+      steerRunId !== null && (yield* stopReachedRun(command, command.threadId, steerRunId))
+        ? projection.runs.find((run) => run.id === steerRunId)
+        : undefined;
+    const queueBehindRun = activeRun ?? worktreeMissingRun ?? stoppedSteerRun;
     const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
     const startsOrQueuesRun =
       dispatchMode.type === "defer_start" ||
@@ -5455,11 +5467,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           (run.status === "failed" || run.status === "interrupted") &&
           run.workspacePreparation?.type === "worktree",
       );
-    // A steer re-dispatched after it could not join its turn was sent before any Stop since, and
-    // was meant to go before the queue.
-    const redispatchedSteer = projection.messages.some(
-      (message) => message.id === command.messageId,
-    );
     const sentByUserFromClient =
       command.createdBy === "user" &&
       (command.creationSource === "web" || command.creationSource === "mobile") &&
@@ -5604,6 +5611,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         activeAttemptId: attemptId,
         status: "queued",
         ...(worktreeMissingRun !== undefined ||
+        stoppedSteerRun !== undefined ||
         (heldRunsToRelease.length === 0 && queueIsHeld && !wakeSkipsHold)
           ? { queueHeld: true }
           : {}),

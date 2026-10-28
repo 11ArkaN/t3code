@@ -943,10 +943,14 @@ it.effect("queues a steer the provider can only run as its own turn behind the r
   ),
 );
 
-it.effect("keeps Stop's held queue when a steer it raced has to wait for a new turn", () =>
+it.effect.each([
+  { queued: true, settled: false, label: "behind a queued message" },
+  { queued: false, settled: false, label: "alone" },
+  { queued: false, settled: true, label: "after the stopped turn ended" },
+])("holds a steer that raced Stop and has to wait for a new turn, $label", ({ queued, settled }) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const { started, layer, startFirstTurn, steerEntered, releaseSteer } =
+      const { events, started, layer, startFirstTurn, steerEntered, releaseSteer } =
         yield* nextTurnSelectionHarness("steering-requires-new-turn-stop", false, true);
       yield* Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -966,17 +970,19 @@ it.effect("keeps Stop's held queue when a steer it raced has to wait for a new t
           createdBy: "user",
           creationSource: "web",
         });
-        yield* orchestrator.dispatch({
-          type: "message.dispatch",
-          commandId: CommandId.make("queue-later"),
-          threadId,
-          messageId: laterId,
-          text: "later",
-          attachments: [],
-          dispatchMode: { type: "queue_after_active" },
-          createdBy: "user",
-          creationSource: "web",
-        });
+        if (queued) {
+          yield* orchestrator.dispatch({
+            type: "message.dispatch",
+            commandId: CommandId.make("queue-later"),
+            threadId,
+            messageId: laterId,
+            text: "later",
+            attachments: [],
+            dispatchMode: { type: "queue_after_active" },
+            createdBy: "user",
+            creationSource: "web",
+          });
+        }
         const steering = yield* worker.runOnce.pipe(Effect.forkScoped);
         yield* Deferred.await(steerEntered);
         yield* orchestrator.dispatch({
@@ -986,18 +992,53 @@ it.effect("keeps Stop's held queue when a steer it raced has to wait for a new t
           runId: first.runId,
           holdQueue: true,
         });
+        if (settled) {
+          const interrupted = yield* orchestrator.streamDomainEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "run.updated" &&
+                event.payload.id === first.runId &&
+                event.payload.status === "interrupted",
+            ),
+            Stream.take(1),
+            Stream.runDrain,
+            Effect.forkScoped,
+          );
+          const turn = (yield* orchestrator.getThreadProjection(threadId)).providerTurns[0]!;
+          yield* Queue.offer(events, {
+            type: "provider_turn.updated",
+            driver,
+            providerTurn: { ...turn, status: "interrupted", completedAt: yield* DateTime.now },
+          });
+          yield* Queue.offer(events, {
+            type: "turn.terminal",
+            driver,
+            providerThreadId: turn.providerThreadId,
+            providerTurnId: turn.id,
+            runOrdinal: first.runOrdinal,
+            status: "interrupted",
+            failure: null,
+            threadDisposition: "reusable",
+          });
+          yield* Fiber.join(interrupted);
+        }
         yield* Deferred.succeed(releaseSteer, undefined);
         yield* Fiber.join(steering);
+        yield* worker.drain();
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
 
         const projection = yield* orchestrator.getThreadProjection(threadId);
-        for (const messageId of [laterId, skillId]) {
+        assert.equal(started.length, 1, "nothing may start after Stop");
+        const waiting = queued ? [skillId, laterId] : [skillId];
+        for (const messageId of waiting) {
           const run = projection.runs.find((candidate) => candidate.userMessageId === messageId);
           assert.equal(run?.status, "queued");
           assert.isTrue(run?.queueHeld, `${messageId} must stay held after Stop`);
         }
         assert.deepEqual(
           queuedRunsInDeliveryOrder(projection).map((run) => run.userMessageId),
-          [skillId, laterId],
+          waiting,
         );
       }).pipe(Effect.provide(layer));
     }),
