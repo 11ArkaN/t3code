@@ -14,7 +14,9 @@ import {
   type VcsProcessExitFailureKind,
 } from "@t3tools/contracts";
 
+import { combinedAuthOutput } from "@t3tools/source-control-core/server/discovery";
 import * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
+import { parseGitLabAuthStatusHosts } from "./gitLabAuthStatus.ts";
 import {
   decodeGitLabMergeRequestJson,
   decodeGitLabMergeRequestListJson,
@@ -22,6 +24,7 @@ import {
 import type * as SourceControlProvider from "@t3tools/source-control-core/server/SourceControlProvider";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const AUTH_STATUS_TIMEOUT_MS = 5_000;
 
 const gitLabCliExecutionErrorContext = {
   operation: Schema.Literal("execute"),
@@ -440,6 +443,27 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.mapError(mapError));
 
+  // Outside a GitLab checkout glab targets gitlab.com, so aim at the only signed-in host.
+  const signedInHostArgs = (cwd: string) =>
+    process
+      .run({
+        operation: "GitLabCli.authStatus",
+        command: "glab",
+        args: ["auth", "status"],
+        cwd,
+        allowNonZeroExit: true,
+        timeoutMs: AUTH_STATUS_TIMEOUT_MS,
+      })
+      .pipe(
+        Effect.map((result): ReadonlyArray<string> => {
+          const [only, ...others] = parseGitLabAuthStatusHosts(combinedAuthOutput(result)).filter(
+            (host) => host.account !== null,
+          );
+          return only && others.length === 0 ? ["--hostname", only.host] : [];
+        }),
+        Effect.orElseSucceed((): ReadonlyArray<string> => []),
+      );
+
   const execute: GitLabCli["Service"]["execute"] = (input) =>
     run(input, (error) =>
       GitLabCliCommandError.fromVcsError(
@@ -534,10 +558,13 @@ export const make = Effect.gen(function* () {
       );
     }),
     getRepositoryCloneUrls: Effect.fn("GitLabCli.getRepositoryCloneUrls")(function (input) {
-      return execute({
-        cwd: input.cwd,
-        args: ["api", `projects/${encodeURIComponent(input.repository)}`],
-      }).pipe(
+      return signedInHostArgs(input.cwd).pipe(
+        Effect.flatMap((hostArgs) =>
+          execute({
+            cwd: input.cwd,
+            args: ["api", ...hostArgs, `projects/${encodeURIComponent(input.repository)}`],
+          }),
+        ),
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
           decodeGitLabRepositoryCloneUrls(raw).pipe(
@@ -556,12 +583,13 @@ export const make = Effect.gen(function* () {
         Effect.map(normalizeRepositoryCloneUrls),
       );
     }),
-    createRepository: Effect.fn("GitLabCli.createRepository")(function (input) {
+    createRepository: Effect.fn("GitLabCli.createRepository")(function* (input) {
+      const hostArgs = yield* signedInHostArgs(input.cwd);
       const { namespacePath, projectPath } = parseRepositoryPath(input.repository);
       const namespaceId: Effect.Effect<number | null, GitLabCliError> = namespacePath
         ? execute({
             cwd: input.cwd,
-            args: ["api", `namespaces/${encodeURIComponent(namespacePath)}`],
+            args: ["api", ...hostArgs, `namespaces/${encodeURIComponent(namespacePath)}`],
           }).pipe(
             Effect.map((result) => result.stdout.trim()),
             Effect.flatMap((raw) =>
@@ -582,12 +610,13 @@ export const make = Effect.gen(function* () {
           )
         : Effect.succeed(null);
 
-      return namespaceId.pipe(
+      return yield* namespaceId.pipe(
         Effect.flatMap((resolvedNamespaceId) =>
           execute({
             cwd: input.cwd,
             args: [
               "api",
+              ...hostArgs,
               "--method",
               "POST",
               "projects",

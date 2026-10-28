@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/process";
 
-import { VcsProcessExitError } from "@t3tools/contracts";
+import { VcsProcessExitError, VcsProcessTimeoutError } from "@t3tools/contracts";
 
 import type * as SourceControlHost from "@t3tools/source-control-core/server/SourceControlHost";
 import * as TestSourceControlHost from "@t3tools/source-control-testing/TestSourceControlHost";
@@ -192,7 +192,18 @@ layer("GitLabCli.layer", (it) => {
         detail: "GET 404 project not found",
         failureKind: "not-found",
       });
-      mockedRun.mockReturnValueOnce(Effect.fail(cause));
+      mockedRun.mockImplementation((input) =>
+        input.args[0] === "auth"
+          ? Effect.fail(
+              new VcsProcessTimeoutError({
+                operation: "GitLabCli.authStatus",
+                command: "glab",
+                cwd: "/repo",
+                timeoutMs: 5_000,
+              }),
+            )
+          : Effect.fail(cause),
+      );
 
       const error = yield* Effect.gen(function* () {
         const glab = yield* GitLabCli.GitLabCli;
@@ -204,10 +215,13 @@ layer("GitLabCli.layer", (it) => {
 
       assert.strictEqual(error._tag, "GitLabCliCommandError");
       assert.strictEqual(error.cause, cause);
+      expect(mockedRun).toHaveBeenLastCalledWith(
+        expect.objectContaining({ args: ["api", "projects/missing%2Fproject"] }),
+      );
     }),
   );
 
-  it.effect("looks up repositories on the only signed-in host when glab has no default host", () =>
+  it.effect("looks up repositories on the only signed-in host", () =>
     Effect.gen(function* () {
       mockedRun.mockImplementation((input) => {
         const args = input.args.join(" ");
