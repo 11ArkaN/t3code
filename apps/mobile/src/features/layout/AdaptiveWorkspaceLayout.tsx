@@ -814,6 +814,9 @@ function AdaptiveWorkspaceLayoutContent(
       listPaneCeiling,
       Math.max(listPaneFloor, drawnSidebarWidth.value - listPaneGap),
     ),
+    // Following the keyboard, the list rides the sidebar's edge like the content beside it,
+    // instead of being uncovered in place.
+    transform: [{ translateX: drawnSidebarWidth.value - renderedSidebarWidth.value }],
   }));
   const sidebarAnimatedStyle = useAnimatedStyle(() => ({
     // Fading a UIKit glass ancestor can leave remounted header effects missing.
