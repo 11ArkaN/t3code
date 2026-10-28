@@ -19,7 +19,15 @@ import {
   type NativeStackNavigatorProps,
   type NativeStackTypeBag,
 } from "@react-navigation/native-stack";
-import { Fragment, use, useEffect, useRef, useState, type ComponentProps } from "react";
+import {
+  Fragment,
+  use,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { Split, type SplitHostCommands } from "react-native-screens";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -291,6 +299,20 @@ function WorkspaceColumns(
     hostRef.current?.show(compactColumn);
   }, [compactColumn, layout.usesSplitView]);
 
+  // Like desktop, a thread column with nothing selected starts a new thread. An overlaid
+  // sidebar covers the column, so it waits until the sidebar closes.
+  const startsDraft =
+    layout.usesSplitView &&
+    !activeDetailKey &&
+    selectedTab === "threads" &&
+    !settingsOpen &&
+    !(layout.primarySidebarOverlaysContent && panes.primarySidebarVisible);
+  const startDraft = useEffectEvent(openNewTask);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an empty thread column opens a new-thread draft route in the navigator
+  useEffect(() => {
+    if (startsDraft) startDraft();
+  }, [startsDraft]);
+
   const primary = props.descriptors[props.primary.key];
   if (!primary) return null;
   return (
@@ -405,13 +427,17 @@ function WorkspaceColumns(
               onCompose={detailCompose}
             />
             <ColumnContent>
-              <WorkspaceEmptyDetail
-                tab={settingsOpen ? "settings" : selectedTab}
-                onStartNewTask={
-                  // Duo provides compose in the detail bar; iPad uses the empty-state action.
-                  detailCompose ? undefined : openNewTask
-                }
-              />
+              {startsDraft ? (
+                <View className="flex-1 bg-screen" />
+              ) : (
+                <WorkspaceEmptyDetail
+                  tab={settingsOpen ? "settings" : selectedTab}
+                  onStartNewTask={
+                    // Duo provides compose in the detail bar; iPad uses the empty-state action.
+                    detailCompose ? undefined : openNewTask
+                  }
+                />
+              )}
             </ColumnContent>
           </Split.Screen>
           {screens.routes.map((route) => {

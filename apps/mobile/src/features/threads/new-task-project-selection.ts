@@ -8,24 +8,66 @@ type DraftProjectSelectionResolution =
   | { readonly kind: "preserve" }
   | { readonly kind: "select"; readonly project: EnvironmentProject }
   | { readonly kind: "pick" }
-  | { readonly kind: "dismiss" };
+  | { readonly kind: "none" };
 
 /**
- * The copy of a project a new thread starts in: the preferred environment's, then the
- * representative. A connected copy wins over a disconnected one.
+ * A project's copies, the one a new thread starts in first: the preferred environment's, then
+ * the representative. A connected copy wins over a disconnected one.
  */
+function orderScopeProjects(
+  scope: HomeProjectScope,
+  preferredEnvironmentId: EnvironmentId | null,
+  connectedEnvironmentIds: ReadonlySet<EnvironmentId>,
+): ReadonlyArray<EnvironmentProject> {
+  const rank = (project: EnvironmentProject) =>
+    (connectedEnvironmentIds.has(project.environmentId) ? 0 : 3) +
+    (project.environmentId === preferredEnvironmentId
+      ? 0
+      : project === scope.representative
+        ? 1
+        : 2);
+  return [...scope.projects].sort((left, right) => rank(left) - rank(right));
+}
+
 export function getProjectScopeSelectionTarget(
   scope: HomeProjectScope,
   preferredEnvironmentId: EnvironmentId | null,
   connectedEnvironmentIds: ReadonlySet<EnvironmentId>,
 ): EnvironmentProject {
-  const rank = (project: EnvironmentProject) =>
-    project.environmentId === preferredEnvironmentId ? 0 : project === scope.representative ? 1 : 2;
-  const ordered = [...scope.projects].sort((left, right) => rank(left) - rank(right));
   return (
-    ordered.find((project) => connectedEnvironmentIds.has(project.environmentId)) ??
-    ordered[0] ??
+    orderScopeProjects(scope, preferredEnvironmentId, connectedEnvironmentIds)[0] ??
     scope.representative
+  );
+}
+
+/**
+ * One picker row per copy of each project, so a project on two machines shows two rows. Rows
+ * name their machine once the projects span more than one.
+ */
+export function projectPickerRows(
+  scopes: ReadonlyArray<HomeProjectScope>,
+  preferredEnvironmentId: EnvironmentId | null,
+  connectedEnvironmentIds: ReadonlySet<EnvironmentId>,
+) {
+  const machines = new Set(
+    scopes.flatMap((scope) => scope.projects.map((project) => project.environmentId)),
+  );
+  return {
+    rows: scopes.flatMap((scope) =>
+      orderScopeProjects(scope, preferredEnvironmentId, connectedEnvironmentIds).map((project) => ({
+        scope,
+        project,
+      })),
+    ),
+    showsMachines: machines.size > 1,
+  };
+}
+
+/** A workspace path for a picker row, with the home directory as `~`. */
+export function shortWorkspacePath(workspaceRoot: string): string {
+  return workspaceRoot.replace(
+    /^(?:\/(?:Users\/(?!Shared(?:\/|$))|home\/)[^/]+|\/root|[A-Za-z]:\\Users\\[^\\]+)(?=[\\/]|$)/,
+    "~",
   );
 }
 
@@ -88,14 +130,17 @@ export function resolveEnvironmentProjectMatch(
   );
 }
 
+/**
+ * The project a draft opens in when its route names none. `projectScopes` are the projects a
+ * thread can start in, most recent first. Shared content asks unless only one project fits.
+ */
 export function resolveDraftProjectSelection(
   selectedProjectKey: string | null,
   projects: ReadonlyArray<EnvironmentProject>,
   projectScopes: ReadonlyArray<HomeProjectScope>,
   draft: {
     readonly incomingShareId: string | undefined;
-    /** The draft's first project picker closed and the draft is showing again. */
-    readonly pickerClosed: boolean;
+    readonly connectedEnvironmentIds: ReadonlySet<EnvironmentId>;
   },
 ): DraftProjectSelectionResolution {
   const hasExplicitProjectSelection =
@@ -106,14 +151,17 @@ export function resolveDraftProjectSelection(
   if (hasExplicitProjectSelection) {
     return { kind: "preserve" };
   }
-  // A share draft holds content the user sent here, so cancelling the picker must not drop it.
-  if (draft.pickerClosed && selectedProjectKey === null && draft.incomingShareId === undefined) {
-    return { kind: "dismiss" };
+  if (draft.incomingShareId !== undefined) {
+    const onlyScope = projectScopes.length === 1 ? projectScopes[0] : null;
+    return onlyScope ? { kind: "select", project: onlyScope.representative } : { kind: "pick" };
   }
-
-  const onlyScope =
-    draft.incomingShareId !== undefined && projectScopes.length === 1 ? projectScopes[0] : null;
-  return onlyScope ? { kind: "select", project: onlyScope.representative } : { kind: "pick" };
+  const recent = projectScopes[0];
+  return recent
+    ? {
+        kind: "select",
+        project: getProjectScopeSelectionTarget(recent, null, draft.connectedEnvironmentIds),
+      }
+    : { kind: "none" };
 }
 
 type ProjectRef = { readonly environmentId: string; readonly projectId: string };

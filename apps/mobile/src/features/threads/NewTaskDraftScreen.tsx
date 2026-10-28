@@ -11,6 +11,8 @@ import { draftThreadShell } from "./draft-thread-shell";
 import { useRememberThreadProject } from "./useRememberThreadProject";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { connectionTone } from "../connection/connectionTone";
+import { ConnectionStatusDot } from "../connection/ConnectionStatusDot";
+import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { AppBar } from "../../components/ui/AppBar";
 import { ThreadId } from "@t3tools/contracts";
 
@@ -22,7 +24,6 @@ import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime
 import {
   CommonActions,
   StackActions,
-  useIsFocused,
   useNavigation,
   usePreventRemove,
   useRoute,
@@ -156,7 +157,6 @@ export function NewTaskDraftScreen(props: {
   const projects = useProjects();
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
-  const isFocused = useIsFocused();
   const goBack = useWorkspaceBackNavigation("threads");
   const currentRoute = useRoute();
   const flowKey = newTaskFlowKey(currentRoute);
@@ -395,9 +395,16 @@ export function NewTaskDraftScreen(props: {
   ]);
 
   const lastInitialProjectRefRef = useRef(props.initialProjectRef);
-  const initialPickerRef = useRef<"open" | "dismissed" | null>(null);
+  const sharePickerOpenedRef = useRef(false);
+  const projectSelection =
+    props.draftId || (props.initialProjectRef?.environmentId && props.initialProjectRef.projectId)
+      ? null
+      : resolveDraftProjectSelection(selectedProjectKey, projects, projectScopes, {
+          incomingShareId: props.incomingShareId,
+          connectedEnvironmentIds: flow.connectedEnvironmentIds,
+        });
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies the route or catalog project to the draft once projects load, or opens the picker in the navigator
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies the route or catalog project to the draft once projects load, or opens the share picker in the navigator
   useEffect(() => {
     if (props.draftId) {
       return;
@@ -458,41 +465,31 @@ export function NewTaskDraftScreen(props: {
       return;
     }
 
-    const selection = resolveDraftProjectSelection(selectedProjectKey, projects, projectScopes, {
-      incomingShareId: props.incomingShareId,
-      pickerClosed: initialPickerRef.current === "open" && isFocused,
-    });
-    if (selection.kind === "preserve") {
-      initialPickerRef.current = null;
+    if (projectSelection === null || projectSelection.kind === "none") {
       return;
     }
-    if (selection.kind === "select") {
-      setProject(selection.project);
+    if (projectSelection.kind === "preserve") {
+      sharePickerOpenedRef.current = false;
       return;
     }
-    if (selection.kind === "dismiss") {
-      initialPickerRef.current = "dismissed";
-      goBack();
+    if (projectSelection.kind === "select") {
+      setProject(projectSelection.project);
       return;
     }
-    // Open the first picker once; catalog updates must not push it again over a cancelled draft.
-    if (initialPickerRef.current !== null) {
+    // Open the share picker once; catalog updates must not push it again over a cancelled draft.
+    if (sharePickerOpenedRef.current) {
       return;
     }
-    initialPickerRef.current = "open";
+    sharePickerOpenedRef.current = true;
     navigation.dispatch(CommonActions.navigate("NewTaskProject"));
   }, [
-    goBack,
-    isFocused,
-    projectScopes,
+    projectSelection,
     projects,
     flow.draftKey,
     props.initialProjectRef,
-    props.incomingShareId,
     props.draftId,
     navigation,
     selectedProject,
-    selectedProjectKey,
     setProject,
   ]);
 
@@ -678,9 +675,52 @@ export function NewTaskDraftScreen(props: {
     return message.messageId;
   }
 
-  // Keep the current surface until the local draft selection is ready. Publishing
-  // an empty loading surface here flashes between two already-cached threads.
-  if (!selectedProject) return null;
+  const chooseProject = () => {
+    if (isComposerInteractionLocked) {
+      return;
+    }
+    promptInputRef.current?.blur();
+    void KeyboardController.dismiss({ animated: true });
+    navigation.navigate("NewTaskProject", { incomingShareId: props.incomingShareId });
+  };
+  const fallbackHeader = (
+    <AppBar
+      title="New thread"
+      sidebar={false}
+      onBack={goBack}
+      options={{
+        ...threadHeaderAppearance(NATIVE_LIQUID_GLASS_SUPPORTED),
+        unstable_headerSubtitle: undefined,
+        unstable_headerRightItems: () => [],
+        unstable_headerToolbarItems: () => [],
+      }}
+    />
+  );
+
+  if (!selectedProject) {
+    // Keep the current surface until the local draft selection is ready. Publishing
+    // an empty loading surface here flashes between two already-cached threads.
+    if (projectSelection?.kind !== "none") return null;
+    return (
+      <ThreadScreenFallback header={fallbackHeader}>
+        <View className="flex-1 items-center justify-center gap-3 px-6">
+          <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
+            What should we build?
+          </Text>
+          <ComposerInlineControl
+            accessibilityHint="Opens the project picker"
+            chevronDirection="right"
+            emphasized
+            icon="folder"
+            label="Choose project"
+            onPress={chooseProject}
+          />
+        </View>
+      </ThreadScreenFallback>
+    );
+  }
+  // The default project applies after this commit; drawing the fallback project first flashes it.
+  if (projectSelection?.kind === "select") return null;
 
   const setupBlockReason =
     isIncomingShareReady && !isImportingShare
@@ -692,14 +732,6 @@ export function NewTaskDraftScreen(props: {
             ? "Choose a base branch before creating a worktree."
             : null
       : "Wait for shared content to finish importing.";
-  const chooseProject = () => {
-    if (isComposerInteractionLocked) {
-      return;
-    }
-    promptInputRef.current?.blur();
-    void KeyboardController.dismiss({ animated: true });
-    navigation.navigate("NewTaskProject", { incomingShareId: props.incomingShareId });
-  };
   const openContextPicker = (routeName: "NewTaskBranch" | "NewTaskEnvironment") => {
     if (isComposerInteractionLocked) {
       return;
@@ -709,6 +741,45 @@ export function NewTaskDraftScreen(props: {
     navigation.navigate(routeName);
   };
 
+  const projectLabel = flow.isScratchDraft
+    ? "No project"
+    : (selectedProjectLabel ?? selectedProject.title);
+  // Name the machine only when the project lives on more than one.
+  const projectChipLabel =
+    flow.environments.length > 1 ? `${projectLabel} · ${selectedEnvironmentLabel}` : projectLabel;
+  const projectChip = (
+    <View className="min-w-0 shrink">
+      <ComposerInlineControl
+        accessibilityHint="Opens the project picker"
+        accessibilityLabel={`Project: ${projectChipLabel}${environmentConnected ? "" : ", offline"}`}
+        chevronDirection="right"
+        disabled={isComposerInteractionLocked}
+        icon={flow.isScratchDraft ? "text.bubble" : undefined}
+        renderIcon={
+          flow.isScratchDraft
+            ? undefined
+            : (size) => (
+                <ProjectFavicon
+                  environmentId={selectedProject.environmentId}
+                  faviconPath={selectedProject.faviconPath}
+                  projectIcon={selectedProject.projectIcon}
+                  projectTitle={projectLabel}
+                  size={size}
+                  workspaceRoot={selectedProject.workspaceRoot}
+                />
+              )
+        }
+        label={projectChipLabel}
+        maxWidth="100%"
+        onPress={chooseProject}
+        suffix={
+          environmentConnected ? undefined : (
+            <ConnectionStatusDot state="error" pulse={false} size={6} />
+          )
+        }
+      />
+    </View>
+  );
   const environmentControl = (
     <DraftEnvironmentControl
       connectionState={connectionState}
@@ -723,7 +794,7 @@ export function NewTaskDraftScreen(props: {
       The shared content is no longer in the inbox. You can continue editing this task draft.
     </Text>
   ) : null;
-  const hero = flow.isScratchDraft ? (
+  const androidHero = flow.isScratchDraft ? (
     <View className="items-center gap-2 px-6" testID="new-task-hero">
       <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
         What should we work on?
@@ -773,6 +844,18 @@ export function NewTaskDraftScreen(props: {
       {shareUnavailableNotice}
     </View>
   );
+  // iOS keeps the project and machine in the chip above the composer, so its hero only asks.
+  const hero =
+    Platform.OS === "ios" ? (
+      <View className="items-center gap-2 px-6" testID="new-task-hero">
+        <Text className="text-center text-2xl font-t3-medium tracking-tight text-foreground">
+          {flow.isScratchDraft ? "What should we work on?" : "What should we build?"}
+        </Text>
+        {shareUnavailableNotice}
+      </View>
+    ) : (
+      androidHero
+    );
   // The nested hero scroll view does not receive UIKit's automatic navigation inset in split columns.
   const heroViewport = (headerInset: number, bottomInset: number, availableHeight: number) =>
     availableHeight < 180 ? null : (
@@ -810,8 +893,8 @@ export function NewTaskDraftScreen(props: {
       </NativeScrollEdgeEffectsContext>
     );
 
-  const workspaceControls = (
-    <View className="flex-row items-center gap-1 px-2">
+  const checkoutControls = (
+    <>
       <ComposerInlineControl
         accessibilityHint={`Switches to ${flow.workspaceMode === "local" ? "a new worktree" : "the current checkout"}`}
         accessibilityLabel={workspaceLabel}
@@ -840,28 +923,23 @@ export function NewTaskDraftScreen(props: {
           onPress={() => openContextPicker("NewTaskBranch")}
         />
       </View>
-    </View>
+    </>
   );
+  const workspaceControls =
+    Platform.OS === "ios" ? (
+      <View className="flex-row flex-wrap items-center gap-x-1 px-2">
+        {projectChip}
+        {flow.canChooseWorkspace ? checkoutControls : null}
+      </View>
+    ) : flow.canChooseWorkspace ? (
+      <View className="flex-row items-center gap-1 px-2">{checkoutControls}</View>
+    ) : null;
 
   if (!flow.selectedModel) {
     return (
-      <ThreadScreenFallback
-        header={
-          <AppBar
-            title="New thread"
-            sidebar={false}
-            onBack={goBack}
-            options={{
-              ...threadHeaderAppearance(NATIVE_LIQUID_GLASS_SUPPORTED),
-              unstable_headerSubtitle: undefined,
-              unstable_headerRightItems: () => [],
-              unstable_headerToolbarItems: () => [],
-            }}
-          />
-        }
-      >
+      <ThreadScreenFallback header={fallbackHeader}>
         <View className="flex-1 justify-end gap-3 p-4">
-          {environmentControl}
+          {Platform.OS === "ios" ? projectChip : environmentControl}
           <Text className="text-foreground-muted">
             Your draft is saved on this device. Connect to an environment to choose its first model.
           </Text>
@@ -923,7 +1001,7 @@ export function NewTaskDraftScreen(props: {
                   />
                 </View>
               ) : null}
-              {flow.canChooseWorkspace ? workspaceControls : null}
+              {workspaceControls}
             </View>
           ),
           editorRef: promptInputRef,

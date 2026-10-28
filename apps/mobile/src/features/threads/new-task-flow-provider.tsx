@@ -69,6 +69,7 @@ import {
   useSavedRemoteConnections,
 } from "../../state/use-remote-environment-registry";
 import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -130,7 +131,9 @@ export function branchBadgeLabel(input: {
 
 type NewTaskFlowContextValue = {
   readonly activeNewTask: { readonly pendingKey: string | null } | null;
+  /** Projects a thread can start in, most recent first; threads without a project are left out. */
   readonly projectScopes: ReadonlyArray<HomeProjectScope>;
+  readonly connectedEnvironmentIds: ReadonlySet<EnvironmentId>;
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
   readonly selectedModelKey: string | null;
@@ -229,6 +232,7 @@ export function NewTaskFlowProvider(
   const groupingSettings = useMobileProjectGroupingSettings();
   const { enabled: legacyPlanModeEnabled } = useLegacyPlanModeState();
 
+  const serverConfigs = useServerConfigs();
   const projectScopes = sortHomeProjectScopes({
     scopes: buildHomeProjectScopes({
       projects,
@@ -238,7 +242,12 @@ export function NewTaskFlowProvider(
     threads,
     pendingTasks: [],
     projectSortOrder: "updated_at",
-  });
+  }).filter(
+    (scope) =>
+      !scope.projects.every((project) =>
+        isScratchProject(project, serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot),
+      ),
+  );
 
   const flowKey = props.flowKey ?? INACTIVE_FLOW_KEY;
   const storedFlowState = useAtomValue(newTaskFlowStateAtom(flowKey));
@@ -328,8 +337,12 @@ export function NewTaskFlowProvider(
   const projectDefaults = useNewTaskProjectDefaults(selectedProject);
   const selectedEnvironmentServerConfig = projectDefaults.serverConfig;
   const isScratchDraft = projectDefaults.isScratch;
-  const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
+  const connectedEnvironmentIds = new Set(
+    connectedEnvironments
+      .filter((environment) => environment.connectionState === "connected")
+      .map((environment) => environment.environmentId),
+  );
   const scratchEnvironments = connectedEnvironments.filter(
     (environment) =>
       availableScratchWorkspaceRoot(
@@ -399,7 +412,9 @@ export function NewTaskFlowProvider(
       props.active === false ||
       props.routeDraftId !== undefined ||
       activeDraftKey !== null ||
-      selectedProject === null
+      selectedProject === null ||
+      // The draft screen may have chosen a project, and bound its draft, earlier in this commit.
+      readNewTaskFlowState(flowKey).draftKey !== null
     ) {
       return;
     }
@@ -830,6 +845,7 @@ export function NewTaskFlowProvider(
   const value = {
     activeNewTask,
     projectScopes,
+    connectedEnvironmentIds,
     selectedEnvironmentId,
     selectedProjectKey,
     selectedModelKey,

@@ -6,8 +6,10 @@ import type { HomeProjectScope } from "../home/homeThreadList";
 import {
   getProjectScopeSelectionTarget,
   newTaskDestination,
+  projectPickerRows,
   resolveDraftProjectSelection,
   resolveEnvironmentProjectMatch,
+  shortWorkspacePath,
 } from "./new-task-project-selection";
 
 function makeProject(
@@ -74,6 +76,38 @@ describe("getProjectScopeSelectionTarget", () => {
   });
 });
 
+describe("projectPickerRows", () => {
+  it("lists each copy of a project, a connected one first, and names machines once they differ", () => {
+    const mac = makeProject("t3code", "mac");
+    const server = makeProject("t3code", "server");
+    const react = makeProject("react", "mac");
+    const picker = projectPickerRows(
+      [makeScope([mac, server]), makeScope([react])],
+      null,
+      new Set([EnvironmentId.make("server")]),
+    );
+    expect(picker.rows.map((row) => row.project)).toEqual([server, mac, react]);
+    expect(picker.showsMachines).toBe(true);
+
+    const oneMachine = projectPickerRows([makeScope([mac]), makeScope([react])], null, new Set());
+    expect(oneMachine.showsMachines).toBe(false);
+  });
+});
+
+describe("shortWorkspacePath", () => {
+  it.each([
+    ["/Users/theo/code/t3code", "~/code/t3code"],
+    ["/home/theo/t3code", "~/t3code"],
+    ["/home/theo", "~"],
+    ["/root/app", "~/app"],
+    ["C:\\Users\\theo\\code", "~\\code"],
+    ["/Users/Shared/repo", "/Users/Shared/repo"],
+    ["/var/folders/12/workspace/react", "/var/folders/12/workspace/react"],
+  ])("shows %s as %s", (path, short) => {
+    expect(shortWorkspacePath(path)).toBe(short);
+  });
+});
+
 describe("resolveEnvironmentProjectMatch", () => {
   it("follows the same repository onto the target machine", () => {
     const selected = makeProject("t3code", "mac", { repositoryKey: "github.com/t3tools/t3code" });
@@ -117,12 +151,19 @@ describe("resolveEnvironmentProjectMatch", () => {
 
 describe("resolveDraftProjectSelection", () => {
   const projects = [makeProject("t3code"), makeProject("t3code-2")];
-  const draft = { incomingShareId: undefined, pickerClosed: false };
+  const draft = { incomingShareId: undefined, connectedEnvironmentIds: new Set<EnvironmentId>() };
 
-  it("opens the picker instead of auto-selecting the only project", () => {
-    expect(resolveDraftProjectSelection(null, projects, [makeScope(projects)], draft)).toEqual({
-      kind: "pick",
-    });
+  it("starts a draft without a project in the most recent project, on a connected machine", () => {
+    const mac = makeProject("t3code", "mac");
+    const server = makeProject("t3code", "server");
+    const scopes = [makeScope([mac, server]), makeScope([makeProject("older")])];
+    expect(
+      resolveDraftProjectSelection(null, [mac, server], scopes, {
+        ...draft,
+        connectedEnvironmentIds: new Set([EnvironmentId.make("server")]),
+      }),
+    ).toEqual({ kind: "select", project: server });
+    expect(resolveDraftProjectSelection(null, [], [], draft)).toEqual({ kind: "none" });
   });
 
   it("selects the only logical project for shared content", () => {
@@ -134,37 +175,23 @@ describe("resolveDraftProjectSelection", () => {
     ).toEqual({ kind: "select", project: projects[0] });
   });
 
-  it("dismisses the draft when the first picker closes without a choice", () => {
+  it("keeps the project the draft already chose", () => {
     expect(
-      resolveDraftProjectSelection(null, projects, [makeScope(projects)], {
-        ...draft,
-        pickerClosed: true,
-      }),
-    ).toEqual({ kind: "dismiss" });
-  });
-
-  it("keeps the draft when the picker closes after a choice", () => {
-    expect(
-      resolveDraftProjectSelection("environment:t3code-2", projects, [makeScope(projects)], {
-        ...draft,
-        pickerClosed: true,
-      }),
+      resolveDraftProjectSelection("environment:t3code-2", projects, [makeScope(projects)], draft),
     ).toEqual({ kind: "preserve" });
   });
 
-  it("keeps a share draft asking for a project when its picker closes without a choice", () => {
+  it("asks where shared content goes when more than one project could take it", () => {
     const scopes = [makeScope([projects[0]!]), makeScope([projects[1]!])];
     expect(
-      resolveDraftProjectSelection(null, projects, scopes, {
-        incomingShareId: "share",
-        pickerClosed: true,
-      }),
+      resolveDraftProjectSelection(null, projects, scopes, { ...draft, incomingShareId: "share" }),
     ).toEqual({ kind: "pick" });
   });
 });
 
 describe("newTaskDestination", () => {
-  const picker = { draft: { requestId: "request" } };
+  // A draft that names no project opens in the most recent one (see resolveDraftProjectSelection).
+  const projectless = { draft: { requestId: "request" } };
 
   function destination(options: {
     readonly useLastProject: boolean | undefined;
@@ -225,20 +252,20 @@ describe("newTaskDestination", () => {
         projects: [makeProject("chosen")],
         last: { environmentId: "removed-environment", projectId: "chosen" },
       }),
-    ).toEqual(picker);
+    ).toEqual(projectless);
   });
 
-  it("opens the picker rather than the first project when nothing matches", () => {
+  it("names no project rather than the first one when nothing matches", () => {
     expect(
       destination({
         useLastProject: true,
         projects: [makeProject("first"), makeProject("second")],
         current: makeProject("removed"),
       }),
-    ).toEqual(picker);
+    ).toEqual(projectless);
   });
 
-  it("always opens the picker when the preference is off", () => {
+  it("ignores the current and last project when the preference is off", () => {
     const only = makeProject("only");
     expect(
       destination({
@@ -247,6 +274,6 @@ describe("newTaskDestination", () => {
         current: only,
         last: { environmentId: "environment", projectId: "only" },
       }),
-    ).toEqual(picker);
+    ).toEqual(projectless);
   });
 });

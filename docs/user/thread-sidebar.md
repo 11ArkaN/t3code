@@ -10,11 +10,13 @@ and mode selections, unless the destination project has its own model default.
 Its branch and workspace mode come from your configured defaults. To continue in
 an existing worktree, use **New thread in this worktree** from the branch toolbar.
 
-On mobile, **New thread** starts in the current thread's project, or else in the
-last project you opened or chose on that device. If neither is available, the
-project picker opens. Turn off **Settings → General → Use last project** to
-choose a project every time. When you pick a project that is on more than one
-machine, the thread starts on a connected one if any is connected.
+On mobile, **New thread** opens a draft in the current thread's project, or else
+in the last project you opened or chose on that device. Otherwise, or when
+**Settings → General → Use last project** is off, it opens in your most recently
+active project. If that project is on more than one machine, the draft starts on
+a connected one if any is connected. On iPhone and iPad, tap the project above
+the composer to change it; the list shows a project once for each machine it is
+on.
 
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
@@ -26,8 +28,10 @@ start without a project** under a new thread's heading, pick **No project** from
 the project menu in that heading or from **New thread in...** in the command
 palette, or press `mod+alt+n`. On mobile, pick **No project** from the project
 list. It starts on your current machine; before sending, pick another machine
-from the machine menu to move it there. To move a draft into a project, pick the
-project in the heading.
+from the machine menu to move it there. On iPhone and iPad, the project list
+has a **No project** row for each machine instead. To move a draft into a
+project, pick the project in the heading, or above the composer on iPhone and
+iPad.
 
 Each thread without a project works in its own folder under `~/.t3/scratch` (the
 `scratch` folder of your T3 data directory), named after its date, the first words

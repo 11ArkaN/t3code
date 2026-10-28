@@ -11,16 +11,17 @@ import {
 } from "@react-navigation/native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
-import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { cn } from "../../lib/cn";
+import { scopedProjectKey } from "../../lib/scopedEntities";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { Button } from "../../components/ui/Button";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
@@ -29,13 +30,21 @@ import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { useProjects, useServerConfigs } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
+import {
+  useRemoteConnectionStatus,
+  useSavedRemoteConnections,
+} from "../../state/use-remote-environment-registry";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { useWorkspaceState } from "../../state/workspace";
 
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
 import { useNewTaskFlow } from "./new-task-flow-provider";
-import { filterProjectScopes, getProjectScopeSelectionTarget } from "./new-task-project-selection";
+import {
+  filterProjectScopes,
+  getProjectScopeSelectionTarget,
+  projectPickerRows,
+  shortWorkspacePath,
+} from "./new-task-project-selection";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 type NewTaskRouteParams = {
@@ -151,7 +160,13 @@ function NewTaskHeader(props: {
 export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRouteParams | undefined>) {
   const projects = useProjects();
   const [searchText, setSearchText] = useState("");
-  const { projectScopes, selectedEnvironmentId, setProject } = useNewTaskFlow();
+  const {
+    projectScopes: listScopes,
+    connectedEnvironmentIds,
+    selectedEnvironmentId,
+    selectedProjectKey,
+    setProject,
+  } = useNewTaskFlow();
   const { state: catalogState } = useWorkspaceState();
   const navigation = useNavigation();
   const selectDetail = useSelectWorkspaceDetail();
@@ -172,13 +187,9 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const projectEmptyState = deriveProjectEmptyState(catalogState);
   const serverConfigs = useServerConfigs();
-  const listScopes = projectScopes.filter(
-    (scope) =>
-      !scope.projects.every((project) =>
-        isScratchProject(project, serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot),
-      ),
-  );
   const visibleScopes = filterProjectScopes(listScopes, searchText);
+  // iOS lists every copy of a project, so the machine is chosen here too.
+  const picker = projectPickerRows(listScopes, selectedEnvironmentId, connectedEnvironmentIds);
   const resumedDestinationKeyRef = useRef<string | null>(null);
   const reservedDestinationProject = incomingShare?.destination
     ? (projects.find(
@@ -188,11 +199,9 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       ) ?? null)
     : null;
   const { connectedEnvironments } = useRemoteConnectionStatus();
-  const connectedEnvironmentIds = new Set(
-    connectedEnvironments
-      .filter((environment) => environment.connectionState === "connected")
-      .map((environment) => environment.environmentId),
-  );
+  const { savedConnectionsById } = useSavedRemoteConnections();
+  const machineLabel = (environmentId: EnvironmentId) =>
+    savedConnectionsById[environmentId]?.environmentLabel ?? "Unknown machine";
   const openScratch = useAtomCommand(projectEnvironment.openScratch, {
     reportFailure: false,
   });
@@ -248,9 +257,10 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
     });
   }
 
-  async function startScratch(): Promise<void> {
-    if (!scratchEnvironment || scratchStartInFlightRef.current) return;
-    const environmentId = scratchEnvironment.environmentId;
+  async function startScratch(
+    environmentId = scratchEnvironment?.environmentId ?? null,
+  ): Promise<void> {
+    if (environmentId === null || scratchStartInFlightRef.current) return;
     scratchStartInFlightRef.current = true;
     const result = await openScratch({ environmentId, input: {} });
     if (result._tag === "Failure") {
@@ -351,33 +361,48 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               </View>
             ) : (
               <View collapsable={false} className="overflow-hidden rounded-[24px] bg-grouped-card">
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="No project"
-                  onPress={() => void startScratch()}
-                  className="flex-row items-center gap-3 bg-grouped-card px-4 py-3.5"
-                >
-                  <View className="h-7 w-7 items-center justify-center">
+                {scratchEnvironments.map((environment, index) => (
+                  <Pressable
+                    key={environment.environmentId}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      scratchEnvironments.length > 1
+                        ? `No project, on ${environment.environmentLabel}`
+                        : "No project"
+                    }
+                    onPress={() => void startScratch(environment.environmentId)}
+                    className={cn(
+                      "flex-row items-center gap-3 bg-grouped-card px-4 py-3.5",
+                      index > 0 && "border-t border-border-subtle",
+                    )}
+                  >
+                    <View className="h-7 w-7 items-center justify-center">
+                      <SymbolView
+                        name="text.bubble"
+                        size={18}
+                        tintColorClassName="accent-icon-muted"
+                        type="monochrome"
+                      />
+                    </View>
+                    <View className="min-w-0 flex-1">
+                      <Text className="text-base font-t3-bold leading-snug">No project</Text>
+                      <Text
+                        className="text-xs leading-snug text-foreground-muted"
+                        numberOfLines={1}
+                      >
+                        {scratchEnvironments.length > 1
+                          ? environment.environmentLabel
+                          : "Start a task without a project"}
+                      </Text>
+                    </View>
                     <SymbolView
-                      name="text.bubble"
-                      size={18}
-                      tintColorClassName="accent-icon-muted"
+                      name="chevron.right"
+                      size={14}
+                      tintColorClassName="accent-chevron"
                       type="monochrome"
                     />
-                  </View>
-                  <View className="min-w-0 flex-1">
-                    <Text className="text-base font-t3-bold leading-snug">No project</Text>
-                    <Text className="text-xs leading-snug text-foreground-muted" numberOfLines={1}>
-                      Start a task without a project
-                    </Text>
-                  </View>
-                  <SymbolView
-                    name="chevron.right"
-                    size={14}
-                    tintColorClassName="accent-chevron"
-                    type="monochrome"
-                  />
-                </Pressable>
+                  </Pressable>
+                ))}
               </View>
             )
           ) : null}
@@ -497,51 +522,62 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     />
                   );
                 }
-                return (
-                  <View
-                    key={scope.key}
-                    className={cn(scopeIndex > 0 && "border-t border-border-subtle")}
-                  >
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={scope.title}
-                      disabled={reservedDestinationProject !== null}
-                      onPress={() => void selectProject(selectionTarget)}
-                      className="flex-row items-center gap-3 bg-grouped-card px-4 py-3.5"
-                    >
-                      <View className="h-7 w-7 items-center justify-center">
-                        <ProjectFavicon
-                          environmentId={scope.representative.environmentId}
-                          faviconPath={scope.representative.faviconPath}
-                          projectIcon={scope.representative.projectIcon}
-                          size={20}
-                          projectTitle={scope.title}
-                          workspaceRoot={scope.representative.workspaceRoot}
-                        />
-                      </View>
-                      <View className="min-w-0 flex-1">
-                        <Text className={cn("text-base leading-snug", "font-t3-bold")}>
-                          {scope.title}
-                        </Text>
-                        <Text
-                          className="text-xs leading-snug text-foreground-muted"
-                          ellipsizeMode="middle"
-                          numberOfLines={1}
+                return picker.rows
+                  .filter((row) => row.scope === scope)
+                  .map(({ project }, rowIndex) => {
+                    const key = scopedProjectKey(project.environmentId, project.id);
+                    const path = shortWorkspacePath(project.workspaceRoot);
+                    const detail = picker.showsMachines
+                      ? `${path} · ${machineLabel(project.environmentId)}`
+                      : path;
+                    const selected = key === selectedProjectKey;
+                    return (
+                      <View
+                        key={key}
+                        className={cn(
+                          (scopeIndex > 0 || rowIndex > 0) && "border-t border-border-subtle",
+                        )}
+                      >
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`${scope.title}, ${detail}`}
+                          accessibilityState={{ selected }}
+                          disabled={reservedDestinationProject !== null}
+                          onPress={() => void selectProject(project)}
+                          className="flex-row items-center gap-3 bg-grouped-card px-4 py-3.5"
                         >
-                          {hasMultipleProjects
-                            ? `${scope.projects.length} workspaces`
-                            : selectionTarget.workspaceRoot}
-                        </Text>
+                          <View className="h-7 w-7 items-center justify-center">
+                            <ProjectFavicon
+                              environmentId={project.environmentId}
+                              faviconPath={project.faviconPath}
+                              projectIcon={project.projectIcon}
+                              size={20}
+                              projectTitle={scope.title}
+                              workspaceRoot={project.workspaceRoot}
+                            />
+                          </View>
+                          <View className="min-w-0 flex-1">
+                            <Text className="text-base font-t3-bold leading-snug">
+                              {scope.title}
+                            </Text>
+                            <Text
+                              className="text-xs leading-snug text-foreground-muted"
+                              ellipsizeMode="head"
+                              numberOfLines={1}
+                            >
+                              {detail}
+                            </Text>
+                          </View>
+                          <SymbolView
+                            name={selected ? "checkmark" : "chevron.right"}
+                            size={14}
+                            tintColorClassName={selected ? "accent-icon" : "accent-chevron"}
+                            type="monochrome"
+                          />
+                        </Pressable>
                       </View>
-                      <SymbolView
-                        name="chevron.right"
-                        size={14}
-                        tintColorClassName="accent-chevron"
-                        type="monochrome"
-                      />
-                    </Pressable>
-                  </View>
-                );
+                    );
+                  });
               })}
             </View>
           )}
