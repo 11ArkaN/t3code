@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AsyncResult } from "effect/reactivity";
 import {
   Clock3Icon,
@@ -59,7 +60,7 @@ import {
   useEnvironmentHttpBaseUrl,
   type EnvironmentPresentation,
 } from "../../state/environments";
-import { useProjects } from "../../state/entities";
+import { useProjects, useThreadShell } from "../../state/entities";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -1133,6 +1134,9 @@ function ScheduledTaskEditorForm({
   const [draft, setDraft] = useState<DraftState>(() =>
     task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
   );
+  const boundThread = useThreadShell(
+    draft.threadId ? scopeThreadRef(environmentId, draft.threadId as ThreadId) : null,
+  );
   const submissionPending = useRef(false);
   const editingTaskMissing =
     draft.editingId !== null &&
@@ -1369,6 +1373,17 @@ function ScheduledTaskEditorForm({
               }
             />
           </Field>
+          {draft.threadId ? (
+            <Field label="Thread" hint="Each run is sent here" htmlFor="scheduled-task-thread">
+              <Input
+                id="scheduled-task-thread"
+                readOnly
+                value={
+                  boundThread ? boundThread.title.trim() || "Untitled thread" : "Thread unavailable"
+                }
+              />
+            </Field>
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Project" htmlFor="scheduled-task-project">
