@@ -42,19 +42,18 @@ const image = (name: string): FilePreviewItem => ({
   } satisfies AssetResource,
 });
 
-it("opens the tapped image when a sibling in its gallery fails to resolve", async () => {
+async function openGallery(broken: string) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const outcome = Promise.withResolvers<{ presented: readonly string[] } | "closed">();
   harness.present = (source) =>
     outcome.resolve({ presented: [source.uri, ...(source.gallery ?? []).map((item) => item.uri)] });
   harness.refresh.mockImplementation(async (_environmentId, resource) => {
-    if (resource.url.endsWith("/broken")) throw new Error("asset was deleted");
+    if (resource.url.endsWith(`/${broken}`)) throw new Error("asset was deleted");
     return `${resource.url}?signed`;
   });
   const tapped = image("tapped");
-  const gallery = [image("first"), tapped, image("broken"), image("last")];
-  const container = document.createElement("div");
-  const root = createRoot(container);
+  const gallery = [image("first"), tapped, image("sibling"), image("last")];
+  const root = createRoot(document.createElement("div"));
   try {
     await act(async () =>
       root.render(
@@ -64,16 +63,23 @@ it("opens the tapped image when a sibling in its gallery fails to resolve", asyn
         />,
       ),
     );
-
-    expect(await outcome.promise).toEqual({
-      presented: [
-        "https://github.com/user-attachments/assets/tapped?signed",
-        "https://github.com/user-attachments/assets/first?signed",
-        "https://github.com/user-attachments/assets/tapped?signed",
-        "https://github.com/user-attachments/assets/last?signed",
-      ],
-    });
+    return await outcome.promise;
   } finally {
     await act(async () => root.unmount());
   }
+}
+
+it("opens the tapped image when a sibling in its gallery fails to resolve", async () => {
+  expect(await openGallery("sibling")).toEqual({
+    presented: [
+      "https://github.com/user-attachments/assets/tapped?signed",
+      "https://github.com/user-attachments/assets/first?signed",
+      "https://github.com/user-attachments/assets/tapped?signed",
+      "https://github.com/user-attachments/assets/last?signed",
+    ],
+  });
+});
+
+it("closes the preview when the tapped image fails to resolve", async () => {
+  expect(await openGallery("tapped")).toBe("closed");
 });
