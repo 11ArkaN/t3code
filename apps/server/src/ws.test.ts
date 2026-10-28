@@ -876,11 +876,21 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
 it.effect("server.getSettings returns redacted settings to installed native clients", () =>
   Effect.gen(function* () {
     const settings = yield* ServerSettings.ServerSettingsService;
+    const provider = ProviderInstanceId.make("claudeAgent");
+    const favorites = [{ provider, model: "claude-sonnet-4-5" }];
+    const providerModelPreferences = {
+      [provider]: {
+        hiddenModels: ["claude-opus-4-5"],
+        modelOrder: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+      },
+    };
     const saved = yield* settings.updateSettings({
       defaultModelSelection: {
-        instanceId: ProviderInstanceId.make("claudeAgent"),
+        instanceId: provider,
         model: "claude-haiku-4-5",
       },
+      favorites,
+      providerModelPreferences,
       sourceControlHosts: { gitcafe: { token: "gitcafe-secret" } },
     });
     const exit = yield* Deferred.make<Exit.Exit<unknown, unknown>>();
@@ -932,6 +942,8 @@ it.effect("server.getSettings returns redacted settings to installed native clie
     const value = result.value as typeof saved;
     assert.deepEqual(value, ServerSettings.redactServerSettingsForClient(saved));
     assert.deepEqual(value.defaultModelSelection, saved.defaultModelSelection);
+    assert.deepEqual(value.favorites, favorites);
+    assert.deepEqual(value.providerModelPreferences, providerModelPreferences);
     assert.notInclude(JSON.stringify(value), "gitcafe-secret");
   }).pipe(
     Effect.provide(
