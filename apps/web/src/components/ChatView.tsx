@@ -1766,7 +1766,9 @@ export default function ChatView(props: ChatViewProps) {
   const onInterruptStable = useStableCallback(onInterrupt);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- window listener for the desktop snapshot event that focuses the composer
   useEffect(() => subscribeSnapShotComposerFocus(focusComposerStable), [focusComposerStable]);
+  // Returns focus after a control interaction; explicit focus actions use focusComposer.
   const scheduleComposerFocus = () => {
+    if (isTouchPrimaryDevice()) return;
     window.requestAnimationFrame(() => {
       focusComposer();
     });
