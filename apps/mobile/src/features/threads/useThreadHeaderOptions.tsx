@@ -100,12 +100,16 @@ export function useThreadHeaderOptions(props: {
     }),
   ];
   // Desktop's right panel toggle: the panel holds browser, terminal, files, diff and devices.
-  // With changes, desktop's Changes row sits beside it and opens the Diff tab.
+  // With changes, desktop's Changes row sits beside it and opens the Diff tab. A compact bar
+  // folds two trailing items into "…", so there the Changes item alone opens the panel.
+  const changesOnly = props.changes !== undefined && !layout.usesSplitView;
   const panelHeaderItems: NativeHeaderItems = [
     ...(props.changes
       ? [
           {
-            accessibilityLabel: `Changes ${props.changes.label}`,
+            accessibilityLabel: changesOnly
+              ? `Changes ${props.changes.label}, opens the panel`
+              : `Changes ${props.changes.label}`,
             identifier: "thread-right-changes",
             label: layout.usesSplitView ? `Changes ${props.changes.label}` : props.changes.label,
             onPress: props.changes.onOpen,
@@ -115,17 +119,21 @@ export function useThreadHeaderOptions(props: {
           },
         ]
       : []),
-    {
-      accessibilityLabel: "Toggle panel",
-      disabled: props.onTogglePanel === undefined,
-      icon: { name: "sidebar.right", type: "sfSymbol" },
-      identifier: "thread-right-panel",
-      label: "Panel",
-      onPress: props.onTogglePanel,
-      sharesBackground: true,
-      type: "button",
-      variant: "plain",
-    },
+    ...(changesOnly
+      ? []
+      : [
+          {
+            accessibilityLabel: "Toggle panel",
+            disabled: props.onTogglePanel === undefined,
+            icon: { name: "sidebar.right", type: "sfSymbol" },
+            identifier: "thread-right-panel",
+            label: "Panel",
+            onPress: props.onTogglePanel,
+            sharesBackground: true,
+            type: "button",
+            variant: "plain",
+          },
+        ]),
   ];
 
   const options: AppNativeStackNavigationOptions = {
