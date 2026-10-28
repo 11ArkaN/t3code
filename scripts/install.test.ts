@@ -85,6 +85,7 @@ async function installOver(input: {
   readonly home: string;
   readonly binDir: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly cwd?: string;
 }) {
   const target = NodePath.join(input.home, "runtime", "versions", "1.2.3");
   await NodeFSP.mkdir(target, { recursive: true });
@@ -96,6 +97,7 @@ async function installOver(input: {
       : ["powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", installer]];
   const result = NodeChildProcess.spawnSync(command, args, {
     encoding: "utf8",
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     env: {
       ...process.env,
       T3CODE_CHANNEL: "",
@@ -122,6 +124,15 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh t3 
       const foreign = await installOver({ script: "install.sh", home, binDir });
       expect(foreign.code).not.toBe(0);
       expect(foreign.output).toContain(`another t3 is already at ${link}`);
+      expect(await NodeFSP.readFile(link, "utf8")).toBe("#!/bin/sh\necho mine\n");
+      // Not even from inside the versions folder, where `.` would resolve into it.
+      const fromVersions = await installOver({
+        script: "install.sh",
+        home,
+        binDir,
+        cwd: foreign.target,
+      });
+      expect(fromVersions.code).not.toBe(0);
       expect(await NodeFSP.readFile(link, "utf8")).toBe("#!/bin/sh\necho mine\n");
 
       // An upgrade over an older version's link, written through a symlinked T3 home.

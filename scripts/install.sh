@@ -228,21 +228,23 @@ fi
 step "Setting up the t3 command..."
 mkdir -p "$bin_dir"
 # Replace only this home's own t3 links: into its versions, or the desktop app's launcher.
+# Anything that is not a symlink (a script, a copied binary) belongs to someone else.
 if [ -e "${bin_dir}/t3" ] || [ -L "${bin_dir}/t3" ]; then
-  existing="$(readlink "${bin_dir}/t3" 2>/dev/null || true)"
-  real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
-  # Through a symlinked T3 home the link text names the alias; resolve its folder to compare.
-  existing_dir="$(CDPATH='' cd -P -- "$(dirname -- "${existing:-.}")" 2>/dev/null && pwd || true)"
-  resolved="${existing_dir}/${existing##*/}"
-  case "$existing" in
-    "$versions_dir"/* | "$real_versions_dir"/* | "${t3_home}/bin/t3") ;;
-    *)
-      case "$resolved" in
-        "$real_versions_dir"/*) ;;
-        *) fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly." ;;
-      esac
-      ;;
-  esac
+  owned=false
+  if [ -L "${bin_dir}/t3" ]; then
+    existing="$(readlink "${bin_dir}/t3" 2>/dev/null || true)"
+    case "$existing" in /*) ;; *) existing="${bin_dir}/${existing}" ;; esac
+    real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
+    # Through a symlinked T3 home the link text names the alias; resolve its folder to compare.
+    existing_dir="$(CDPATH='' cd -P -- "$(dirname -- "$existing")" 2>/dev/null && pwd || true)"
+    case "$existing" in
+      "$versions_dir"/* | "$real_versions_dir"/* | "${t3_home}/bin/t3") owned=true ;;
+    esac
+    if [ -n "$existing_dir" ]; then
+      case "${existing_dir}/${existing##*/}" in "$real_versions_dir"/*) owned=true ;; esac
+    fi
+  fi
+  "$owned" || fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly."
 fi
 ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
 # Pruning keeps what this launcher points at; a background service cannot see bin_dir otherwise.
