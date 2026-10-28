@@ -20,8 +20,6 @@ type ClaudeSkillRoot = {
   readonly directory: string;
   readonly scope: ClaudeSkillScope;
   readonly prefix?: string;
-  /** Lives in a project, so its open() may block; see ProjectFileReader. */
-  readonly projectControlled: boolean;
 };
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
@@ -130,21 +128,19 @@ function skillOverrideSettingsPaths(
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv,
   repositoryRoot?: string,
-): ReadonlyArray<{ readonly path: string; readonly projectControlled: boolean }> {
+): ReadonlyArray<string> {
   const managedPath = claudeManagedSettingsPath(path, platform, environment);
   const root = repositoryRoot !== undefined && repositoryRoot !== cwd ? repositoryRoot : undefined;
-  const project = (filePath: string) => ({ path: filePath, projectControlled: true });
-  const machine = (filePath: string) => ({ path: filePath, projectControlled: false });
   return [
-    machine(path.join(configDirPath, "settings.json")),
+    path.join(configDirPath, "settings.json"),
     ...(cwd
       ? [
-          project(path.join(cwd, ".claude", "settings.json")),
-          project(path.join(cwd, ".claude", "settings.local.json")),
+          path.join(cwd, ".claude", "settings.json"),
+          path.join(cwd, ".claude", "settings.local.json"),
         ]
       : []),
-    ...(root ? [project(path.join(root, ".claude", "settings.local.json"))] : []),
-    ...(managedPath ? [machine(managedPath)] : []),
+    ...(root ? [path.join(root, ".claude", "settings.local.json")] : []),
+    ...(managedPath ? [managedPath] : []),
   ];
 }
 
@@ -239,12 +235,16 @@ function parseSkillOverride(value: typeof SkillOverrideValue.Type): SkillOverrid
   }
 }
 
+/** Any path inside these is read with ProjectFileReader, whatever its role, e.g. a config dir. */
+type ProjectDirectories = ReadonlyArray<string | undefined>;
+
 /** Undefined when the file is missing or unreadable. */
 const readClaudeFile = Effect.fn("readClaudeFile")(function* (
   filePath: string,
-  projectControlled: boolean,
+  projectDirectories: ProjectDirectories,
 ) {
-  if (projectControlled) {
+  const path = yield* Path.Path;
+  if (ProjectFileReader.isProjectPath(path, projectDirectories, filePath)) {
     const projectFiles = yield* ProjectFileReader.ProjectFileReader;
     return yield* projectFiles.readFileString(filePath);
   }
@@ -252,18 +252,36 @@ const readClaudeFile = Effect.fn("readClaudeFile")(function* (
   return yield* fileSystem.readFileString(filePath).pipe(Effect.orElseSucceed(() => undefined));
 });
 
+const readClaudeDirectory = Effect.fn("readClaudeDirectory")(function* (
+  directory: string,
+  projectDirectories: ProjectDirectories,
+): Effect.fn.Return<
+  ReadonlyArray<string>,
+  never,
+  FileSystem.FileSystem | Path.Path | ProjectFileReader.ProjectFileReader
+> {
+  const path = yield* Path.Path;
+  if (ProjectFileReader.isProjectPath(path, projectDirectories, directory)) {
+    const projectFiles = yield* ProjectFileReader.ProjectFileReader;
+    return (yield* projectFiles.readDirectory(directory)) ?? [];
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.readDirectory(directory).pipe(Effect.orElseSucceed(() => []));
+});
+
 const readSkillSettings = Effect.fn("readSkillSettings")(function* (
   configDirPath: string,
   cwd: string | undefined,
   environment: NodeJS.ProcessEnv,
+  repositoryRoot: string | undefined,
+  projectDirectories: ProjectDirectories,
 ) {
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
   const overridesByName = new Map<string, SkillOverride>();
   const enabledPlugins = new Map<string, boolean>();
-  const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
 
-  for (const { path: settingsPath, projectControlled } of skillOverrideSettingsPaths(
+  for (const settingsPath of skillOverrideSettingsPaths(
     path,
     configDirPath,
     cwd,
@@ -271,7 +289,7 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
     environment,
     repositoryRoot,
   )) {
-    const contents = yield* readClaudeFile(settingsPath, projectControlled);
+    const contents = yield* readClaudeFile(settingsPath, projectDirectories);
     if (contents === undefined) {
       continue;
     }
@@ -304,6 +322,7 @@ const readSkillSettings = Effect.fn("readSkillSettings")(function* (
 const InstalledPlugins = Schema.fromJsonString(
   Schema.Struct({ plugins: Schema.Record(Schema.String, Schema.Array(Schema.Unknown)) }),
 );
+const decodeInstalledPlugins = Schema.decodeEffect(InstalledPlugins);
 const decodeInstalledPlugin = Schema.decodeUnknownOption(
   Schema.Struct({
     scope: Schema.Literals(["user", "project", "local", "managed"]),
@@ -329,6 +348,7 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   cwd: string | undefined,
   enabledPlugins: ReadonlyMap<string, boolean>,
   environment: NodeJS.ProcessEnv,
+  cwdDirectories: ProjectDirectories,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -337,13 +357,17 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   const pluginsPath = pluginDirectory
     ? path.resolve(cwd ?? ".", expandHomePath(pluginDirectory, home))
     : path.join(configDirPath, "plugins");
-  const installed = yield* fileSystem
-    .readFileString(path.join(pluginsPath, "installed_plugins.json"))
-    .pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(InstalledPlugins)),
-      Effect.orElseSucceed(() => undefined),
-    );
-  if (installed === undefined) return [];
+  const installedContents = yield* readClaudeFile(
+    path.join(pluginsPath, "installed_plugins.json"),
+    cwdDirectories,
+  );
+  const installed =
+    installedContents === undefined
+      ? undefined
+      : yield* decodeInstalledPlugins(installedContents).pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+  if (installed === undefined) return { roots: [], projectDirectories: cwdDirectories };
   const roots: Array<ClaudeSkillRoot> = [];
   // The CLI's process.cwd() resolves symlinks; registry projectPath values remain lexical.
   const workspace =
@@ -352,6 +376,7 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
       : yield* fileSystem.realPath(cwd).pipe(Effect.orElseSucceed(() => path.resolve(cwd)));
   const repositoryRoot =
     workspace === undefined ? undefined : yield* findPluginRepositoryRoot(workspace);
+  const projectDirectories = [...cwdDirectories, workspace, repositoryRoot];
 
   for (const [key, entries] of Object.entries(installed.plugins).sort()) {
     if (enabledPlugins.get(key) !== true) continue;
@@ -378,12 +403,9 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     if (!install) continue;
     const scope = install.scope === "user" || install.scope === "managed" ? "user" : "project";
     const installPath = path.resolve(cwd ?? ".", install.installPath);
-    const projectControlled = [cwd, workspace, repositoryRoot].some(
-      (directory) => directory !== undefined && isInsideDirectory(path, directory, installPath),
-    );
     const manifestContents = yield* readClaudeFile(
       path.join(installPath, ".claude-plugin", "plugin.json"),
-      projectControlled,
+      projectDirectories,
     );
     const manifest =
       manifestContents === undefined
@@ -396,14 +418,13 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
     const hasDefaultDirectory = yield* fileSystem
       .exists(defaultDirectory)
       .pipe(Effect.orElseSucceed(() => false));
-    if (hasDefaultDirectory)
-      roots.push({ directory: defaultDirectory, scope, prefix, projectControlled });
+    if (hasDefaultDirectory) roots.push({ directory: defaultDirectory, scope, prefix });
     const declared = manifest?.skills;
     if (declared === undefined && !hasDefaultDirectory) {
       const hasRootSkill = yield* fileSystem
         .exists(path.join(installPath, "SKILL.md"))
         .pipe(Effect.orElseSucceed(() => false));
-      if (hasRootSkill) roots.push({ directory: installPath, scope, prefix, projectControlled });
+      if (hasRootSkill) roots.push({ directory: installPath, scope, prefix });
     }
 
     const canonicalInstallPath = yield* fileSystem
@@ -422,11 +443,11 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
         canonicalDirectory !== undefined &&
         isInsideDirectory(path, canonicalInstallPath, canonicalDirectory)
       ) {
-        roots.push({ directory, scope, prefix, projectControlled });
+        roots.push({ directory, scope, prefix });
       }
     }
   }
-  return roots;
+  return { roots, projectDirectories };
 });
 
 const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
@@ -461,43 +482,40 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const configDirPath = yield* resolveClaudeConfigDirPath(config, environment ?? process.env, cwd);
+  const additionalArgument = parseCliArgs(config.launchArgs ?? "").flags["add-dir"];
+  const additionalDirectory =
+    additionalArgument && (cwd || path.isAbsolute(additionalArgument))
+      ? path.resolve(cwd ?? ".", additionalArgument)
+      : undefined;
+  const repositoryRoot = cwd === undefined ? undefined : yield* findRepositoryRoot(cwd);
+  const cwdDirectories = [cwd, repositoryRoot, additionalDirectory];
   const { skillOverrides, enabledPlugins } = yield* readSkillSettings(
     configDirPath,
     cwd,
     environment ?? process.env,
+    repositoryRoot,
+    cwdDirectories,
+  );
+  const plugins = yield* discoverPluginSkillRoots(
+    configDirPath,
+    cwd,
+    enabledPlugins,
+    environment ?? process.env,
+    cwdDirectories,
   );
 
-  const additionalDirectory = parseCliArgs(config.launchArgs ?? "").flags["add-dir"];
   const roots: ReadonlyArray<ClaudeSkillRoot> = [
-    { directory: path.join(configDirPath, "skills"), scope: "user", projectControlled: false },
-    ...(cwd
+    { directory: path.join(configDirPath, "skills"), scope: "user" },
+    ...(cwd ? [{ directory: path.join(cwd, ".claude", "skills"), scope: "project" as const }] : []),
+    ...(additionalDirectory
       ? [
           {
-            directory: path.join(cwd, ".claude", "skills"),
+            directory: path.join(additionalDirectory, ".claude", "skills"),
             scope: "project" as const,
-            projectControlled: true,
           },
         ]
       : []),
-    ...(additionalDirectory && (cwd || path.isAbsolute(additionalDirectory))
-      ? [
-          {
-            directory: path.join(
-              path.resolve(cwd ?? ".", additionalDirectory),
-              ".claude",
-              "skills",
-            ),
-            scope: "project" as const,
-            projectControlled: true,
-          },
-        ]
-      : []),
-    ...(yield* discoverPluginSkillRoots(
-      configDirPath,
-      cwd,
-      enabledPlugins,
-      environment ?? process.env,
-    )),
+    ...plugins.roots,
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -509,9 +527,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         .pipe(Effect.orElseSucceed(() => false)));
     const entries = singleSkill
       ? [path.basename(root.directory)]
-      : yield* fileSystem
-          .readDirectory(root.directory)
-          .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+      : yield* readClaudeDirectory(root.directory, plugins.projectDirectories);
 
     const skillFiles = yield* Effect.forEach(
       [...entries].sort(),
@@ -519,14 +535,14 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         const skillPath = singleSkill
           ? path.join(root.directory, "SKILL.md")
           : path.join(root.directory, entry, "SKILL.md");
-        return Effect.map(readClaudeFile(skillPath, root.projectControlled), (contents) => ({
+        return Effect.map(readClaudeFile(skillPath, plugins.projectDirectories), (contents) => ({
           entry,
           skillPath,
           frontmatter: contents === undefined ? undefined : parseSkillFrontmatter(contents),
         }));
       },
-      // Project reads each spawn a child; overlap them rather than paying for each in turn.
-      { concurrency: root.projectControlled ? 8 : 1 },
+      // Project reads may each spawn a child; overlap them rather than paying for each in turn.
+      { concurrency: 8 },
     );
 
     for (const { entry, skillPath, frontmatter } of skillFiles) {

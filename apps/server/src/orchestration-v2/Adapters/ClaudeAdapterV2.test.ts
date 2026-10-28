@@ -3376,6 +3376,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 ProjectFileReader.ProjectFileReader,
                 ProjectFileReader.ProjectFileReader.of({
                   readFileString: () => Effect.undefined,
+                  readDirectory: () => Effect.undefined,
                 }),
               ),
               NodeServices.layer,
@@ -3949,33 +3950,41 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     );
 
     it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
-      "starts every turn and leaves the libuv pool free when settings.local.json is a FIFO",
+      "starts every turn and leaves the libuv pool free when settings.local.json and a config dir inside the project are FIFOs",
       () =>
         Effect.gen(function* () {
           const fileSystem = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-fifo-" });
+          const scratch = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-fifo-" });
           const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-ws-" });
+          const home = path.join(workspace, ".claude-home");
           yield* fileSystem.makeDirectory(path.join(workspace, ".git"));
           yield* fileSystem.makeDirectory(path.join(workspace, ".claude"));
+          yield* fileSystem.makeDirectory(home);
+          const settingsPath = path.join(workspace, ".claude", "settings.local.json");
           // open() of a FIFO waits for a writer, like a TCC-protected file in a headless daemon,
           // and pins a libuv pool thread; the finalizer's writer releases any reader left waiting.
-          const settingsPath = path.join(workspace, ".claude", "settings.local.json");
-          NodeChildProcess.execFileSync("mkfifo", [settingsPath]);
-          yield* Effect.addFinalizer(() =>
-            Effect.sync(() => {
-              try {
-                NodeFS.closeSync(
-                  NodeFS.openSync(
-                    settingsPath,
-                    NodeFS.constants.O_WRONLY | NodeFS.constants.O_NONBLOCK,
-                  ),
-                );
-              } catch {
-                // ENXIO: no reader is waiting.
-              }
-            }),
-          );
+          for (const gatePath of [
+            settingsPath,
+            path.join(home, "settings.json"),
+            path.join(home, "remote-settings.json"),
+          ]) {
+            NodeChildProcess.execFileSync("mkfifo", [gatePath]);
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                try {
+                  NodeFS.closeSync(
+                    NodeFS.openSync(
+                      gatePath,
+                      NodeFS.constants.O_WRONLY | NodeFS.constants.O_NONBLOCK,
+                    ),
+                  );
+                } catch {
+                  // ENXIO: no reader is waiting.
+                }
+              }),
+            );
+          }
           // A stuck read never finishes interrupting, so only the join is timed.
           const withinDeadline = <A, E>(effect: Effect.Effect<A, E>) =>
             Effect.forkDetach(effect).pipe(
@@ -4014,10 +4023,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             assert.deepEqual(
               opened,
               Option.some(true),
-              `turn ${attempt} of ${attempts} hung reading ${settingsPath}`,
+              `turn ${attempt} of ${attempts} hung reading ${settingsPath} or ${home}`,
             );
           }
-          const unrelated = path.join(home, "unrelated.txt");
+          const unrelated = path.join(scratch, "unrelated.txt");
           yield* fileSystem.writeFileString(unrelated, "free");
           assert.isTrue(
             Option.isSome(yield* withinDeadline(fileSystem.readFileString(unrelated))),

@@ -4333,11 +4333,43 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     adapterOptions.settings.homePath.trim().length > 0 ||
     adapterOptions.environment.CLAUDE_CONFIG_DIR !== hostEnvironment.CLAUDE_CONFIG_DIR;
   const announcedBypassDowngrades = new Set<ThreadId>();
-  const readBypassSettings = (filePath: string) =>
-    fileSystem.readFileString(filePath).pipe(
-      Effect.flatMap(decodeClaudeBypassSettings),
-      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed({})),
-    );
+  // Whatever their role, files in the cwd or its checkout are read with ProjectFileReader.
+  // Undefined when missing; a file that exists but cannot be read fails.
+  const readSettingsFile = Effect.fn("ClaudeAdapterV2.readSettingsFile")(function* (
+    filePath: string,
+    projectDirectories: ReadonlyArray<string | null | undefined>,
+  ) {
+    if (!ProjectFileReader.isProjectPath(path, projectDirectories, filePath)) {
+      return yield* fileSystem.readFileString(filePath).pipe(
+        Effect.map((contents): string | undefined => contents),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.undefined),
+      );
+    }
+    const contents = yield* projectFiles.readFileString(filePath);
+    if (contents !== undefined) return contents;
+    if (Option.isNone(yield* fileSystem.stat(filePath).pipe(Effect.option))) return undefined;
+    return yield* new ClaudeProjectSettingsUnreadableError({ path: filePath });
+  });
+  const checkoutDirectory = Effect.fn("ClaudeAdapterV2.checkoutDirectory")(function* (cwd: string) {
+    for (let directory = cwd; ; directory = path.dirname(directory)) {
+      const isCheckout = yield* fileSystem
+        .exists(path.join(directory, ".git"))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (isCheckout) return directory;
+      if (path.dirname(directory) === directory) return undefined;
+    }
+  });
+  const projectDirectories = (cwd: string | null) =>
+    cwd === null
+      ? Effect.succeed([])
+      : Effect.map(checkoutDirectory(cwd), (checkout) => [cwd, checkout]);
+  const readBypassSettings = Effect.fn("ClaudeAdapterV2.readBypassSettings")(function* (
+    filePath: string,
+    directories: ReadonlyArray<string | undefined>,
+  ) {
+    const contents = yield* readSettingsFile(filePath, directories);
+    return contents === undefined ? {} : yield* decodeClaudeBypassSettings(contents);
+  });
   // The SDK reads <cwd>/.claude/settings{,.local}.json with sync fs on the main thread, where a
   // blocked open() would freeze the server, so one the reader cannot read fails like an SDK error.
   const resolveSdkSettings = Effect.fn("ClaudeAdapterV2.resolveSdkSettings")(function* (
@@ -4347,13 +4379,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     if (cwd !== null) {
       yield* Effect.forEach(
         ["settings.json", "settings.local.json"],
-        Effect.fnUntraced(function* (name) {
-          const filePath = path.join(path.resolve(cwd), ".claude", name);
-          const exists = Option.isSome(yield* fileSystem.stat(filePath).pipe(Effect.option));
-          if (exists && (yield* projectFiles.readFileString(filePath)) === undefined) {
-            return yield* new ClaudeProjectSettingsUnreadableError({ path: filePath });
-          }
-        }),
+        (name) => readSettingsFile(path.join(path.resolve(cwd), ".claude", name), [cwd]),
         { concurrency: "unbounded", discard: true },
       );
     }
@@ -4365,9 +4391,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     function* (cwd: string | null) {
       // resolveSettings does not initialize remote-cache eligibility in the SDK host.
       // Keep the payload intact so the SDK also honors managedSourcesBehavior.
-      const remote = yield* readBypassSettings(path.join(homePath, "remote-settings.json"));
+      const directories = yield* projectDirectories(cwd);
+      const remote = yield* readBypassSettings(
+        path.join(homePath, "remote-settings.json"),
+        directories,
+      );
       const home = customHome
-        ? yield* readBypassSettings(path.join(homePath, "settings.json"))
+        ? yield* readBypassSettings(path.join(homePath, "settings.json"), directories)
         : {};
       const resolved = yield* resolveSdkSettings(cwd, {
         settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
@@ -4399,23 +4429,29 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
       const resolved = yield* resolveSdkSettings(cwd, {
         settingSources: customHome ? ["project", "local"] : ["user", "project", "local"],
       }).pipe(Effect.orElseSucceed(() => undefined));
-      const home = customHome
-        ? yield* fileSystem.readFileString(path.join(homePath, "settings.json")).pipe(
-            Effect.flatMap(decodeClaudeSubagentCacheSettings),
-            Effect.orElseSucceed(() => ({ subagentPromptCacheTtl: undefined })),
-          )
+      const homeContents = customHome
+        ? yield* readSettingsFile(
+            path.join(homePath, "settings.json"),
+            yield* projectDirectories(cwd),
+          ).pipe(Effect.orElseSucceed(() => undefined))
         : undefined;
+      const home =
+        homeContents === undefined
+          ? undefined
+          : Option.getOrUndefined(
+              yield* decodeClaudeSubagentCacheSettings(homeContents).pipe(Effect.option),
+            );
       return resolved?.effective.subagentPromptCacheTtl ?? home?.subagentPromptCacheTtl;
     },
   );
 
   const readToolSearchSetting = Effect.fn("ClaudeAdapterV2.readToolSearchSetting")(function* (
     filePath: string,
-    projectControlled: boolean,
+    directories: ReadonlyArray<string | null | undefined>,
   ) {
-    const contents = projectControlled
-      ? yield* projectFiles.readFileString(filePath)
-      : yield* fileSystem.readFileString(filePath).pipe(Effect.orElseSucceed(() => undefined));
+    const contents = yield* readSettingsFile(filePath, directories).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
     if (contents === undefined) return undefined;
     const settings = yield* decodeClaudeEnvSettings(contents).pipe(Effect.option);
     const value = Option.getOrUndefined(settings)?.env?.ENABLE_TOOL_SEARCH;
@@ -4444,16 +4480,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
     cwd: string,
   ) {
     if ((yield* HostProcess.Platform) === "win32") return cwd;
-    for (let directory = cwd; ; directory = path.dirname(directory)) {
-      const isCheckout = yield* fileSystem
-        .exists(path.join(directory, ".git"))
-        .pipe(Effect.orElseSucceed(() => false));
-      if (isCheckout) {
-        const root = yield* mainCheckoutRoot(directory);
-        return root === (yield* HostProcess.HomeDirectory) ? cwd : root;
-      }
-      if (path.dirname(directory) === directory) return cwd;
-    }
+    const checkout = yield* checkoutDirectory(cwd);
+    if (checkout === undefined) return cwd;
+    const root = yield* mainCheckoutRoot(checkout);
+    return root === (yield* HostProcess.HomeDirectory) ? cwd : root;
   });
   // Settings env beats the process env, --settings over local over project over user, and a local
   // file an older Claude Code left in cwd applies under the root one. resolveSettings reads local
@@ -4471,12 +4501,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ...(localDirectory === cwd ? [] : [path.join(cwd, ".claude", "settings.local.json")]),
               path.join(cwd, ".claude", "settings.json"),
             ];
-      const settingsFiles = [
-        ...projectSettingsFiles.map((file) => [file, true] as const),
-        [path.join(homePath, "settings.json"), false] as const,
-      ];
-      for (const [settingsFile, projectControlled] of settingsFiles) {
-        const value = yield* readToolSearchSetting(settingsFile, projectControlled);
+      const directories = [...(yield* projectDirectories(cwd)), localDirectory];
+      for (const settingsFile of [...projectSettingsFiles, path.join(homePath, "settings.json")]) {
+        const value = yield* readToolSearchSetting(settingsFile, directories);
         if (value !== undefined) return claudeToolSearchOverride(value);
       }
       return claudeToolSearchOverride(adapterOptions.environment.ENABLE_TOOL_SEARCH);

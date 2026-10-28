@@ -972,5 +972,31 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
           );
         }).pipe(Effect.scoped, Effect.provide(layerNodeServices)),
     );
+
+    it.live(
+      "completes every discovery when a config dir inside the project holds FIFO settings and plugin records",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-fifo-" });
+          yield* writeSkill(path.join(workspace, ".claude", "skills"), "review", "# Review");
+          yield* makeOpenGate(path.join(workspace, ".claude", "settings.json"));
+          yield* fs.makeDirectory(path.join(workspace, ".claude", "plugins"));
+          yield* makeOpenGate(path.join(workspace, ".claude", "plugins", "installed_plugins.json"));
+
+          const attempts = LIBUV_POOL_SIZE + 1;
+          for (let attempt = 1; attempt <= attempts; attempt++) {
+            const skills = yield* awaitWithinDeadline(
+              discoverClaudeSkills({ homePath: "" }, workspace, { CLAUDE_CONFIG_DIR: ".claude" }),
+            );
+            assert.deepEqual(
+              Option.map(skills, (found) => found.map((skill) => skill.name)),
+              Option.some(["review"]),
+              `discovery ${attempt} of ${attempts} hung reading the project-local config dir`,
+            );
+          }
+        }).pipe(Effect.scoped, Effect.provide(layerNodeServices)),
+    );
   },
 );
