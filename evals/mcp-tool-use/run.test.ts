@@ -161,18 +161,22 @@ it("passes a good run and names every rule a bad run breaks", () => {
   ]);
 });
 
+const decodeMcpToolUseCase = Schema.decodeUnknownSync(McpToolUseCase);
+
 it("matches invocation expressions and rejects discovery, wrong tabs, and wrong arguments", () => {
-  const expect = {
-    calls: [
-      {
-        tool: "preview_evaluate",
-        args: {
-          tabId: "tab_1",
-          expression: String.raw`regex:\.callTool\(\s*['"]create_note['"]\s*,\s*\{(?=[^}]*\btitle['"]?\s*:\s*['"]Groceries['"])(?=[^}]*\bbody['"]?\s*:\s*['"]milk, eggs, bread['"])`,
-        },
-      },
-    ],
+  const cases = NodeFS.readFileSync(
+    new URL("./cases/visual-preview.ndjson", import.meta.url),
+    "utf8",
+  )
+    .trim()
+    .split("\n")
+    .map((line) => decodeMcpToolUseCase(JSON.parse(line)));
+  const caseExpect = (id: string) => {
+    const testCase = cases.find((testCase) => testCase.id === id);
+    if (!testCase) throw new Error(`Missing case ${id}`);
+    return testCase.expect;
   };
+  const expect = caseExpect("webmcp-requested-site-write-refused");
   const run = (expression: unknown, tabId = "tab_1"): SampleRun => ({
     calls: [{ step: 0, tool: "preview_evaluate", input: { tabId, expression } }],
     text: "",
@@ -195,9 +199,27 @@ it("matches invocation expressions and rejects discovery, wrong tabs, and wrong 
     run(expression, "wrong_tab"),
     run(expression.replace("Groceries", "Work")),
     run(expression.replace("milk, eggs, bread", "milk")),
+    run(
+      `navigator.modelContext.callTool("create_note", {payload: "title: 'Groceries', body: 'milk, eggs, bread'"})`,
+    ),
     run(null),
   ])
     assert.lengthOf(failed(expect, sample), 1);
+  const saveExpect = caseExpect("control-webmcp-requested-chart-save");
+  assert.deepEqual(
+    failed(
+      saveExpect,
+      run(
+        "navigator.modelContext.callTool('save_chart', {spec: {title:'Daily usage',type:'bar',data:[]}})",
+      ),
+    ),
+    [],
+  );
+  for (const expression of [
+    "navigator.modelContext.callTool('save_chart', {spec: {}, title:'Daily usage'})",
+    `navigator.modelContext.callTool('save_chart', {spec: {description: "title:'Daily usage'"}})`,
+  ])
+    assert.lengthOf(failed(saveExpect, run(expression)), 1);
 });
 
 it("bounds numbers and reads target.options in either schema form", () => {
