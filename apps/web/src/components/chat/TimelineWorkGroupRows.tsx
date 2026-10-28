@@ -58,14 +58,7 @@ import {
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
 import { useClientSettings } from "../../hooks/useSettings";
-import {
-  LiveToolCard,
-  SettledToolCard,
-  ToolCardBody,
-  ToolGroupLine,
-  groupHasTools,
-  useEntriesInWorkingRun,
-} from "./ToolCallCard";
+import { LiveToolCard, ToolCardBody, ToolGroupLine, groupHasTools } from "./ToolCallCard";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -82,7 +75,6 @@ export const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { workspaceRoot, routeThreadKey, onToggleWorkEntry } = use(TimelineRowCtx);
   const toolCallCards = useClientSettings((settings) => settings.toolCallCards);
-  const inWorkingRun = useEntriesInWorkingRun(groupedEntries);
   const onToggleStandaloneEntry = (collapsed: boolean) =>
     onToggleWorkEntry(disclosureAnchorKey, collapsed);
   const nonEmptyEntries = groupedEntries.filter((entry) =>
@@ -108,9 +100,6 @@ export const WorkGroupSection = memo(function WorkGroupSection({
     return inCard ? <ToolCardBody>{entries}</ToolCardBody> : entries;
   }
 
-  if (toolCallCards && inWorkingRun && groupHasTools(nonEmptyEntries)) {
-    return <SettledToolCard entries={nonEmptyEntries} />;
-  }
   return (
     <section aria-label="Activity">
       {nonEmptyEntries.map((workEntry) => (

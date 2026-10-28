@@ -1397,6 +1397,8 @@ export function deriveMessagesTimelineRows(input: {
   availableRevertTurnCounts?: ReadonlySet<number> | undefined;
   liveAgentTaskIds?: ReadonlySet<string> | undefined;
   worktreeSetup?: WorktreeSetupSnapshot | null;
+  /** Beta tool call cards: the working run's calls share one card below its text. */
+  toolCallCards?: boolean;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input.timelineEntries);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -1481,6 +1483,14 @@ export function deriveMessagesTimelineRows(input: {
     for (let index = timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
       const entry = timelineEntries[index]!;
       if (
+        input.toolCallCards &&
+        entry.kind === "message" &&
+        entry.message.role === "assistant" &&
+        runIdIsActiveResponse(entry.message.runId)
+      ) {
+        continue;
+      }
+      if (
         entry.kind !== "work" ||
         entry.entry.tone === "error" ||
         entry.entry.sourceActivityKind === "runtime.error" ||
@@ -1517,7 +1527,9 @@ export function deriveMessagesTimelineRows(input: {
     latestRunningToolEntry !== undefined ||
     (latestVisibleToolEntry !== undefined &&
       workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
+  // A card keeps showing its failed call; the old rows swap it for a thinking row.
   const latestToolFailed =
+    input.toolCallCards !== true &&
     latestRunningToolEntry === undefined &&
     latestVisibleToolEntry !== undefined &&
     latestVisibleToolEntry.entry.toolLifecycleStatus !== "declined" &&
@@ -1661,7 +1673,7 @@ export function deriveMessagesTimelineRows(input: {
       appendWorkingRow();
     }
 
-    if (timelineEntry.id === activeWorkPlacementEntryId) {
+    if (timelineEntry.id === activeWorkPlacementEntryId && !input.toolCallCards) {
       appendActiveWorkRows();
     }
 
@@ -2024,6 +2036,8 @@ export function deriveMessagesTimelineRows(input: {
           : undefined,
     });
   }
+  // Only the run's own text can follow its calls, so the end is the bottom of the run.
+  if (input.toolCallCards) appendActiveWorkRows();
 
   const setupHandedOff =
     input.worktreeSetup !== null &&
