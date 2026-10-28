@@ -109,5 +109,10 @@ describe("sidebar pointer lifecycle", () => {
     row.dispatchEvent(pointer("pointermove", { pointerType: "mouse", clientX: 20 }));
     row.dispatchEvent(pointer("pointerup", { pointerType: "mouse", buttons: 0, clientX: 20 }));
     expect(drag.onStart).toHaveBeenCalledOnce();
+
+    const penDrag = gesture({}, { pointerType: "pen" });
+    row.dispatchEvent(pointer("pointermove", { pointerType: "pen", clientX: 40 }));
+    row.dispatchEvent(pointer("pointerup", { pointerType: "pen", buttons: 0, clientX: 40 }));
+    expect(penDrag.onStart).toHaveBeenCalledOnce();
   });
 });
