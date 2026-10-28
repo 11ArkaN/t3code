@@ -4,8 +4,17 @@ import UIKit
 import UniformTypeIdentifiers
 
 private final class FilePreviewItem: NSObject, QLPreviewItem {
+  let source: URL
+  let sourceIdentifier: String?
   var previewItemURL: URL?
   var previewItemTitle: String?
+
+  init(source: URL, title: String, sourceIdentifier: String?, file: URL? = nil) {
+    self.source = source
+    self.sourceIdentifier = sourceIdentifier
+    previewItemURL = file
+    previewItemTitle = title
+  }
 }
 
 private final class FilePreviewController: QLPreviewController {
@@ -20,7 +29,7 @@ private final class FilePreviewController: QLPreviewController {
 final class T3NativeFilePresentation: NSObject, QLPreviewControllerDataSource,
   QLPreviewControllerDelegate, UIAdaptivePresentationControllerDelegate {
   let identifier: String
-  private var controller: UIViewController?
+  private var controller: FilePreviewController?
   private let completion: (Error?) -> Void
   private weak var sources: T3PresentationSources?
   private let sourceIdentifiers: [String]
@@ -43,30 +52,14 @@ final class T3NativeFilePresentation: NSObject, QLPreviewControllerDataSource,
   }
 
   func present(urls: [URL], titles: [String], selectedIndex: Int, from presenter: UIViewController) {
+    items = urls.indices.map { index in
+      FilePreviewItem(source: urls[index], title: titles[index],
+                      sourceIdentifier: sourceIdentifiers.indices.contains(index) ? sourceIdentifiers[index] : nil)
+    }
     loading = Task { @MainActor [self] in
       do {
-        for (index, url) in urls.enumerated() {
-        let title = titles[index]
-        let file = try await Self.prepareFile(url: url, title: title)
-        guard !finished, !Task.isCancelled else {
-          try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
-          return
-        }
-        // Quick Look knows which formats it renders; refuse before presenting so the caller
-        // can fall back instead of showing an "unsupported format" page.
-        guard QLPreviewController.canPreview(file as NSURL) else {
-          try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
-          throw NSError(
-            domain: "T3NativePresentation",
-            code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "This file type cannot be previewed on this device."]
-          )
-        }
-        let item = FilePreviewItem()
-        item.previewItemURL = file
-        item.previewItemTitle = title
-        items.append(item)
-        }
+        guard let selected = try await prepare(items[selectedIndex]) else { return }
+        items[selectedIndex] = selected
         let preview = FilePreviewController()
         preview.delegate = self
         preview.dataSource = self
@@ -79,6 +72,56 @@ final class T3NativeFilePresentation: NSObject, QLPreviewControllerDataSource,
         preview.presentationController?.delegate = self
       } catch {
         finish(error: error)
+        return
+      }
+      await prepareRemainingItems()
+    }
+  }
+
+  /// Returns nil when the presentation closed while the file was being prepared.
+  @MainActor private func prepare(_ item: FilePreviewItem) async throws -> FilePreviewItem? {
+    let file = try await Self.prepareFile(url: item.source, title: item.previewItemTitle ?? "")
+    guard !finished, !Task.isCancelled else {
+      try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+      return nil
+    }
+    // Quick Look knows which formats it renders; refuse before presenting so the caller
+    // can fall back instead of showing an "unsupported format" page.
+    guard QLPreviewController.canPreview(file as NSURL) else {
+      try? FileManager.default.removeItem(at: file.deletingLastPathComponent())
+      throw NSError(
+        domain: "T3NativePresentation",
+        code: 3,
+        userInfo: [NSLocalizedDescriptionKey: "This file type cannot be previewed on this device."]
+      )
+    }
+    return FilePreviewItem(source: item.source, title: item.previewItemTitle ?? "",
+                           sourceIdentifier: item.sourceIdentifier, file: file)
+  }
+
+  /// Prepares the rest of the gallery while it is open, nearest to the visible item first.
+  @MainActor private func prepareRemainingItems() async {
+    while !finished, let controller {
+      let current = items.indices.contains(controller.currentPreviewItemIndex)
+        ? controller.currentPreviewItemIndex : 0
+      guard let index = items.indices.filter({ items[$0].previewItemURL == nil })
+        .min(by: { abs($0 - current) < abs($1 - current) })
+      else { return }
+      do {
+        guard let ready = try await prepare(items[index]) else { return }
+        // A new item object makes Quick Look drop whatever it rendered for the placeholder.
+        items[index] = ready
+        controller.reloadData()
+        if controller.currentPreviewItemIndex == index { controller.refreshCurrentPreviewItem() }
+      } catch {
+        guard !finished, !Task.isCancelled else { return }
+        let visible = controller.currentPreviewItemIndex
+        items.remove(at: index)
+        controller.reloadData()
+        // Keep the visible item on screen when an earlier one disappears.
+        if visible != NSNotFound, index < visible || visible == items.count {
+          controller.currentPreviewItemIndex = visible - 1
+        }
       }
     }
   }
@@ -109,10 +152,9 @@ final class T3NativeFilePresentation: NSObject, QLPreviewControllerDataSource,
 
   private func sourceView(for item: QLPreviewItem) -> UIView? {
     guard !UIAccessibility.isReduceMotionEnabled,
-      let index = items.firstIndex(where: { $0 === item }),
-      sourceIdentifiers.indices.contains(index)
+      let sourceIdentifier = (item as? FilePreviewItem)?.sourceIdentifier
     else { return nil }
-    return sources?.view(for: sourceIdentifiers[index])
+    return sources?.view(for: sourceIdentifier)
   }
 
   func previewController(_ controller: QLPreviewController, transitionViewFor item: QLPreviewItem) -> UIView? {
