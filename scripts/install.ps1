@@ -216,6 +216,17 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
 Step "Setting up the t3 command..."
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 $shim = Join-Path $binDir "t3.cmd"
+# Replace only a shim that runs a version in this home; never the desktop app's or another t3.
+if (Test-Path $shim) {
+  $existingTarget = ""
+  foreach ($line in Get-Content $shim) {
+    if ($line -match '^"([^"]+)"') { $existingTarget = $Matches[1]; break }
+  }
+  $ownedPrefix = $versionsDir.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $existingTarget.StartsWith($ownedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Fail "another t3 is already at $shim. Remove it and run this again, or run $(Join-Path $targetDir 't3.exe') directly."
+  }
+}
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
 [System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))

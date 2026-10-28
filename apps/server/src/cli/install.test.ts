@@ -1,9 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as TestClock from "effect/testing/TestClock";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { installCli, offerCliInstall } from "./install.ts";
@@ -79,6 +82,42 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("on Windows, writes a t3.cmd only over its own and only for paths cmd can run", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { root, runtimeDir, executable, provide } = yield* setup;
+      const shim = path.join(root, "bin", "t3.cmd");
+      const windows = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        provide(effect.pipe(Effect.provideService(HostProcess.Platform, "win32")));
+
+      yield* fs.makeDirectory(path.dirname(shim), { recursive: true });
+      const desktopShim =
+        '@echo off\r\nrem Written by T3 Code\r\n"C:\\T3 Code\\T3 Code.exe" "x" %*\r\n';
+      yield* fs.writeFileString(shim, desktopShim);
+      const error = yield* windows(installCli()).pipe(Effect.flip);
+      assert.include(error.message, "Another t3 is already at");
+      assert.equal(yield* fs.readFileString(shim), desktopShim);
+
+      yield* fs.writeFileString(
+        shim,
+        `@echo off\r\n"${path.join(runtimeDir, "versions/0.0.1/t3.exe")}" %*`,
+      );
+      yield* windows(installCli());
+      assert.equal(yield* fs.readFileString(shim), `@echo off\r\n"${executable}" %*`);
+
+      const unrunnable = yield* windows(
+        installCli().pipe(
+          Effect.provideService(
+            HostProcess.ExecutablePath,
+            path.join(runtimeDir, "versions/100%/t3"),
+          ),
+        ),
+      ).pipe(Effect.flip);
+      assert.include(unrunnable.message, "has % or non-ASCII characters");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("asks npx users without a t3 command once per minor release and installs on yes", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -87,28 +126,40 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       let asked = 0;
       const offer = (
         answer: boolean | undefined,
-        args: ReadonlyArray<string> = ["connect"],
-        env: NodeJS.ProcessEnv = {},
+        options: {
+          readonly args?: ReadonlyArray<string>;
+          readonly env?: NodeJS.ProcessEnv;
+          readonly interactive?: boolean;
+          readonly foreground?: boolean;
+        } = {},
       ) =>
         provide(
           offerCliInstall({
-            args,
-            interactive: true,
+            args: options.args ?? ["connect"],
+            interactive: options.interactive ?? true,
+            foreground: Effect.succeed(options.foreground ?? true),
             confirm: Effect.sync(() => {
               asked += 1;
               return answer;
             }),
           }),
-          env,
+          options.env,
         );
 
-      yield* offer(false, ["connect", "--help"]);
-      yield* offer(false, ["connect"], { T3CODE_USE_NPM: "1" });
+      // Scripts, CI, sudo, dumb terminals, background jobs, help, and the opt-out never ask.
+      yield* offer(false, { interactive: false });
+      yield* offer(false, { env: { CI: "true" } });
+      yield* offer(false, { env: { SUDO_USER: "theo" } });
+      yield* offer(false, { env: { TERM: "dumb" } });
+      yield* offer(false, { foreground: false });
+      yield* offer(false, { args: ["connect", "--help"] });
+      yield* offer(false, { env: { T3CODE_USE_NPM: "1" } });
       const globalBin = path.join(root, "global-bin");
       yield* fs.makeDirectory(globalBin);
       yield* fs.writeFileString(path.join(globalBin, "t3"), "");
-      yield* offer(false, ["connect"], { PATH: globalBin });
+      yield* offer(false, { env: { PATH: globalBin } });
       assert.equal(asked, 0);
+      assert.isFalse(yield* fs.exists(link));
 
       // A runner's own .bin on PATH is not an installed t3.
       const npxBin = path.join(npmPackage, "../.bin");
@@ -117,7 +168,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
         yield* fs.makeDirectory(bin, { recursive: true });
         yield* fs.writeFileString(path.join(bin, "t3"), "");
       }
-      assert.isFalse(yield* offer(undefined, ["connect"], { PATH: `${npxBin}:${pnpmBin}` }));
+      assert.isFalse(yield* offer(undefined, { env: { PATH: `${npxBin}:${pnpmBin}` } }));
       assert.equal(asked, 1);
       assert.isFalse(yield* fs.exists(path.join(runtimeDir, "install-prompt-declined")));
       asked = 0;
@@ -135,6 +186,51 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       yield* fs.remove(path.join(runtimeDir, "install-prompt-declined"));
       yield* offer(true);
       assert.equal(asked, 2);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("a failed yes and no answer at all wait for the next minor release", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { runtimeDir, link, provide } = yield* setup;
+      const declined = path.join(runtimeDir, "install-prompt-declined");
+      let asked = 0;
+      const offer = (confirm: Effect.Effect<boolean>) =>
+        provide(
+          offerCliInstall({
+            args: ["connect"],
+            interactive: true,
+            foreground: Effect.succeed(true),
+            confirm: Effect.andThen(
+              Effect.sync(() => (asked += 1)),
+              confirm,
+            ),
+          }),
+        );
+
+      yield* fs.makeDirectory(path.dirname(link), { recursive: true });
+      yield* fs.writeFileString(link, "#!/bin/sh\necho mine\n");
+      assert.isTrue(yield* offer(Effect.succeed(true)));
+      assert.equal(yield* fs.readFileString(link), "#!/bin/sh\necho mine\n");
+      assert.equal(
+        (yield* fs.readFileString(declined)).trim(),
+        VERSION.split(".").slice(0, 2).join("."),
+      );
+      yield* offer(Effect.succeed(true));
+      assert.equal(asked, 1);
+
+      yield* fs.remove(declined);
+      yield* fs.remove(link);
+      const waiting = yield* Deferred.make<void>();
+      const unanswered = yield* offer(
+        Effect.andThen(Deferred.succeed(waiting, undefined), Effect.never),
+      ).pipe(Effect.forkChild);
+      yield* Deferred.await(waiting);
+      yield* TestClock.adjust("30 seconds");
+      assert.isTrue(yield* Fiber.join(unanswered));
+      assert.isTrue(yield* fs.exists(declined));
+      assert.isFalse(yield* fs.exists(link));
     }).pipe(Effect.scoped),
   );
 });

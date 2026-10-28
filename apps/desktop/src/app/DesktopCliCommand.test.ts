@@ -144,6 +144,28 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("does not retry a first-launch install that failed", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const shadow = path.join(home, "shadow");
+      yield* fs.makeDirectory(shadow);
+      yield* fs.writeFileString(path.join(shadow, "t3"), "#!/bin/sh\n", { mode: 0o755 });
+      process.env.PATH = [shadow, path.join(home, ".local", "bin")].join(":");
+      const command = yield* commandIn({ home });
+      const link = path.join(home, ".local", "bin", "t3");
+
+      yield* command.installOnFirstLaunch;
+      expect(yield* fs.exists(link)).toBe(false);
+      expect(yield* fs.readFileString(path.join(shadow, "t3"))).toBe("#!/bin/sh\n");
+
+      yield* fs.remove(path.join(shadow, "t3"));
+      yield* command.installOnFirstLaunch;
+      expect(yield* fs.exists(link)).toBe(false);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("never replaces or removes a t3 it did not create", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

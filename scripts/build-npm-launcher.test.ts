@@ -259,6 +259,33 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         });
         assert.equal(brokenInstall.stdout.trim(), `stub connect launcher=${launcher}`);
 
+        // An install that passes every check but cannot start falls back to npm's copy once.
+        const installedExe = path.join(home, "runtime/versions/1.2.4-nightly.20261026.1/t3");
+        for (const content of ["\x7fELF\x02\x01\x01garbage", "#!/no/such/interpreter\n"]) {
+          yield* fs.writeFileString(installedExe, content);
+          yield* fs.chmod(installedExe, 0o755);
+          const cannotStart = yield* run(process.execPath, [launcher, "connect"], {
+            cwd: root,
+            env,
+          });
+          assert.equal(cannotStart.stdout.trim(), `stub connect launcher=${launcher}`, content);
+          assert.equal(cannotStart.exitCode, 7);
+        }
+
+        // Pre-0.0.41 services re-enter over IPC and must keep npm's exact version.
+        yield* installAs("1.2.4-nightly.20261026.1");
+        const service = NodeChildProcess.fork(launcher, ["__service-preflight"], {
+          env,
+          silent: true,
+        });
+        const serviceOutput = yield* Effect.promise(async () => {
+          let output = "";
+          service.stdout?.on("data", (chunk) => (output += chunk));
+          await NodeEvents.EventEmitter.once(service, "exit");
+          return output;
+        });
+        assert.equal(serviceOutput.trim(), `stub __service-preflight launcher=${launcher}`);
+
         yield* installAs("1.2.3-nightly.20261026.1");
         const older = yield* run(process.execPath, [launcher, "connect"], { cwd: root, env });
         assert.equal(older.stdout.trim(), `stub connect launcher=${launcher}`, older.stderr);

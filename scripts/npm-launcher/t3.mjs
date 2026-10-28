@@ -173,6 +173,9 @@ function newestInstalled(home) {
   if (process.platform !== "win32") {
     const shim = path.join(home, "bin", "t3");
     try {
+      // The shim is a few hundred bytes; never read a large file someone else put there.
+      const info = fs.statSync(shim);
+      if (!info.isFile() || info.size > 16_384) throw new Error("not a desktop shim");
       const content = fs.readFileSync(shim, "utf8");
       const desktop = /^# T3 Code version: (\S+)$/m.exec(content)?.[1];
       // A moved or deleted app leaves the shim behind; it would only print an error.
@@ -192,27 +195,34 @@ function note(message) {
 }
 
 async function main() {
-  const key = `${process.platform}-${process.arch}`;
-  if (!SUPPORTED.includes(key)) {
-    throw new Error(
-      `no T3 Code CLI build is available for ${key} (supported: ${SUPPORTED.join(", ")}).\n` +
-        "The desktop app is at https://github.com/pingdotgg/t3code/releases",
-    );
-  }
   const home = t3Home();
   // Service IPC and signals must reach the child; terminal Ctrl-C already does, so do not forward SIGINT twice.
   const ipc = process.send !== undefined;
   const installed = ipc || process.env.T3CODE_USE_NPM === "1" ? undefined : newestInstalled(home);
   if (installed && compareVersions(installed.version, version) >= 0) {
     note(
-      `using your installed t3 ${installed.version}. Run \`t3\` directly next time, or set T3CODE_USE_NPM=1 for npm's ${version}.`,
+      `using your installed t3 ${installed.version} (${installed.command}). Set T3CODE_USE_NPM=1 for npm's ${version}.`,
     );
     const { T3CODE_NPM_LAUNCHER_PATH: _, ...env } = process.env;
-    return run(installed.command, env, ipc);
+    return run(installed.command, env, ipc, () => {
+      note(`your installed t3 at ${installed.command} could not run, so npm's ${version} runs.`);
+      runNpm(home, ipc).catch(fail);
+    });
   }
   if (installed) {
     note(
       `your installed t3 ${installed.version} is older than ${version}, so npm's ${version} runs.`,
+    );
+  }
+  await runNpm(home, ipc);
+}
+
+async function runNpm(home, ipc) {
+  const key = `${process.platform}-${process.arch}`;
+  if (!SUPPORTED.includes(key)) {
+    throw new Error(
+      `no T3 Code CLI build is available for ${key} (supported: ${SUPPORTED.join(", ")}).\n` +
+        "The desktop app is at https://github.com/pingdotgg/t3code/releases",
     );
   }
   const dir = path.join(home, "runtime", "versions", version);
@@ -225,11 +235,18 @@ async function main() {
   );
 }
 
-function run(executable, env, ipc) {
+/** `fallback` runs instead when the executable cannot start at all. */
+function run(executable, env, ipc, fallback) {
   const child = spawn(executable, process.argv.slice(2), {
     stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
     env,
   });
+  let done = false;
+  const finish = (exit) => {
+    if (done) return;
+    done = true;
+    exit();
+  };
   if (ipc) {
     process.on("message", (message) => child.connected && child.send(message));
     child.on("message", (message) => process.connected && process.send(message));
@@ -238,9 +255,14 @@ function run(executable, env, ipc) {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => (ipc || signal !== "SIGINT") && child.kill(signal));
   }
-  child.on("error", (error) => fail(error));
+  child.on("error", (error) => finish(() => (fallback ? fallback() : fail(error))));
   child.on("exit", (code, signal) =>
-    process.exit(code ?? 128 + (os.constants.signals[signal] || 1)),
+    finish(() =>
+      // 126 and 127 mean the shell could not run it; t3 itself never exits with them.
+      fallback && (code === 126 || code === 127)
+        ? fallback()
+        : process.exit(code ?? 128 + (os.constants.signals[signal] || 1)),
+    ),
   );
 }
 

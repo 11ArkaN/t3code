@@ -107,6 +107,19 @@ describe("renderCliShim", () => {
     ]);
   });
 
+  it("names its version and app in the lines the npm launcher reads", () => {
+    const executable = "/opt/T3 Code's App/t3-desktop";
+    const script = renderCliShim({
+      target: { kind: "direct", executable, entry: "/opt/app.asar/bin.mjs" },
+      shimPath: "/home/u/.t3/bin/t3",
+      t3Home: "/home/u/.t3",
+      version: "1.2.3-nightly.20261027.1",
+    });
+    // Same patterns as scripts/npm-launcher/t3.mjs.
+    expect(/^# T3 Code version: (\S+)$/m.exec(script)?.[1]).toBe("1.2.3-nightly.20261027.1");
+    expect(/^app='(.*)'$/m.exec(script)?.[1]?.replaceAll(`'"'"'`, "'")).toBe(executable);
+  });
+
   it("writes a Windows launcher that keeps cmd from reinterpreting paths", () => {
     const executable = "C:\\Apps\\R&whoami&X 100%\\!CHANNEL!\\T3 Code.exe";
     const script = renderCliShim({

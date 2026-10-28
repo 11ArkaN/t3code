@@ -22,7 +22,12 @@ import { projectCommand } from "./cli/project.ts";
 import { threadCommand } from "./cli/thread.ts";
 import { runDefaultServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 import { updateCommand } from "./cli/update.ts";
-import { confirmCliInstall, installCommand, offerCliInstall } from "./cli/install.ts";
+import {
+  confirmCliInstall,
+  inTerminalForeground,
+  installCommand,
+  offerCliInstall,
+} from "./cli/install.ts";
 import { uninstallCommand } from "./cli/uninstall.ts";
 import { serviceLauncherCommand } from "./cli/serviceLauncher.ts";
 import { claudeHistoryCommand } from "./cli/claudeHistory.ts";
@@ -106,6 +111,7 @@ export function runCli() {
   offerCliInstall({
     args: process.argv.slice(2),
     interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    foreground: inTerminalForeground,
     confirm: confirmCliInstall,
   }).pipe(
     Effect.flatMap((proceed) =>

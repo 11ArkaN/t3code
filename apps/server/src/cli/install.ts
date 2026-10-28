@@ -1,12 +1,15 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { pathSetupCommand } from "@t3tools/shared/shell";
 import * as Console from "effect/Console";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Command, Prompt } from "effect/cli";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { launcherOwnsVersionsDir, windowsShimTarget } from "../cloud/pinnedRuntime.ts";
@@ -41,14 +44,22 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const environment = yield* HostProcess.Environment;
   const home = yield* HostProcess.HomeDirectory;
   const runtime = yield* standaloneRuntime;
+  const windows = platform === "win32";
   if (Option.isNone(runtime)) {
+    const script = windows
+      ? "irm https://t3.codes/install.ps1 | iex"
+      : "curl -fsSL https://t3.codes/install.sh | sh";
     return yield* new CliInstallError({
-      reason:
-        "Only the standalone t3 can install itself. Use `curl -fsSL https://t3.codes/install.sh | sh`, or Settings in the desktop app.",
+      reason: `Only the standalone t3 can install itself. Use \`${script}\`, or Settings in the desktop app.`,
     });
   }
   const { executable, versionsDir, runtimeDir } = runtime.value;
-  const windows = platform === "win32";
+  // cmd.exe expands `%` and reads the shim in the OEM code page, so such a path would not run.
+  if (windows && /[%\u0080-\uffff]/.test(executable)) {
+    return yield* new CliInstallError({
+      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx t3.`,
+    });
+  }
   const binDir = environment.T3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin");
   const name = windows ? "t3.cmd" : "t3";
   const link = path.join(binDir, name);
@@ -103,7 +114,15 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const launchersFile = path.join(runtimeDir, "launchers");
   const launchers = yield* fs.readFileString(launchersFile).pipe(Effect.orElseSucceed(() => ""));
   if (!launchers.split(/\r?\n/).includes(recorded)) {
-    yield* fs.writeFileString(launchersFile, `${recorded}\n`, { flag: "a" }).pipe(Effect.ignore);
+    yield* fs
+      .writeFileString(launchersFile, `${recorded}\n`, { flag: "a" })
+      .pipe(
+        Effect.catch(() =>
+          Console.error(
+            `Warning: could not record ${recorded} in ${launchersFile}. Cleanup may remove the version it runs.`,
+          ),
+        ),
+      );
   }
 
   // resolve() drops trailing separators, so `~/.local/bin/` on PATH still matches.
@@ -135,9 +154,7 @@ const reportInstalled = Effect.fn("cli.install.report")(function* (
 });
 
 export const installCommand = Command.make("install").pipe(
-  Command.withDescription(
-    "Install this version as the `t3` command, so you can run t3 without npx.",
-  ),
+  Command.withDescription("Install this version as the `t3` command."),
   Command.withHandler(() => installCli().pipe(Effect.flatMap(reportInstalled))),
 );
 
@@ -154,14 +171,45 @@ const SKIPPED_ARGUMENTS = new Set([
   "uninstall",
 ]);
 
+/** Agents can run commands in a terminal that nobody answers; no answer counts as no. */
+const PROMPT_TIMEOUT = Duration.seconds(30);
+
+/**
+ * A background job (`npx t3 serve &`) that reads the terminal is stopped by the shell, so only
+ * the terminal's foreground process group may prompt. Unknown counts as background.
+ */
+export const inTerminalForeground = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const platform = yield* HostProcess.Platform;
+  if (platform === "win32") return true;
+  if (platform === "linux") {
+    const stat = yield* fs.readFileString("/proc/self/stat").pipe(Effect.orElseSucceed(() => ""));
+    // Fields after the parenthesized command name: state ppid pgrp session tty_nr tpgid.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return fields[2] !== undefined && fields[2] === fields[5];
+  }
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const output = yield* spawner
+    .string(
+      ChildProcess.make("ps", ["-o", "tpgid=,pgid=", "-p", String(process.pid)], {
+        stdin: "ignore",
+        stderr: "ignore",
+      }),
+    )
+    .pipe(Effect.orElseSucceed(() => ""));
+  const [tpgid, pgid] = output.trim().split(/\s+/);
+  return tpgid !== undefined && tpgid === pgid;
+});
+
 /**
  * Before a command run through npx, pnpm dlx, or bunx at a terminal, asks to install the `t3`
- * command. Yes is the default; no is saved in the T3 home per minor release. Returns false when
- * the user quits the prompt, so the command does not run.
+ * command. Yes is the default. No, no answer, or a failed install is saved in the T3 home until
+ * the next minor release. Returns false when the user quits the prompt, so the command does not run.
  */
-export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R>(input: {
+export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R, E2, R2>(input: {
   readonly args: ReadonlyArray<string>;
   readonly interactive: boolean;
+  readonly foreground: Effect.Effect<boolean, E2, R2>;
   /** Undefined when the user quits the prompt. */
   readonly confirm: Effect.Effect<boolean | void, E, R>;
 }) {
@@ -170,7 +218,7 @@ export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R>(i
   const platform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   if (!input.interactive || environment.CI || environment.SUDO_USER) return true;
-  if (environment.T3CODE_USE_NPM === "1") return true;
+  if (environment.T3CODE_USE_NPM === "1" || environment.TERM === "dumb") return true;
   if (input.args.some((arg) => SKIPPED_ARGUMENTS.has(arg))) return true;
   if (detectCliRunner(yield* resolveEntryPath) === null) return true;
   const runtime = yield* standaloneRuntime;
@@ -202,17 +250,27 @@ export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R>(i
   const declined = yield* fs.readFileString(declinedFile).pipe(Effect.orElseSucceed(() => ""));
   const minor = minorRelease(packageJson.version);
   if (declined.trim() === minor) return true;
+  if (!(yield* input.foreground)) return true;
 
-  const answer = yield* input.confirm;
-  if (answer === undefined) return false;
-  if (!answer) {
-    yield* fs.writeFileString(declinedFile, `${minor}\n`).pipe(Effect.ignore);
-    yield* Console.log(`Skipped. Run \`${yield* resolveCliCommand("install")}\` any time.\n`);
+  const installHint = `Run \`${yield* resolveCliCommand("install")}\` any time.`;
+  const saveDecline = fs.writeFileString(declinedFile, `${minor}\n`).pipe(Effect.ignore);
+  const answer = yield* input.confirm.pipe(Effect.timeoutOption(PROMPT_TIMEOUT));
+  if (Option.isNone(answer)) {
+    yield* saveDecline;
+    yield* Console.log(`\nNo answer, so t3 was not installed. ${installHint}\n`);
+    return true;
+  }
+  if (answer.value === undefined) return false;
+  if (!answer.value) {
+    yield* saveDecline;
+    yield* Console.log(`Skipped. ${installHint}\n`);
     return true;
   }
   yield* installCli().pipe(
     Effect.flatMap(reportInstalled),
-    Effect.catch((error) => Console.error(`Could not install t3: ${error.message}`)),
+    Effect.catch((error) =>
+      Effect.andThen(saveDecline, Console.error(`Could not install t3: ${error.message}`)),
+    ),
   );
   yield* Console.log("");
   return true;
@@ -220,7 +278,7 @@ export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R>(i
 
 export const confirmCliInstall = Prompt.run(
   Prompt.Confirm({
-    message: "Install the t3 command? Then you can run `t3` without npx.",
+    message: "Install the t3 command? Then you can run `t3` directly.",
     initial: true,
   }),
 ).pipe(Effect.catchTags({ QuitError: () => Effect.void }));

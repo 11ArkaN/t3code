@@ -87,7 +87,7 @@ The desktop app includes the `t3` command-line tool and installs it on first
 launch. On macOS and Linux it adds a `t3` link to a folder on your `PATH`; on
 Windows it adds the app's command folder to your `PATH`. Open a new terminal
 afterwards. If the folder is not on your `PATH`, **Settings → About**
-shows the command to add it. **Remove** next to **t3 command** takes it off,
+shows how to add it. **Remove** next to **t3 command** takes it off,
 and the app does not add it again; **Install** puts it back. If you already
 have another `t3`, it stays as it is.
 

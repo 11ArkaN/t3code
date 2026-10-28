@@ -227,6 +227,15 @@ fi
 
 step "Setting up the t3 command..."
 mkdir -p "$bin_dir"
+# Replace only a t3 link into this home's versions; never the desktop app's link or another t3.
+if [ -e "${bin_dir}/t3" ] || [ -L "${bin_dir}/t3" ]; then
+  existing="$(readlink "${bin_dir}/t3" 2>/dev/null || true)"
+  real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
+  case "$existing" in
+    "$versions_dir"/* | "$real_versions_dir"/*) ;;
+    *) fail "another t3 is already at ${bin_dir}/t3. Remove it and run this again, or run ${target_dir}/t3 directly." ;;
+  esac
+fi
 ln -sfn "${target_dir}/t3" "${bin_dir}/t3"
 # Pruning keeps what this launcher points at; a background service cannot see bin_dir otherwise.
 launcher="$(CDPATH='' cd -P -- "$bin_dir" && pwd)/t3"
