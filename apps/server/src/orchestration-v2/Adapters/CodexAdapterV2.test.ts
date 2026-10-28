@@ -7797,6 +7797,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           "Codex ignores skills sent with turn/steer, so `$zebra-probe` must wait for a new turn",
         );
         assert.isTrue(Exit.isFailure(steer), "the steer must fail so the message is re-dispatched");
+        const failure = Exit.isFailure(steer) ? Cause.squash(steer.cause) : undefined;
+        assert.propertyVal(failure, "_tag", "ProviderAdapterSteerRunError");
+        assert.propertyVal(failure, "requiresNewTurn", true);
       }).pipe(
         Effect.scoped,
         Effect.provide(
