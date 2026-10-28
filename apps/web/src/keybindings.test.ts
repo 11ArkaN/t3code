@@ -659,7 +659,7 @@ describe("resolveShortcutCommand", () => {
     );
   });
 
-  it('leaves Ctrl+layout "+" to zoom, except on the number row or with Alt', () => {
+  it('matches Ctrl+layout "+" as itself unless Shift, Alt or the number row is involved', () => {
     assert.isNull(
       resolveShortcutCommand(
         event({ key: "+", code: "BracketRight", ctrlKey: true }),
@@ -692,6 +692,14 @@ describe("resolveShortcutCommand", () => {
             command: "terminal.toggle",
           },
         ]),
+        { platform: "Linux" },
+      ),
+      "terminal.toggle",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "+", code: "Equal", ctrlKey: true, shiftKey: true }),
+        compile([{ shortcut: modShortcut("=", { shiftKey: true }), command: "terminal.toggle" }]),
         { platform: "Linux" },
       ),
       "terminal.toggle",
