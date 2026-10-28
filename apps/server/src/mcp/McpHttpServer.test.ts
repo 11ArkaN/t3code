@@ -18,6 +18,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
@@ -983,6 +984,105 @@ it.effect("hides tools for links and refuses another environment while the beta 
         isError: true,
         content: [{ text: expect.stringContaining("cannot reach linked environments") }],
       });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("tells a listening session its tools changed when the links beta flips", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const token = "linksToken";
+      const scope: McpInvocationContext.McpThreadInvocationScope = {
+        environmentId,
+        requestNamespace: token,
+        thread: {
+          threadId: ThreadId.make("thread-links"),
+          providerSessionId: token,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const LinksToolkit = Toolkit.make(
+        Tool.make("links", {
+          description: "Lists links.",
+          success: Schema.Struct({ links: Schema.Number }),
+          failure: OrchestratorMcpFailure,
+          failureMode: "return",
+        }).annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenWhileLinksOff),
+      );
+      const settingsContext = yield* Layer.build(ServerSettings.layerTest());
+      const settings = Context.get(settingsContext, ServerSettings.ServerSettingsService);
+      const serverLayer = McpHttpServer.toolkitRegistration(
+        LinksToolkit,
+        McpToolAccess.toLayer(LinksToolkit, {
+          links: McpToolAccess.reads(() => Effect.succeed({ links: 0 })),
+        }),
+      ).pipe(
+        Layer.provideMerge(
+          McpHttpServer.layerMcpTransport.pipe(
+            Layer.provide(Layer.succeedContext(settingsContext)),
+          ),
+        ),
+        Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: (presented) => Effect.succeed(presented === token ? scope : undefined),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      const headers = {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${token}`,
+      };
+      const initialize = yield* httpClient.post("/mcp", {
+        headers,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      const session = {
+        ...headers,
+        "mcp-session-id": initialize.headers["mcp-session-id"]!,
+        "mcp-protocol-version": "2025-06-18",
+      };
+      yield* httpClient.post("/mcp", {
+        headers: session,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+          "application/json",
+        ),
+      });
+
+      // Streamable HTTP clients hear server-initiated messages on a GET stream for their session.
+      const listen = yield* httpClient.get("/mcp", {
+        headers: { ...session, accept: "text/event-stream" },
+      });
+      expect(
+        listen.status,
+        "an idle session has no stream to hear notifications/tools/list_changed on",
+      ).toBe(200);
+      const notifications = yield* Stream.toQueue(
+        listen.stream.pipe(
+          Stream.decodeText,
+          Stream.splitLines,
+          Stream.filter((line) => line.startsWith("data:")),
+          Stream.map((line) => decodeJsonText(line.slice("data:".length)) as { method?: string }),
+          Stream.filter((message) => message.method !== undefined),
+        ),
+        { capacity: 8 },
+      );
+
+      yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+      expect((yield* Queue.take(notifications)).method).toBe("notifications/tools/list_changed");
+      yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
+      expect((yield* Queue.take(notifications)).method).toBe("notifications/tools/list_changed");
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
