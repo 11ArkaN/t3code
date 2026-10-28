@@ -1385,7 +1385,7 @@ const setup = (tools, origin) => {
   delete globalThis.__tools; delete globalThis.__origin;
   const page = globalThis, stringify = JSON.stringify, parse = JSON.parse, names = tools.map(t => t.name);
   let executed = [], count = 0;
-  Object.defineProperty(page, "__take", { value: () => { const taken = stringify(executed); executed = []; return taken; } });
+  Object.defineProperty(page, "__take", { value: () => { const taken = stringify({ executed, complete: count <= 128 }); executed = []; return taken; } });
   page.window = page.self = page;
   page.location = { origin, href: origin + "/" };
   page.console = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
@@ -1413,10 +1413,13 @@ for (const [page, expressions] of pages.entries()) {
   for (const expression of expressions) {
     try {
       run(expression);
-    } catch {
+    } catch (error) {
+      if (error?.code === "ERR_SCRIPT_EXECUTION_TIMEOUT") throw error;
       // A page error still keeps the executions that ran before it.
     }
-    for (const [tool, input] of JSON.parse(run("__take()")))
+    const { executed, complete } = JSON.parse(run("__take()"));
+    if (!complete) throw new Error("WebMCP replay exceeded 128 tool executions.");
+    for (const [tool, input] of executed)
       process.stdout.write(JSON.stringify([page, tool, input]) + "\n");
   }
 }`;
@@ -1443,10 +1446,9 @@ export const executeWebMcp = (
       maxBuffer: 16 * 1024 * 1024,
     },
   );
-  // A hung or oversized page keeps what it printed; a child that never started is a harness fault.
-  const code = (child.error as NodeJS.ErrnoException | undefined)?.code;
-  if (child.error !== undefined && code !== "ETIMEDOUT" && code !== "ENOBUFS") throw child.error;
-  if (child.error === undefined && (child.status !== 0 || child.signal !== null)) {
+  // An incomplete replay cannot establish that a forbidden tool was never called.
+  if (child.error !== undefined) throw child.error;
+  if (child.status !== 0 || child.signal !== null) {
     throw new Error(
       `WebMCP replay terminated with status ${child.status} and signal ${child.signal}.`,
     );

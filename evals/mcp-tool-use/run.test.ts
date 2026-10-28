@@ -302,18 +302,26 @@ it("runs WebMCP expressions without host objects", () => {
     assert.deepEqual(page(expression), [], expression);
   assert.deepEqual(
     page(
-      "document.modelContext.getTools().then(([tool]) => { document.modelContext.executeTool(tool); while (true) {} })",
+      "document.modelContext.getTools().then(([tool]) => { document.modelContext.executeTool(tool); throw new Error('page') })",
     ),
     [{ tool: "mock", input: {} }],
   );
+  for (const expression of [
+    "document.modelContext.getTools().then(([tool]) => { document.modelContext.executeTool(tool); while (true) {} })",
+    "document.modelContext.getTools().then(([tool]) => { for (let n = 0; n < 129; n++) document.modelContext.executeTool(tool) })",
+    "document.modelContext.getTools().then(async ([tool]) => { for (let n = 0; n < 129; n++) await document.modelContext.executeTool(tool).catch(() => {}) })",
+  ])
+    assert.throws(() => page(expression), /WebMCP replay terminated/, expression);
 });
 
 it("rejects partial WebMCP results from an unexpectedly terminated replay", () => {
   const partial = '[0,"list_notes",{}]\n';
   using child = vi.spyOn(NodeChildProcess, "spawnSync");
-  for (const [status, signal] of [
-    [1, null],
-    [null, "SIGKILL"],
+  for (const [status, signal, code] of [
+    [1, null, undefined],
+    [null, "SIGKILL", undefined],
+    [null, "SIGTERM", "ETIMEDOUT"],
+    [null, "SIGTERM", "ENOBUFS"],
   ] as const) {
     child.mockReturnValue({
       pid: 1,
@@ -322,6 +330,7 @@ it("rejects partial WebMCP results from an unexpectedly terminated replay", () =
       stderr: "",
       status,
       signal,
+      ...(code === undefined ? {} : { error: Object.assign(new Error(code), { code }) }),
     });
     assert.throws(
       () =>
@@ -343,7 +352,7 @@ it("rejects partial WebMCP results from an unexpectedly terminated replay", () =
             stopReason: "end_turn",
           },
         ),
-      /WebMCP replay terminated/,
+      /WebMCP replay terminated|ETIMEDOUT|ENOBUFS/,
     );
   }
 });
