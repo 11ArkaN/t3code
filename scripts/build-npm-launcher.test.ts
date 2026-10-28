@@ -312,7 +312,13 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         });
         assert.equal(notExecutable.stdout.trim(), `stub connect launcher=${launcher}`);
 
+        // A replaced (maybe older) app until the app runs again and refreshes its shim.
         yield* fs.chmod(desktopApp, 0o755);
+        const replaced = yield* run(process.execPath, [launcher, "connect"], { cwd: root, env });
+        assert.equal(replaced.stdout.trim(), `stub connect launcher=${launcher}`);
+
+        // Any utimes moves the shim's ctime to now, which is what the launcher compares.
+        yield* fs.utimes(desktopShim, 1_800_000_000, 1_800_000_000);
         const desktop = yield* run(process.execPath, [launcher, "connect"], { cwd: root, env });
         assert.equal(desktop.stdout.trim(), "desktop connect", desktop.stderr);
       }),

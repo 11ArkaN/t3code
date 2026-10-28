@@ -183,7 +183,11 @@ function newestInstalled(home) {
       if (desktop && app) {
         // Throws, skipping the shim, when either cannot run.
         for (const file of [app, shim]) fs.accessSync(file, fs.constants.X_OK);
-        found.push({ version: desktop, command: shim });
+        // The app refreshes the shim each launch. A replaced app gets a new ctime (even when
+        // its mtime is kept), so a version line older than the app may name the wrong version.
+        if (fs.statSync(app).ctimeMs <= info.ctimeMs) {
+          found.push({ version: desktop, command: shim });
+        }
       }
     } catch {}
   }

@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -177,6 +178,11 @@ export const install = Effect.gen(function* () {
       yield* fs.writeFileString(staging, content, { mode: 0o755 });
       yield* fs.rename(staging, shimPath);
       yield* logInfo("installed t3 launcher", { shimPath });
+    } else {
+      // npx trusts the version line only while the shim is newer than the app it runs.
+      // Any utimes moves the ctime npx compares; the times passed are in seconds.
+      const now = (yield* Clock.currentTimeMillis) / 1000;
+      yield* fs.utimes(shimPath, now, now);
     }
     return Option.some(shimPath);
   }).pipe(
