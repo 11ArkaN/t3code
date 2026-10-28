@@ -2769,7 +2769,7 @@ const make = Effect.gen(function* () {
         : yield* resolveProjectTarget(
             parent,
             input.projectId,
-            "Pass projectId, or allProjects: true to list every project: this MCP client is not running inside a T3 thread.",
+            "Pass projectId, or allProjects: true for every project. This MCP client is not running inside a T3 thread.",
           );
       const projectThreads = yield* threadManagement
         .listProjectThreads({

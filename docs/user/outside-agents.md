@@ -55,10 +55,10 @@ Then choose what the agent may do:
 
 ## What outside agents can call
 
-An outside agent sees every T3 Code tool. Some tools only work for an agent
-running inside a T3 thread, because they act as that thread: subagents,
-secret requests, rendered HTML, the browser preview, devices, worktree
-handoff, and linking another environment. An outside agent that calls one gets
+Some tools only work for an agent running inside a T3 thread, because they act
+as that thread: subagents, secret requests, rendered HTML, the browser preview,
+devices, worktree handoff, and linking another environment. They still appear
+in an outside agent's tool list, but calling one fails with
 `thread_credential_required`.
 
 - To hand off work, start a thread with `t3_thread_launch`, then follow it with
