@@ -1420,7 +1420,7 @@ export const makeCodexAppServerSpawnCommand = Effect.fn(
     ...(input.extendEnv === undefined ? {} : { extendEnv: input.extendEnv }),
     shell: spawnCommand.shell,
     // Codex can take 45 s to exit after SIGTERM and keeps its threads' writer locks
-    // until then. Reopening a thread waits for this close, so keep it short.
+    // until then. The resume retry waits out the few seconds this leaves.
     forceKillAfter: "3 seconds",
   });
 });
@@ -1672,14 +1672,16 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
         const homeStartup = yield* openCodexHomeStartup(
           codexAuthPath(settings.homePath, environment),
         ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
-        const client = yield* clientFactory.open({
-          instanceId: adapterOptions.instanceId,
-          threadId: input.threadId,
-          providerSessionId: input.providerSessionId,
-          runtimePolicy: input.runtimePolicy,
-          settings,
-          environment,
-        });
+        const client = yield* clientFactory
+          .open({
+            instanceId: adapterOptions.instanceId,
+            threadId: input.threadId,
+            providerSessionId: input.providerSessionId,
+            runtimePolicy: input.runtimePolicy,
+            settings,
+            environment,
+          })
+          .pipe(Effect.onError(() => homeStartup.abandon));
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,

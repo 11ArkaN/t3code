@@ -64,6 +64,9 @@ export function codexAuthPath(
 
 // One lock per Codex home for the whole server; a home's lock lives as long as the server.
 const homeLocks = new Map<string, Semaphore.Semaphore>();
+// Codex sends the refresh with no timeout, so one T3 stopped waiting for may still spend the token.
+const refreshPendingUntilMs = new Map<string, number>();
+const PENDING_REFRESH_MS = 2 * 60_000;
 
 /**
  * Starts app-servers on one Codex home one at a time (concurrent first starts break a new home's
@@ -71,16 +74,18 @@ const homeLocks = new Map<string, Semaphore.Semaphore>();
  * the home once the app-server has initialized, refreshing first when due.
  */
 export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function* (
-  authPath: string | undefined,
+  rawAuthPath: string | undefined,
 ) {
-  if (authPath === undefined) {
+  if (rawAuthPath === undefined) {
     return {
       start: <E1, E2>(_input: {
         readonly initialize: Effect.Effect<unknown, E1>;
         readonly refresh: Effect.Effect<unknown, E2>;
       }) => Effect.void,
+      abandon: Effect.void,
     };
   }
+  const authPath = NodePath.resolve(rawAuthPath);
   const scope = yield* Scope.Scope;
   const fileSystem = yield* FileSystem.FileSystem;
   const homeLock = homeLocks.get(authPath) ?? Semaphore.makeUnsafe(1);
@@ -108,11 +113,16 @@ export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function*
       // account/read can fail after its refresh succeeds, so auth.json decides the outcome.
       const refreshIfStillDue = Effect.gen(function* () {
         if (!(yield* isDue)) return;
+        if ((yield* Clock.currentTimeMillis) < (refreshPendingUntilMs.get(authPath) ?? 0)) return;
         const exit = yield* input.initialize.pipe(
           Effect.andThen(input.refresh),
           Effect.timeout(REFRESH_TIMEOUT),
           Effect.exit,
         );
+        if (Exit.isFailure(exit)) {
+          const nowMs = yield* Clock.currentTimeMillis;
+          refreshPendingUntilMs.set(authPath, nowMs + PENDING_REFRESH_MS);
+        }
         if (yield* isDue) {
           yield* Effect.logWarning("Codex auth refresh did not update auth.json.", {
             authPath,
@@ -134,5 +144,7 @@ export const openCodexHomeStartup = Effect.fn("CodexHomeStartup.open")(function*
         Effect.forkIn(scope),
       );
     }),
+    /** Frees the home when the open fails before `start`, without waiting for scope teardown. */
+    abandon: Scope.close(gate, Exit.void),
   };
 });

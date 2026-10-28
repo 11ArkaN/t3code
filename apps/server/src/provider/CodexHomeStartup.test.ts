@@ -2,6 +2,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import { TestClock } from "effect/testing";
+import * as Fiber from "effect/Fiber";
+import * as Deferred from "effect/Deferred";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
@@ -93,6 +96,53 @@ it.layer(NodeServices.layer)("openCodexHomeStartup", (it) => {
       yield* Effect.all([openSession, openSession, openSession], { concurrency: "unbounded" });
 
       expect(yield* Ref.get(refreshes)).toBe(1);
+    }),
+  );
+
+  it.effect("does not refresh again while a timed-out refresh may still be running", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const authPath = path.join(yield* fileSystem.makeTempDirectoryScoped(), "auth.json");
+      yield* fileSystem.writeFileString(authPath, authJson({ accessToken: jwt({ exp: 60 }) }));
+      const attempts = yield* Ref.make(0);
+      const firstStarted = yield* Deferred.make<void>();
+      const hangingRefresh = Ref.update(attempts, (count) => count + 1).pipe(
+        Effect.andThen(Deferred.succeed(firstStarted, undefined)),
+        Effect.andThen(Effect.never),
+      );
+      const openSession = Effect.scoped(
+        openCodexHomeStartup(authPath).pipe(
+          Effect.flatMap((startup) =>
+            startup.start({ initialize: Effect.void, refresh: hangingRefresh }),
+          ),
+        ),
+      );
+
+      const first = yield* openSession.pipe(Effect.forkChild);
+      yield* Deferred.await(firstStarted);
+      yield* TestClock.adjust("15 seconds");
+      yield* Fiber.join(first);
+      yield* openSession;
+
+      expect(yield* Ref.get(attempts)).toBe(1);
+    }),
+  );
+
+  it.effect("frees the home for the next app-server when an open fails before start", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const authPath = path.join(yield* fileSystem.makeTempDirectoryScoped(), "auth.json");
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const failed = yield* openCodexHomeStartup(authPath);
+          yield* failed.abandon;
+          // Still inside the failed open's scope: without abandon this waits for the home forever.
+          const next = yield* openCodexHomeStartup(authPath);
+          yield* next.start({ initialize: Effect.void, refresh: Effect.void });
+        }),
+      );
     }),
   );
 
