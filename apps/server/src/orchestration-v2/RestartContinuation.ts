@@ -24,11 +24,11 @@ import {
   cancelledBeforeStart,
   isRestartNoteSource,
   neverStarted,
+  RESTART_CONTINUE_PROMPT,
   restartCancelledBackgroundWorkNote,
   restartContinuationNote,
+  restartRunReachedProvider,
 } from "./RestartBackgroundNote.ts";
-
-const CONTINUE_PROMPT = "Continue where you left off.";
 
 const MAX_CONTINUATION_CHAIN = 3;
 const CONTINUATION_LOOP_WINDOW_MS = 5 * 60 * 1_000;
@@ -265,14 +265,30 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       projection.providerTurns,
       projection.attempts,
     );
+    const resent =
+      !note.settled &&
+      sourceMessage !== undefined &&
+      !restartRunReachedProvider(
+        source.id,
+        yield* threads.getThreadRecords(input.threadId, ["messages", "turnItems"], {
+          messageRunIds: [source.id],
+          messageRoles: ["assistant"],
+          turnItemRunIds: [source.id],
+        }),
+      )
+        ? sourceMessage
+        : undefined;
     const noteText =
       note.work.length === 0 ? undefined : restartCancelledBackgroundWorkNote(note.work);
+    // A resent continuation's text already carries its chain's note.
+    const request = resent?.text ?? RESTART_CONTINUE_PROMPT;
     const text =
-      noteText === undefined
-        ? CONTINUE_PROMPT
+      noteText === undefined ||
+      (resent !== undefined && source.restartContinuationOfRunId !== undefined)
+        ? request
         : note.settled
           ? noteText
-          : `${noteText}\n\n${CONTINUE_PROMPT}`;
+          : `${noteText}\n\n${request}`;
     yield* threads
       .dispatch({
         type: "message.dispatch",
@@ -288,7 +304,8 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
             : "T3 Code restarted and resumed this turn",
           detail: text,
         },
-        attachments: [],
+        attachments: resent?.attachments ?? [],
+        ...(resent?.context === undefined ? {} : { context: resent.context }),
         modelSelection: source.modelSelection,
         dispatchMode: { type: "start_immediately" },
         createdBy: "agent",

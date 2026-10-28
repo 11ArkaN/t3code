@@ -577,6 +577,9 @@ function makeLocalCommandHarness(input: {
       ),
     ensureThread: () => Effect.succeed(providerThread),
   };
+  const startTurn = vi.fn<ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"]>(
+    () => Effect.void,
+  );
   const open = vi.fn(() =>
     input.interruptOpen === true
       ? Effect.interrupt
@@ -615,6 +618,7 @@ function makeLocalCommandHarness(input: {
                   },
                   ensureThread: () => Effect.succeed(providerThread),
                   resumeThread: () => Effect.succeed(projection.providerThreads[0]),
+                  startTurn,
                 } as never)
               : Effect.die("A local command must not open a native session."),
   );
@@ -767,6 +771,7 @@ function makeLocalCommandHarness(input: {
     open,
     writeIfRunCurrent,
     startRootRun,
+    startTurn,
     interruptTurn,
     tryHandlePromptCommand,
     events,
@@ -984,6 +989,33 @@ effectIt.effect.each([
 
     expect(harness.interruptTurn).not.toHaveBeenCalled();
     expect(harness.projection().runs.at(-1)?.status).toBe("running");
+  }),
+);
+
+effectIt.effect.each([
+  { text: "Reply with exactly the word DURIAN-26384.", nativeResume: false },
+  { text: "Continue where you left off.", nativeResume: true },
+])("sends a restart continuation's text unless it is bare: %j", ({ text, nativeResume }) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text,
+      previousTurn: { runStatus: "completed", turnStatus: "completed" },
+    });
+    const [source, continuation] = harness.projection().runs;
+    harness.setProjection({
+      ...harness.projection(),
+      runs: [source!, { ...continuation!, restartContinuationOfRunId: source!.id }],
+    });
+
+    yield* harness.start;
+    yield* harness.startRootRun.mock.calls[0]![0].session.startTurn({
+      restartContinuationOfRunId: source!.id,
+      message: { text, attachments: [] },
+    } as never);
+
+    const sent = harness.startTurn.mock.calls[0]![0];
+    expect(sent.message.text).toBe(text);
+    expect(sent.restartContinuationOfRunId).toBe(nativeResume ? source!.id : undefined);
   }),
 );
 

@@ -93,9 +93,11 @@ turn already ended, and a run waiting on the user: an approval, question, or sec
 or that recovery closed on the cut turn. Message-capable questions stay answerable, so
 they do not block. Delivery also stops after three consecutive continuations in one
 `restartContinuationOfRunId` chain, so a turn that crashes the server cannot loop. Stable
-command and message IDs prevent duplicate submissions after an outbox retry. Codex
-resumes without adding provider prompt text unless the turn lost background work;
-other adapters receive the continuation message through their normal turn path.
+command and message IDs prevent duplicate submissions after an outbox retry. A cut turn
+with no assistant reply or provider item may never have reached the provider, so its
+continuation resends the original request. Codex resumes without adding provider prompt
+text unless the continuation carries a note or a resent request; other adapters receive
+the continuation message through their normal turn path.
 
 Delegated tasks (`delegate_task` child threads) are reconciled as their own threads,
 never as the parent's background work. The orchestrator settles child results and

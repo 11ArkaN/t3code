@@ -1,4 +1,5 @@
 import type {
+  OrchestrationV2ConversationMessage,
   OrchestrationV2PendingBackgroundTask,
   OrchestrationV2ProviderTurn,
   OrchestrationV2RestartCancelledBackgroundWork,
@@ -218,6 +219,29 @@ export function restartContinuationNote(
     work = mergeRestartCancelledBackgroundWork(current.restartCancelledBackgroundWork ?? [], work);
   }
   return { work, settled: isRestartNoteSource(current, providerTurns) };
+}
+
+export const RESTART_CONTINUE_PROMPT = "Continue where you left off.";
+
+/** Codex resumes a bare continuation natively; a note or resent request must reach the provider as prompt text. */
+export function isBareRestartContinuation(
+  message: Pick<OrchestrationV2ConversationMessage, "text" | "attachments">,
+): boolean {
+  return message.text === RESTART_CONTINUE_PROMPT && message.attachments.length === 0;
+}
+
+/** Without a provider item or reply, the provider may never have recorded the run's request. */
+export function restartRunReachedProvider(
+  runId: OrchestrationV2Run["id"],
+  records: {
+    readonly messages: ReadonlyArray<Pick<OrchestrationV2ConversationMessage, "runId" | "role">>;
+    readonly turnItems: ReadonlyArray<Pick<OrchestrationV2TurnItem, "runId" | "nativeItemRef">>;
+  },
+): boolean {
+  return (
+    records.messages.some((message) => message.runId === runId && message.role === "assistant") ||
+    records.turnItems.some((item) => item.runId === runId && item.nativeItemRef !== null)
+  );
 }
 
 export function isRestartNoteContinuation(
