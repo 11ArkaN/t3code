@@ -1,4 +1,5 @@
 import type { NavigationState } from "@react-navigation/native";
+import { isSettingsRoute } from "../features/settings/settings-navigation";
 import { resetRootStack, type RootStackNavigation } from "./root-stack-reset";
 
 function androidWorkspaceBackReturnsToThread(state: NavigationState) {
@@ -67,9 +68,9 @@ export function returnToAndroidWorkspaceList(
   resetAndroidWorkspace(navigation);
 }
 
-// In the split view these destinations swap the detail pane beside the sidebar instead of
-// stacking over Home, so the default slide-in would show a layer that is not there. A Settings
-// page picked from the list replaces the page beside it the same way; pages it opens still push.
+// Split view: Thread, PullRequest, and a Settings page picked from the list swap the detail pane
+// rather than stack, so they don't animate. Pages opened from a Settings page slide edge to edge;
+// the default push edge-extends the incoming page, bleeding a stripe beside the list.
 export function androidWorkspaceDestinationAnimation(
   route: { readonly key: string; readonly name: string },
   routes: readonly { readonly key: string; readonly name: string }[],
@@ -77,6 +78,7 @@ export function androidWorkspaceDestinationAnimation(
 ) {
   if (!usesSplitView) return undefined;
   if (route.name === "Thread" || route.name === "PullRequest") return "none" as const;
+  if (route.name === "Settings" || !isSettingsRoute(route.name)) return undefined;
   const below = routes[routes.findIndex((candidate) => candidate.key === route.key) - 1];
-  return below?.name === "Settings" ? ("none" as const) : undefined;
+  return below?.name === "Settings" ? ("none" as const) : ("slide_from_right" as const);
 }
