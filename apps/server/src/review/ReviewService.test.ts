@@ -211,6 +211,52 @@ describe("ReviewService", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("refuses to describe commits outside the thread's own workspace", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const threadWorktree = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-thread-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const generationCalls: Array<string> = [];
+
+      yield* Effect.gen(function* () {
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        const git = (...args: ReadonlyArray<string>) =>
+          driver
+            .execute({ operation: "ReviewService.test.git", cwd: workspaceRoot, args })
+            .pipe(Effect.map((result) => result.stdout.trim()));
+        yield* driver.initRepo({ cwd: workspaceRoot });
+        yield* git("config", "user.email", "test@test.com");
+        yield* git("config", "user.name", "Test");
+        yield* git("commit", "--allow-empty", "-m", "add the parser");
+        const sha = yield* git("rev-parse", "HEAD");
+
+        const review = yield* ReviewService.ReviewService;
+        const error = yield* Effect.flip(
+          review.generateCommitDescriptions({
+            cwd: workspaceRoot,
+            threadId: ThreadId.make("thread-0"),
+            shas: [sha],
+          }),
+        );
+
+        assert.include(error.message, "does not own this workspace");
+        assert.deepStrictEqual(generationCalls, []);
+      }).pipe(
+        Effect.provide(
+          layer({
+            workspaceRoot,
+            baseDir,
+            realGit: true,
+            threadCwd: threadWorktree,
+            projectModel: "project-model",
+            generationCalls,
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("asks the model once for concurrent requests and again after a failure", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
