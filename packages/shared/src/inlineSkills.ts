@@ -18,7 +18,10 @@ export function formatProviderSkillDisplayName(
   if (displayName) {
     return displayName;
   }
-  return titleCaseWords(skill.name);
+  const separator = skill.name.indexOf(":");
+  const namespace = skill.name.slice(0, separator);
+  const rest = skill.name.slice(separator + 1);
+  return titleCaseWords(separator > 0 && namespace === rest ? rest : skill.name);
 }
 
 const SKILL_TOKEN_REGEX =
