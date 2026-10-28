@@ -2580,51 +2580,33 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
     }),
   );
 
-  it.effect("claims a title generation promptly when every daemon worker is idle", () =>
+  it.effect("holds pending titles at the running-title cap without waking idle workers", () =>
     Effect.gen(function* () {
       const outbox = yield* EffectOutbox.EffectOutboxV2;
-      const titleId = "effect:foundation-idle-title:title";
-      const titleStarted = yield* Deferred.make<void>();
-      const layerWorker = EffectWorker.layerWithOptions({
-        workerId: "idle-title-worker",
-      }).pipe(
-        Layer.provide(
-          Layer.merge(
-            Layer.succeed(EffectOutbox.EffectOutboxV2, outbox),
-            Layer.succeed(
-              EffectWorker.OrchestrationEffectExecutorV2,
-              EffectWorker.OrchestrationEffectExecutorV2.of({
-                execute: () => Deferred.succeed(titleStarted, undefined).pipe(Effect.asVoid),
-              }),
-            ),
-          ),
-        ),
+      const cap = { maxRunningTitleGenerations: 1 };
+      const title = (name: string) => ({
+        id: `effect:foundation-title-cap:${name}`,
+        commandId: CommandId.make(`command:foundation-title-cap:${name}`),
+        threadId: ThreadId.make(`thread:foundation-title-cap:${name}`),
+        request: { type: "thread-title.generate" as const, kind: { type: "regenerate" as const } },
+      });
+      yield* outbox.enqueue([title("first"), title("second")]);
+      const first = yield* outbox.claimNext({ workerId: "title-cap-worker", ...cap });
+      assert.strictEqual(Option.getOrUndefined(first)?.id, title("first").id);
+
+      assert.isTrue(
+        Option.isNone(yield* outbox.claimNext({ workerId: "title-cap-worker", ...cap })),
       );
+      assert.isTrue(
+        Option.isNone(yield* outbox.nextClaimableAt(cap)),
+        "a capped title must not report a past deadline, or idle workers re-poll every 25 ms",
+      );
+      assert.isTrue(Option.isSome(yield* outbox.nextClaimableAt()));
 
-      yield* Effect.gen(function* () {
-        yield* EffectWorker.runDaemonWithOptions({ concurrency: 2 }).pipe(Effect.forkScoped);
-        yield* Effect.yieldNow;
-        yield* outbox.enqueue([
-          {
-            id: titleId,
-            commandId: CommandId.make("command:foundation-idle-title"),
-            threadId: ThreadId.make("thread:foundation-idle-title"),
-            request: { type: "thread-title.generate", kind: { type: "regenerate" } },
-          },
-        ]);
-        yield* outbox.notifyAvailable(1);
-
-        const started = yield* Deferred.await(titleStarted).pipe(
-          Effect.timeoutOption(Duration.seconds(1)),
-          Effect.forkScoped,
-        );
-        yield* TestClock.adjust(Duration.seconds(1));
-        assert.isTrue(
-          Option.isSome(yield* Fiber.join(started)),
-          "the woken worker could not claim the title it was woken for",
-        );
-        yield* outbox.awaitSettled(titleId);
-      }).pipe(Effect.provide(layerWorker), Effect.scoped);
+      yield* outbox.succeed({ effectId: title("first").id, workerId: "title-cap-worker" });
+      const second = yield* outbox.claimNext({ workerId: "title-cap-worker", ...cap });
+      assert.strictEqual(Option.getOrUndefined(second)?.id, title("second").id);
+      yield* outbox.succeed({ effectId: title("second").id, workerId: "title-cap-worker" });
     }),
   );
 
