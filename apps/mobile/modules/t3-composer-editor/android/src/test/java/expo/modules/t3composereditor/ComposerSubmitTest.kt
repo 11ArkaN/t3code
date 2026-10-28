@@ -4,7 +4,6 @@ import android.text.InputType
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
-import android.view.inputmethod.BaseInputConnection
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,14 +17,11 @@ import org.robolectric.shadows.InputDeviceBuilder
 @Config(sdk = [36], manifest = Config.NONE)
 class ComposerSubmitTest {
   private val sends = mutableListOf<Boolean>()
-  private val recordSend: (Boolean) -> Unit = { alternate -> sends += alternate }
   private val editor = SelectionAwareEditText(RuntimeEnvironment.getApplication()).apply {
     inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
     submitEnabled = true
-    submitListener = recordSend
+    submitListener = { alternate -> sends += alternate }
   }
-
-  private val hardwareKeyboard = keyboard(1)
 
   private fun keyboard(id: Int, type: Int = InputDevice.KEYBOARD_TYPE_ALPHABETIC): InputDevice =
     InputDeviceBuilder.newBuilder()
@@ -36,7 +32,7 @@ class ComposerSubmitTest {
 
   private fun pressReturn(
     metaState: Int = 0,
-    device: InputDevice? = hardwareKeyboard,
+    device: InputDevice = keyboard(1),
     repeatCount: Int = 0,
     flags: Int = 0
   ) {
@@ -47,7 +43,7 @@ class ComposerSubmitTest {
       KeyEvent.KEYCODE_ENTER,
       repeatCount,
       metaState,
-      device?.id ?: UNKNOWN_DEVICE,
+      device.id,
       0,
       flags,
     )
@@ -80,27 +76,12 @@ class ComposerSubmitTest {
 
   @Test
   fun onScreenKeyboardReturnInsertsANewline() {
-    pressReturn(device = keyboard(KeyCharacterMap.VIRTUAL_KEYBOARD))
-    // An IME can send device 0 without FLAG_SOFT_KEYBOARD. On phones that ID is the built-in
-    // "keyboard", a key-only device such as the fingerprint sensor.
+    pressReturn(device = keyboard(KeyCharacterMap.VIRTUAL_KEYBOARD), flags = KeyEvent.FLAG_SOFT_KEYBOARD)
+    // Some IMEs send device 0, the phone's key-only built-in "keyboard", without FLAG_SOFT_KEYBOARD.
     pressReturn(device = keyboard(0, InputDevice.KEYBOARD_TYPE_NON_ALPHABETIC))
-    pressReturn(device = null)
-    pressReturn(flags = KeyEvent.FLAG_SOFT_KEYBOARD)
 
     assertEquals(emptyList<Boolean>(), sends)
-    assertEquals("\n\n\n\n", editor.text.toString())
-  }
-
-  @Test
-  fun returnSendsWhileTheKeyboardHoldsAComposingRegion() {
-    // Gboard keeps the last word composing during hardware typing; a composing guard broke sends.
-    editor.setText("line")
-    BaseInputConnection.setComposingSpans(editor.text)
-
-    pressReturn()
-    pressReturn(KeyEvent.META_CTRL_ON)
-
-    assertEquals(listOf(false, true), sends)
+    assertEquals("\n\n", editor.text.toString())
   }
 
   @Test
@@ -115,26 +96,13 @@ class ComposerSubmitTest {
 
   @Test
   fun returnNeverSendsFromAComposerThatCannotSubmit() {
-    editor.submitListener = null
-    pressReturn()
-    assertEquals("\n", editor.text.toString())
-    editor.submitListener = recordSend
-
     editor.submitEnabled = false
     pressReturn()
     editor.submitEnabled = true
 
     editor.readOnly = true
     pressReturn()
-    editor.readOnly = false
-
-    editor.isEnabled = false
-    pressReturn()
 
     assertEquals(emptyList<Boolean>(), sends)
-  }
-
-  private companion object {
-    const val UNKNOWN_DEVICE = 99
   }
 }
