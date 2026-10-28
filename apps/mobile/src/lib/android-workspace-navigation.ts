@@ -69,8 +69,8 @@ export function returnToAndroidWorkspaceList(
 }
 
 // Split view: Thread, PullRequest, and a Settings page picked from the list swap the detail pane
-// rather than stack, so they don't animate. Pages opened from a Settings page slide edge to edge;
-// the default push edge-extends the incoming page, bleeding a stripe beside the list.
+// rather than stack, so they don't animate. Pages opened from a Settings page crossfade inside the
+// pane's card; the default push edge-extends the incoming page, bleeding a stripe beside the list.
 export function androidWorkspaceDestinationAnimation(
   route: { readonly key: string; readonly name: string },
   routes: readonly { readonly key: string; readonly name: string }[],
@@ -80,5 +80,5 @@ export function androidWorkspaceDestinationAnimation(
   if (route.name === "Thread" || route.name === "PullRequest") return "none" as const;
   if (route.name === "Settings" || !isSettingsRoute(route.name)) return undefined;
   const below = routes[routes.findIndex((candidate) => candidate.key === route.key) - 1];
-  return below?.name === "Settings" ? ("none" as const) : ("slide_from_right" as const);
+  return below?.name === "Settings" ? ("none" as const) : ("fade" as const);
 }
