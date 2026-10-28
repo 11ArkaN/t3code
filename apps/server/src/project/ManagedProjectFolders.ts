@@ -2,7 +2,6 @@ import {
   CommandId,
   type GitManagerServiceError,
   ProjectId,
-  SCRATCH_PROJECT_ICON,
   type ThreadId,
   VcsProcessSpawnError,
 } from "@t3tools/contracts";
@@ -289,7 +288,7 @@ const make = Effect.gen(function* () {
           .update({
             commandId: CommandId.make(`scratch-project-icon:${id}`),
             projectId: bootstrapped.project.id,
-            projectIcon: SCRATCH_PROJECT_ICON,
+            projectIcon: { kind: "lucide", name: "message-square-dashed", color: "gray" },
           })
           .pipe(Effect.mapError((cause) => new ScratchProjectError({ workspaceRoot, cause })));
       }

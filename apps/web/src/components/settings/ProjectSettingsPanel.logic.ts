@@ -1,8 +1,13 @@
-import { SCRATCH_PROJECT_ICON } from "@t3tools/contracts";
+import type { ProjectIconOverride } from "@t3tools/contracts";
 
 import type { Project } from "../../types";
 
 export const SCRATCH_PROJECT_TITLE = "No project";
+const SCRATCH_PROJECT_ICON = {
+  kind: "lucide",
+  name: "message-square-dashed",
+  color: "gray",
+} as const satisfies ProjectIconOverride;
 
 export function projectGroupTitleNeedsUpdate(
   memberTitles: ReadonlyArray<string>,
