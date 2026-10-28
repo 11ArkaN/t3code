@@ -1,12 +1,13 @@
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { AsyncResult, type Atom } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, render, stubGlobal } from "../../../test/render";
 
 const state = vi.hoisted(() => ({
-  projects: [] as never[],
+  projects: [] as EnvironmentProject[],
   routeParams: {} as Record<string, string>,
   preview: vi.fn(),
   openLink: vi.fn(async () => undefined),
@@ -124,7 +125,7 @@ const project = {
       remoteUrl: "https://github.com/Effect-TS/effect.git",
     },
   },
-} as never;
+} as EnvironmentProject;
 const pullRequestUrl = "https://github.com/Effect-TS/effect/pull/9339";
 const pullRequestView = {
   to: "/pull-requests",
@@ -206,13 +207,29 @@ const sha = "a".repeat(40);
 const commitUrl = `https://github.com/Effect-TS/effect/pull/9339/commits/${sha}`;
 const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
 
-it("opens a commit link in the active thread's Diff pane once its workspace has the commit", async () => {
+it.each([
+  ["github.com", "pull/9339/commits"],
+  ["code.example.com", "pull/9339/commits"],
+  ["code.example.com:8443", "commit"],
+])("opens a %s/%s commit in the active thread's Diff pane after discovery", async (host, path) => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
-  await using _coordinator = await mount(commitUrl);
+  await using _coordinator = await mount(`https://${host}/Effect-TS/effect/${path}/${sha}`);
   expect(state.preview).not.toHaveBeenCalled();
 
-  state.projects = [project];
+  state.projects = [
+    {
+      ...project,
+      repositoryIdentity: {
+        ...project.repositoryIdentity,
+        canonicalKey: `${host}/effect-ts/effect`,
+        locator: {
+          ...project.repositoryIdentity?.locator,
+          remoteUrl: `https://${host}/Effect-TS/effect.git`,
+        },
+      },
+    } as EnvironmentProject,
+  ];
   await act(async () => appAtomRegistry.set(discoverySettled, true));
   await vi.waitFor(() => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, threadRef)).toBe(

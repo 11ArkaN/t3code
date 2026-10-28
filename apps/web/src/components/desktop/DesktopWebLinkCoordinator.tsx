@@ -27,7 +27,7 @@ import { selectActiveRightPanelSurface, useRightPanelStore } from "../../rightPa
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { assetEnvironment } from "../../state/assets";
-import { readThreadShell } from "../../state/entities";
+import { readProject, readThreadShell } from "../../state/entities";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironment } from "../../state/environments";
 import { previewEnvironment } from "../../state/preview";
 import { allReachableShellsLiveAtom } from "../../state/shell";
@@ -213,11 +213,16 @@ export function DesktopWebLinkCoordinator() {
     }
     const routeParams = router.state.matches.at(-1)?.params ?? {};
     const routeTarget = resolveThreadRouteTarget(routeParams);
+    const activeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : undefined;
+    const activeThread = activeThreadRef ? readThreadShell(activeThreadRef) : null;
+    const activeProject =
+      activeThread && activeThreadRef
+        ? readProject(scopeProjectRef(activeThreadRef.environmentId, activeThread.projectId))
+        : null;
     const commitThreadRef =
-      sourceControlClients.parseCommitUrl(url) !== null &&
-      routeTarget?.kind === "server" &&
-      readThreadShell(routeTarget.threadRef) !== null
-        ? routeTarget.threadRef
+      activeThread &&
+      sourceControlClients.parseCommitUrl(url, activeProject?.repositoryIdentity?.provider) !== null
+        ? activeThreadRef
         : undefined;
     // A commit the thread's workspace lacks continues here, after its lookup.
     const openUnavailableCommit = () => {
