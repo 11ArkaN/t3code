@@ -94,7 +94,10 @@ export const make = Effect.gen(function* () {
     function* (candidate: string) {
       if (yield* isOurLink(candidate)) return true;
       const [resolved, ours] = yield* Effect.all([fs.realPath(candidate), fs.realPath(launcher)]);
-      return resolved === ours;
+      if (resolved !== ours) return false;
+      const info = yield* fs.stat(candidate);
+      if (info.type !== "File" || Number(info.size) > 16_384) return false;
+      return (yield* fs.readFileString(candidate)).includes(DesktopCliShim.MARKER);
     },
     Effect.orElseSucceed(() => false),
   );
