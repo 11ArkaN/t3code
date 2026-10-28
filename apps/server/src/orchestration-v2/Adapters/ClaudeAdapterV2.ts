@@ -10124,6 +10124,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (userMessage !== null) {
               yield* attachTurn;
               yield* startUserTurnForWakeReports(nativeThreadId);
+              // This turn ends any native turn a buffered init opened, so the init no longer proves a wake is open.
+              yield* Ref.update(wakeBuffers, (current) => {
+                const entry = current.get(nativeThreadId);
+                if (entry === undefined) return current;
+                const messages = entry.messages.filter(
+                  (buffered) => !isClaudeTurnStartMessage(buffered),
+                );
+                if (messages.length === entry.messages.length) return current;
+                const next = new Map(current);
+                if (messages.length === 0) next.delete(nativeThreadId);
+                else next.set(nativeThreadId, { ...entry, messages });
+                return next;
+              });
               yield* Effect.uninterruptibleMask((restore) =>
                 restore(
                   querySession.query.offer(userMessage, () => {
