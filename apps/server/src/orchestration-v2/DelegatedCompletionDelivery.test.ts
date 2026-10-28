@@ -949,7 +949,7 @@ it.layer(layerTest)("delegated completion delivery repairs", (it) => {
           afterDispose.subagents.find((candidate) => candidate.id === taskId)?.completionDelivery,
           {
             state: "disposed",
-            observedByRunId: null,
+            observedByRunId: runId,
           },
         );
 
@@ -968,7 +968,7 @@ it.layer(layerTest)("delegated completion delivery repairs", (it) => {
         }
         assert.deepEqual(acknowledgedTask.event.payload.completionDelivery, {
           state: "disposed",
-          observedByRunId: null,
+          observedByRunId: runId,
         });
         assert.equal(acknowledgeAfterDispose.storedEvents.length, 1);
 
@@ -978,7 +978,7 @@ it.layer(layerTest)("delegated completion delivery repairs", (it) => {
             ?.completionDelivery,
           {
             state: "disposed",
-            observedByRunId: null,
+            observedByRunId: runId,
           },
         );
       }),
