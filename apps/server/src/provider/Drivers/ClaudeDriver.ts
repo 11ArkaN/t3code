@@ -45,6 +45,7 @@ import { withInstanceIdentity } from "@t3tools/provider-core/server/instanceIden
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
+  fetchNpmLatestVersion,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
@@ -81,14 +82,12 @@ function isClaudeNativeCommandPath(commandPath: string): boolean {
   );
 }
 
-const UPDATE = makePackageManagedProviderMaintenanceResolver({
-  provider: DRIVER_KIND,
-  npmPackageName: "@anthropic-ai/claude-code",
-  nativeUpdate: {
-    args: ["update"],
-    isCommandPath: isClaudeNativeCommandPath,
-  },
-});
+const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
+
+// `claude update` installs the `stable` dist-tag when settings.json opts in; anything else follows `latest`.
+const ClaudeStableChannelSettings = Schema.fromJsonString(
+  Schema.Struct({ autoUpdatesChannel: Schema.Literal("stable") }),
+);
 
 export type ClaudeDriverEnv =
   | ClaudeAdapterV2DriverEnv
@@ -144,8 +143,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       enabled,
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
     } satisfies ClaudeSettings;
+    // The updater runs with the server's env, not this instance's, so it reads the server's config dir.
+    const updateSettingsPath = path.join(
+      yield* resolveClaudeHomePath({ homePath: "" }, yield* HostProcess.Environment),
+      "settings.json",
+    );
+    const update = makePackageManagedProviderMaintenanceResolver({
+      provider: DRIVER_KIND,
+      npmPackageName: CLAUDE_NPM_PACKAGE,
+      nativeUpdate: {
+        args: ["update"],
+        isCommandPath: isClaudeNativeCommandPath,
+        latestVersionLookup: fileSystem.readFileString(updateSettingsPath).pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(ClaudeStableChannelSettings)),
+          Effect.as(
+            fetchNpmLatestVersion(CLAUDE_NPM_PACKAGE, "stable").pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
+            ),
+          ),
+          Effect.orElseSucceed(() => undefined),
+        ),
+      },
+    });
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
-      resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
+      resolveProviderMaintenanceCapabilitiesEffect(update, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       }).pipe(

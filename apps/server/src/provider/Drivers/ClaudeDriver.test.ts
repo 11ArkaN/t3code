@@ -87,55 +87,73 @@ const noSpawn = ChildProcessSpawner.make(() =>
   Effect.die("Version advisory resolution must not spawn a process"),
 );
 
+// A native launcher at 2.1.308 whose user settings.json holds `settings`.
+const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (settings: object) {
+  const fs = yield* FileSystem.FileSystem;
+  const home = yield* fs
+    .makeTempDirectoryScoped({ prefix: "t3-claude-native-channel-" })
+    .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
+  const versionPath = NodePath.join(home, ".local", "share", "claude", "versions", "2.1.308");
+  const launcherPath = NodePath.join(home, ".local", "bin", "claude");
+  yield* fs.makeDirectory(NodePath.dirname(versionPath), { recursive: true });
+  yield* fs.writeFileString(versionPath, "#!/bin/sh\n");
+  yield* fs.chmod(versionPath, 0o755);
+  yield* fs.makeDirectory(NodePath.dirname(launcherPath), { recursive: true });
+  yield* fs.symlink(versionPath, launcherPath);
+  yield* fs.makeDirectory(NodePath.join(home, ".claude"));
+  yield* fs.writeFileString(
+    NodePath.join(home, ".claude", "settings.json"),
+    JSON.stringify(settings),
+  );
+
+  const instance = yield* ClaudeDriver.create({
+    instanceId: ProviderInstanceId.make("claude-native-channel"),
+    displayName: "Claude update channel test",
+    enabled: false,
+    environment: [{ name: "HOME", value: home, sensitive: false }],
+    config: { ...ClaudeDriver.defaultConfig(), binaryPath: launcherPath },
+  }).pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
+    Effect.provideService(HostProcess.HomeDirectory, home),
+  );
+  const capabilities = yield* instance.snapshot.resolveMaintenance();
+  const latestVersion = yield* resolveLatestProviderVersion(capabilities).pipe(
+    Effect.provideServiceEffect(
+      ProviderLatestVersions.ProviderLatestVersions,
+      ProviderLatestVersions.make(),
+    ),
+  );
+
+  expect(capabilities.update).toMatchObject({ executable: launcherPath, args: ["update"] });
+  return createProviderVersionAdvisory({
+    driver: ClaudeDriver.driverKind,
+    currentVersion: "2.1.308",
+    latestVersion,
+    maintenanceCapabilities: capabilities,
+  });
+});
+
 it.layer(layerTest)("ClaudeDriver", (it) => {
   it.effect(
     "compares a native install on the stable update channel against npm's stable release",
     () =>
       Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const home = yield* fs
-          .makeTempDirectoryScoped({ prefix: "t3-claude-native-stable-" })
-          .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
-        const versionPath = NodePath.join(home, ".local", "share", "claude", "versions", "2.1.308");
-        const launcherPath = NodePath.join(home, ".local", "bin", "claude");
-        yield* fs.makeDirectory(NodePath.dirname(versionPath), { recursive: true });
-        yield* fs.writeFileString(versionPath, "#!/bin/sh\n");
-        yield* fs.chmod(versionPath, 0o755);
-        yield* fs.makeDirectory(NodePath.dirname(launcherPath), { recursive: true });
-        yield* fs.symlink(versionPath, launcherPath);
-        yield* fs.makeDirectory(NodePath.join(home, ".claude"));
-        yield* fs.writeFileString(
-          NodePath.join(home, ".claude", "settings.json"),
-          JSON.stringify({ autoUpdatesChannel: "stable" }),
-        );
+        expect(yield* resolveNativeAdvisory({ autoUpdatesChannel: "stable" })).toMatchObject({
+          status: "current",
+          latestVersion: "2.1.308",
+        });
+      }).pipe(Effect.scoped),
+    { skip: windowsHost },
+  );
 
-        const instance = yield* ClaudeDriver.create({
-          instanceId: ProviderInstanceId.make("claude-native-stable"),
-          displayName: "Claude stable channel test",
-          enabled: false,
-          environment: [{ name: "HOME", value: home, sensitive: false }],
-          config: { ...ClaudeDriver.defaultConfig(), binaryPath: launcherPath },
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
-          Effect.provideService(HostProcess.HomeDirectory, home),
-        );
-        const capabilities = yield* instance.snapshot.resolveMaintenance();
-        const latestVersion = yield* resolveLatestProviderVersion(capabilities).pipe(
-          Effect.provideServiceEffect(
-            ProviderLatestVersions.ProviderLatestVersions,
-            ProviderLatestVersions.make(),
-          ),
-        );
-
-        expect(capabilities.update).toMatchObject({ executable: launcherPath, args: ["update"] });
-        expect(
-          createProviderVersionAdvisory({
-            driver: ClaudeDriver.driverKind,
-            currentVersion: "2.1.308",
-            latestVersion,
-            maintenanceCapabilities: capabilities,
-          }),
-        ).toMatchObject({ status: "current", latestVersion: "2.1.308" });
+  it.effect(
+    "compares a native install on the latest update channel against npm's latest release",
+    () =>
+      Effect.gen(function* () {
+        expect(yield* resolveNativeAdvisory({ autoUpdatesChannel: "latest" })).toMatchObject({
+          status: "behind_latest",
+          latestVersion: "2.1.312",
+        });
       }).pipe(Effect.scoped),
     { skip: windowsHost },
   );
