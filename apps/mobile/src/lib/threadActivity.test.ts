@@ -27,7 +27,10 @@ import {
   threadFeedCompactionLabels,
   createThreadFeedCache,
   deriveThreadFeedPresentation,
+  derivePendingUserInputPage,
   messageFoldRunId,
+  pendingApprovalPresentation,
+  pendingApprovalSubject,
   type ThreadFeedCache,
   type ThreadFeedEntry,
   type ThreadFeedLatestRun,
@@ -1176,6 +1179,84 @@ describe("buildThreadFeed", () => {
     expect(presented.some((entry) => entry.type === "thinking")).toBe(false);
   });
 
+  it("shows what a waiting approval allows, without the working shimmer", () => {
+    const startedAt = "2026-06-20T00:00:01.000Z";
+    const requestId = RuntimeRequestId.make("approval");
+    const nativeItemRef = {
+      driver: ProviderDriverKind.make("codex"),
+      nativeId: "call-rm",
+      strength: "strong" as const,
+    };
+    const { exitCode: _exitCode, output: _output, ...completedCommand } = command();
+    const pendingCommand: OrchestrationV2TurnItem = {
+      ...completedCommand,
+      nativeItemRef,
+      status: "pending",
+      completedAt: null,
+      input: "rm -rf apps/mobile/.expo",
+    };
+    const approvalItem: OrchestrationV2TurnItem = {
+      ...base("approval-item", startedAt, 2),
+      nativeItemRef,
+      status: "waiting",
+      completedAt: null,
+      type: "approval_request",
+      requestId,
+      requestKind: "command",
+      prompt: "Delete cached Metro bundles.",
+    };
+    const feed = buildThreadFeed([
+      projected(userMessage(), 0),
+      projected(pendingCommand, 1),
+      projected(approvalItem, 2),
+    ]);
+    const approval = {
+      requestId,
+      requestKind: "command" as const,
+      createdAt: startedAt,
+      detail: "Delete cached Metro bundles.",
+      responseCapability: "live" as const,
+    };
+
+    const subject = pendingApprovalSubject(feed, requestId);
+    expect(subject).toBe("rm -rf apps/mobile/.expo");
+    expect(pendingApprovalPresentation(approval, subject)).toEqual({
+      title: "Command approval",
+      code: "rm -rf apps/mobile/.expo",
+      description: "Delete cached Metro bundles.",
+    });
+    expect(pendingApprovalPresentation(approval)).toEqual({
+      title: "Command approval",
+      code: "Delete cached Metro bundles.",
+      description: undefined,
+    });
+    expect(
+      pendingApprovalPresentation({
+        ...approval,
+        requestKind: "mcp-elicitation",
+        appName: "Linear",
+        detail: "Read your issues",
+      }),
+    ).toEqual({ title: "App access approval", code: "Linear", description: "Read your issues" });
+
+    const presented = deriveThreadFeedPresentation(
+      feed,
+      { runId, status: "waiting", startedAt, completedAt: null },
+      new Set(),
+      new Set(),
+      startedAt,
+    );
+    expect(presented.find((entry) => entry.id === "live-activity-row")).toBeDefined();
+    expect(
+      presented.some(
+        (entry) =>
+          (entry.type === "work-toggle" && entry.shimmer) ||
+          (entry.type === "activity-group" && entry.activities.some((activity) => activity.live)),
+      ),
+    ).toBe(false);
+    expect(presented.some((entry) => entry.type === "thinking")).toBe(false);
+  });
+
   it("does not show Thinking once the open run's provider turn has ended", () => {
     const startedAt = "2026-04-01T00:00:01.000Z";
     const run = { runId, status: "running" as const, startedAt, completedAt: null };
@@ -1476,6 +1557,26 @@ describe("pending user input answers", () => {
     expect(setPendingUserInputCustomAnswer(question, { selectedOptionValues: ["Go"] }, "")).toEqual(
       { customAnswer: "" },
     );
+  });
+
+  it("pages one question at a time: Next needs the shown answer, the last page submits", () => {
+    const second = { ...singleSelectQuestion, id: "region", header: "Region" };
+    const questions = [singleSelectQuestion, second];
+    expect(derivePendingUserInputPage(questions, {}, 0)).toMatchObject({
+      index: 0,
+      question: { id: "runtime" },
+      isLast: false,
+      canAdvance: false,
+    });
+    const answered = { runtime: { selectedOptionValues: ["Go"] } };
+    expect(derivePendingUserInputPage(questions, answered, 0).canAdvance).toBe(true);
+    expect(derivePendingUserInputPage(questions, answered, 1)).toMatchObject({
+      question: { id: "region" },
+      isLast: true,
+      canAdvance: false,
+    });
+    expect(derivePendingUserInputPage(questions, answered, 5).index).toBe(1);
+    expect(derivePendingUserInputPage([singleSelectQuestion], {}, 0).isLast).toBe(true);
   });
 });
 

@@ -158,12 +158,13 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { threadStreamHaptics } from "./threadStreamHaptics";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
-import type {
-  PendingApproval,
-  PendingUserInput,
-  PendingUserInputDraftAnswer,
-  ThreadFeedEntry,
-  ThreadFeedLatestRun,
+import {
+  pendingApprovalSubject,
+  type PendingApproval,
+  type PendingUserInput,
+  type PendingUserInputDraftAnswer,
+  type ThreadFeedEntry,
+  type ThreadFeedLatestRun,
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
@@ -1547,12 +1548,17 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                         <PendingApprovalCard
                           canOperateThread={props.canOperateThread}
                           approval={props.activePendingApproval}
+                          subject={pendingApprovalSubject(
+                            selectedThreadFeed,
+                            props.activePendingApproval.requestId,
+                          )}
                           respondingApprovalId={props.respondingApprovalId}
                           onRespond={props.onRespondToApproval}
                         />
                       ) : null}
                       {props.activePendingUserInput ? (
                         <PendingUserInputCard
+                          key={props.activePendingUserInput.requestId}
                           environmentId={props.environmentId}
                           canOperateThread={props.canOperateThread}
                           pendingUserInput={props.activePendingUserInput}

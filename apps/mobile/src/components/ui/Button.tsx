@@ -25,8 +25,14 @@ const TONE_CLASS_NAMES = {
 } as const;
 
 export function Button(props: ButtonProps) {
-  const [containerClassName, labelClassName] = TONE_CLASS_NAMES[props.tone ?? "secondary"];
+  const tone = props.tone ?? "secondary";
+  const [containerClassName, labelClassName] = TONE_CLASS_NAMES[tone];
   const disabled = Boolean(props.disabled || props.loading);
+  // Dark cards share the grey fill, so a greyed primary reads as plain text; dim it like desktop.
+  const greyed = disabled && tone !== "primary";
+  const accentClassName = greyed
+    ? "accent-foreground-muted"
+    : labelClassName.replace("text-", "accent-");
   return (
     <Pressable
       accessibilityRole="button"
@@ -38,24 +44,19 @@ export function Button(props: ButtonProps) {
       className={cn(
         "min-h-12 flex-row items-center justify-center gap-2 rounded-full px-6 active:opacity-70",
         props.fullWidth ? "w-full" : "self-start",
-        disabled ? "bg-subtle-strong" : containerClassName,
+        greyed ? "bg-subtle-strong" : containerClassName,
+        disabled && !greyed && "opacity-50",
       )}
     >
       {props.loading ? (
-        <AppActivityIndicator colorClassName="accent-foreground-muted" />
+        <AppActivityIndicator colorClassName={accentClassName} />
       ) : props.icon ? (
-        <SymbolView
-          name={props.icon}
-          size={18}
-          tintColorClassName={
-            disabled ? "accent-foreground-muted" : labelClassName.replace("text-", "accent-")
-          }
-        />
+        <SymbolView name={props.icon} size={18} tintColorClassName={accentClassName} />
       ) : null}
       <AppText
         className={cn(
           "min-w-0 shrink text-center font-t3-medium",
-          disabled ? "text-foreground-muted" : labelClassName,
+          greyed ? "text-foreground-muted" : labelClassName,
         )}
       >
         {props.label}

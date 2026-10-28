@@ -1837,7 +1837,8 @@ function appendToolGroupRows(
   const active = latestActiveActivity !== undefined;
   const live = activeTail || active;
   const latestActivity = latestActiveActivity ?? activities.at(-1)!;
-  const shimmer = activeTail && (active || latestActivity.status === "success");
+  const holdsLiveSlot = activeTail && (active || latestActivity.status === "success");
+  const shimmer = holdsLiveSlot && !awaitsUser(latestActivity);
   const singleActivity = activities.length === 1 ? latestActivity : null;
   const groupSummary = summarizeToolGroup(activities.map((activity) => activity.workEntry));
   const latestThought =
@@ -1862,7 +1863,9 @@ function appendToolGroupRows(
       : singleActivity !== null && !singleActivity.toolLike
         ? singleActivity.workEntry.label
         : groupSummary.summary;
-  const id = shimmer ? LIVE_ACTIVITY_ROW_ID : `${live ? "work-live" : "work-toggle"}:${groupId}`;
+  const id = holdsLiveSlot
+    ? LIVE_ACTIVITY_ROW_ID
+    : `${live ? "work-live" : "work-toggle"}:${groupId}`;
   // Lone calls replace the header and disclose directly; lone thoughts retain the header to show text on expansion.
   if (singleActivity !== null && singleActivity.workEntry.itemType !== "reasoning") {
     result.push({
@@ -1938,9 +1941,19 @@ function appendToolGroupRows(
         isWorking &&
         activity.id === latestActivity.id &&
         activity.lifecycleStatus === "inProgress" &&
-        activity.runId === activeRunId,
+        activity.runId === activeRunId &&
+        !awaitsUser(activity),
     })),
   });
+}
+
+/** An open approval or question waits on the user, so its row must not shimmer like work. */
+function awaitsUser(activity: ThreadFeedActivity): boolean {
+  const type = activity.projectedItem.item.type;
+  return (
+    (type === "approval_request" || type === "user_input_request") &&
+    activity.lifecycleStatus === "inProgress"
+  );
 }
 
 function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boolean): string {
@@ -2059,6 +2072,69 @@ export function buildPendingUserInputAnswers(
   }
 
   return answers;
+}
+
+/** Desktop's paging: Next needs the shown question answered, and the last page submits. */
+export function derivePendingUserInputPage(
+  questions: ReadonlyArray<ThreadUserInputQuestion>,
+  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+  questionIndex: number,
+) {
+  const index = Math.max(0, Math.min(questionIndex, questions.length - 1));
+  const question = questions[index];
+  return {
+    index,
+    question,
+    isLast: index >= questions.length - 1,
+    canAdvance:
+      question !== undefined &&
+      resolvePendingUserInputAnswer(question, draftAnswers[question.id]) !== null,
+  };
+}
+
+const APPROVAL_TITLES = {
+  command: "Command approval",
+  "file-change": "File change approval",
+  "file-read": "File read approval",
+  permission: "App permission approval",
+  "mcp-elicitation": "App access approval",
+} satisfies Record<PendingApproval["requestKind"], string>;
+
+/**
+ * Codex sends its reason as the approval prompt, so the command lives on the tool call the
+ * approval gates. The two share a native item ref.
+ */
+export function pendingApprovalSubject(
+  feed: ReadonlyArray<ThreadFeedEntry>,
+  requestId: PendingApproval["requestId"],
+): string | undefined {
+  const items: OrchestrationV2TurnItem[] = [];
+  for (const entry of feed) {
+    if (entry.type !== "activity-group") continue;
+    for (const activity of entry.activities) items.push(activity.projectedItem.item);
+  }
+  const ref = items.findLast(
+    (item) => item.type === "approval_request" && item.requestId === requestId,
+  )?.nativeItemRef;
+  if (!ref?.nativeId) return undefined;
+  const target = items.findLast(
+    (item) =>
+      (item.type === "command_execution" || item.type === "file_change") &&
+      item.nativeItemRef?.driver === ref.driver &&
+      item.nativeItemRef.nativeId === ref.nativeId,
+  );
+  if (target?.type === "command_execution") return target.input.trim() || undefined;
+  return target?.type === "file_change" ? target.fileName : undefined;
+}
+
+/** The code line names what the user allows; the provider's prompt reads as prose below it. */
+export function pendingApprovalPresentation(approval: PendingApproval, subject?: string) {
+  const code = subject ?? approval.appName ?? approval.detail;
+  return {
+    title: APPROVAL_TITLES[approval.requestKind],
+    code,
+    description: approval.detail !== code ? approval.detail : undefined,
+  };
 }
 
 interface ThreadFeedBuild {

@@ -9,14 +9,15 @@ import {
   fullAccessOverrideExplanation,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import type { PendingApproval } from "../../lib/threadActivity";
+import { pendingApprovalPresentation, type PendingApproval } from "../../lib/threadActivity";
 
 export interface PendingApprovalCardProps {
   readonly canOperateThread: boolean;
   readonly approval: PendingApproval;
+  readonly subject: string | undefined;
   readonly respondingApprovalId: RuntimeRequestId | null;
   readonly onRespond: (
     requestId: RuntimeRequestId,
@@ -37,17 +38,31 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const canRespond = props.approval.responseCapability === "live";
   const disabled = !canRespond || props.respondingApprovalId === props.approval.requestId;
   const [explanationOpen, setExplanationOpen] = useState(false);
+  const presentation = pendingApprovalPresentation(props.approval, props.subject);
   return (
     <View className="gap-2.5 rounded-[20px] border border-border bg-card-alt p-4">
-      <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-foreground-secondary">
-        Approval needed
+      <Text accessibilityRole="header" className="font-t3-bold text-base text-foreground">
+        {presentation.title}
       </Text>
-      <Text className="font-t3-bold text-lg text-foreground">
-        {props.approval.appName ?? props.approval.requestKind}
-      </Text>
-      {props.approval.detail ? (
+      {presentation.code ? (
+        <ScrollView
+          bounces={false}
+          nestedScrollEnabled
+          className="rounded-xl border border-input-border bg-md-code-bg"
+          contentContainerClassName="px-3 py-2.5"
+          style={{ maxHeight: 160, flexGrow: 0 }}
+        >
+          <Text
+            selectable
+            className="text-xs leading-5 text-md-code-text ios:font-[family-name:Menlo] android:font-mono"
+          >
+            {presentation.code}
+          </Text>
+        </ScrollView>
+      ) : null}
+      {presentation.description ? (
         <Text className="font-sans text-sm leading-normal text-foreground-secondary">
-          {props.approval.detail}
+          {presentation.description}
         </Text>
       ) : null}
       {props.approval.reason ? (
