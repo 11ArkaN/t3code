@@ -57,6 +57,7 @@ export function useOpenChangeRequestLink(
   targetUrl: string,
   targetThreadRef?: ScopedThreadRef,
   targetEnvironmentId?: EnvironmentId,
+  onCommitUnavailable?: () => void,
 ) => boolean {
   const navigate = useNavigate();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -67,7 +68,7 @@ export function useOpenChangeRequestLink(
     refresh: true,
   });
   const openLink = useOpenLink(threadRef);
-  return (event, targetUrl, targetThreadRef, targetEnvironmentId) => {
+  return (event, targetUrl, targetThreadRef, targetEnvironmentId, onCommitUnavailable) => {
     if (!openInApp || shouldOpenPullRequestExternally(event)) return false;
     const resolvedThreadRef = targetThreadRef ?? threadRef;
     const resolvedPanelRef = panelRef ?? resolvedThreadRef;
@@ -183,8 +184,9 @@ export function useOpenChangeRequestLink(
             return;
           }
           if (openPullRequest()) return;
+          if (onCommitUnavailable) return onCommitUnavailable();
           return openLink(targetUrl, {
-            event: { metaKey: true, ctrlKey: false },
+            event: { metaKey: event.metaKey, ctrlKey: event.ctrlKey, button: event.button },
             threadRef: resolvedThreadRef,
           });
         })

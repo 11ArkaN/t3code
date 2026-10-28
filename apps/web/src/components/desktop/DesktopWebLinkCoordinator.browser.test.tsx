@@ -246,7 +246,7 @@ it("opens a PR commit the workspace lacks in the thread's PR panel", async () =>
   expect(state.openLink).not.toHaveBeenCalled();
 });
 
-it("opens a plain commit the workspace lacks externally", async () => {
+it("opens a plain commit the workspace lacks like any other delivered link", async () => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
   state.projects = [project];
@@ -254,12 +254,9 @@ it("opens a plain commit the workspace lacks externally", async () => {
   appAtomRegistry.set(discoverySettled, true);
   const plainCommitUrl = `https://github.com/Effect-TS/effect/commit/${sha}`;
   await using _coordinator = await mount(plainCommitUrl);
-  await vi.waitFor(() =>
-    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(
-      plainCommitUrl,
-      expect.objectContaining({ threadRef }),
-    ),
-  );
+  await vi.waitFor(() => expect(state.openScratchProject).toHaveBeenCalledOnce());
+  // Handing it to the OS browser would loop when T3 Code is the default browser.
+  expect(state.openLink).not.toHaveBeenCalled();
   expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
   expect(useRightPanelStore.getState().byThreadKey).toEqual({});
 });

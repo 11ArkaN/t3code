@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide";
 import * as Schema from "effect/Schema";
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { useCodeViewFileReveal } from "./diffs/useCodeViewFileReveal";
 import { useFilesystemReadAccess } from "~/state/filesystem";
 import { useOpenInPreferredEditor } from "../editorPreferences";
@@ -97,7 +97,7 @@ import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import { projectCommitUrl } from "@t3tools/client-runtime/change-request-links";
-import { useOpenPrLink } from "../lib/openPullRequestLink";
+import { useOpenLink } from "../browser/useOpenLink";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 type DiffThemeType = "light" | "dark";
@@ -402,7 +402,14 @@ export default function DiffPanel({
     selectedRunId === null && selectedCommitSha !== null
       ? projectCommitUrl(activeProject?.repositoryIdentity, selectedCommitSha)
       : null;
-  const openPrLink = useOpenPrLink(routeThreadRef ?? undefined);
+  const openLink = useOpenLink(routeThreadRef);
+  // A SHA link goes to the code host; it must not route back into this pane's commit selection.
+  const openCommitUrl = (event: MouseEvent<HTMLElement>, url: string) => {
+    event.stopPropagation();
+    if (event.metaKey || event.ctrlKey || event.button === 1) return;
+    event.preventDefault();
+    void openLink(url, { event });
+  };
   const commitDescriptions = useCommitDescriptions({
     environmentId: activeThread?.environmentId ?? null,
     threadId: activeThreadId,
@@ -743,7 +750,7 @@ export default function DiffPanel({
                       target="_blank"
                       rel="noopener noreferrer"
                       className="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-4"
-                      onClick={(event) => openPrLink(event, selectedCommitUrl)}
+                      onClick={(event) => openCommitUrl(event, selectedCommitUrl)}
                     />
                   }
                 >
@@ -859,7 +866,7 @@ export default function DiffPanel({
                                   aria-label={`Open commit ${commit.sha.slice(0, 7)}`}
                                 />
                               }
-                              onClick={(event) => openPrLink(event, commitUrl)}
+                              onClick={(event) => openCommitUrl(event, commitUrl)}
                             >
                               <span className="font-mono text-xs text-muted-foreground underline underline-offset-4">
                                 {commit.sha.slice(0, 7)}

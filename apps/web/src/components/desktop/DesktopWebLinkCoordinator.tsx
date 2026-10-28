@@ -164,26 +164,8 @@ export function DesktopWebLinkCoordinator() {
     return threadRef;
   };
 
-  const openLink = useEffectEvent(async (url: string) => {
-    const pairingUrl = readPairingAppLink(url);
-    if (pairingUrl !== null) {
-      await pairFromLink(pairingUrl);
-      return;
-    }
-    const appPath = promptLinkAppPath(url);
-    if (appPath !== null) {
-      await router.navigate({ href: appPath });
-      return;
-    }
+  const openInBrowser = useEffectEvent(async (url: string) => {
     const routeParams = router.state.matches.at(-1)?.params ?? {};
-    const routeTarget = resolveThreadRouteTarget(routeParams);
-    const commitThreadRef =
-      sourceControlClients.parseCommitUrl(url) !== null &&
-      routeTarget?.kind === "server" &&
-      readThreadShell(routeTarget.threadRef) !== null
-        ? routeTarget.threadRef
-        : undefined;
-    if (openChangeRequest(externalClick, url, commitThreadRef)) return;
     const isFile = url.startsWith("file:");
     // Only this machine's environment serves files, so fail before starting a thread.
     if (isFile && httpBaseUrl === null) {
@@ -216,6 +198,34 @@ export function DesktopWebLinkCoordinator() {
       const error = squashAtomCommandFailure(result);
       reportFailure(url, error instanceof Error ? error.message : url);
     }
+  });
+
+  const openLink = useEffectEvent(async (url: string) => {
+    const pairingUrl = readPairingAppLink(url);
+    if (pairingUrl !== null) {
+      await pairFromLink(pairingUrl);
+      return;
+    }
+    const appPath = promptLinkAppPath(url);
+    if (appPath !== null) {
+      await router.navigate({ href: appPath });
+      return;
+    }
+    const routeParams = router.state.matches.at(-1)?.params ?? {};
+    const routeTarget = resolveThreadRouteTarget(routeParams);
+    const commitThreadRef =
+      sourceControlClients.parseCommitUrl(url) !== null &&
+      routeTarget?.kind === "server" &&
+      readThreadShell(routeTarget.threadRef) !== null
+        ? routeTarget.threadRef
+        : undefined;
+    // A commit the thread's workspace lacks continues here, after its lookup.
+    const openUnavailableCommit = () => {
+      queueRef.current = queueRef.current.then(() => openInBrowser(url)).catch(() => undefined);
+    };
+    if (openChangeRequest(externalClick, url, commitThreadRef, undefined, openUnavailableCommit))
+      return;
+    await openInBrowser(url);
   });
 
   const receiveLink = useEffectEvent((url: string) => {
