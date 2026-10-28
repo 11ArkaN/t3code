@@ -27,8 +27,6 @@ import { usePrimaryEnvironmentId } from "../state/environments";
 import { reviewEnvironment } from "../state/review";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 
-export { projectCommitUrl as gitHubCommitBrowserUrl } from "@t3tools/client-runtime/change-request-links";
-
 export function usePullRequestPreviewTarget(environmentId: EnvironmentId | null, url: string) {
   const projects = useProjects();
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));

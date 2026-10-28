@@ -20,7 +20,6 @@ interface DiffPanelStoreState {
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: RunId, filePath?: string) => void;
   selectCommit: (ref: ScopedThreadRef, sha: string) => void;
-  fallbackFromCommit: (ref: ScopedThreadRef, sha: string) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<RunId>) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
@@ -105,18 +104,6 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
               [threadKey]: { kind: "commit", sha, baseRef },
             },
             branchBaseRefByThreadKey: { ...state.branchBaseRefByThreadKey, [threadKey]: baseRef },
-          };
-        }),
-      fallbackFromCommit: (ref, sha) =>
-        set((state) => {
-          const threadKey = scopedThreadKey(ref);
-          const previous = state.byThreadKey[threadKey];
-          if (previous?.kind !== "commit" || previous.sha !== sha) return state;
-          return {
-            byThreadKey: {
-              ...state.byThreadKey,
-              [threadKey]: { kind: "branch", baseRef: previous.baseRef },
-            },
           };
         }),
       reconcileTurnSelection: (ref, availableTurnIds) =>

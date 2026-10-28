@@ -14,7 +14,7 @@ import {
   VcsUnsupportedOperationError,
   TextGenerationError,
   ModelSelection,
-  ReviewCommitDescriptionsInput,
+  type ReviewCommitDescriptionsInput,
   type GitCommandError,
   type ReviewCommitDescriptionsResult,
   type ReviewCommitDescriptionsError,
@@ -37,7 +37,6 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
-const isCommitDescriptionsInput = Schema.is(ReviewCommitDescriptionsInput);
 const encodeModelSelection = Schema.encodeSync(Schema.fromJsonString(ModelSelection));
 
 export class ReviewService extends Context.Service<
@@ -145,12 +144,6 @@ export const make = Effect.gen(function* () {
 
   const generateCommitDescriptions: ReviewService["Service"]["generateCommitDescriptions"] =
     Effect.fn("ReviewService.generateCommitDescriptions")(function* (input) {
-      if (!isCommitDescriptionsInput(input)) {
-        return yield* new TextGenerationError({
-          operation: "generateCommitDescriptions",
-          detail: "Request between 1 and 10 full commit hashes.",
-        });
-      }
       yield* assertWorkspaceBoundCwd("ReviewService.generateCommitDescriptions", input.cwd);
       const invalidThread = () =>
         new VcsRepositoryDetectionError({

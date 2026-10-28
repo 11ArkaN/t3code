@@ -6,7 +6,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import { GitCommandError, type ScopedThreadRef, type RunId } from "@t3tools/contracts";
+import type { ReviewBranchCommitsResult, ScopedThreadRef, RunId } from "@t3tools/contracts";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -92,17 +92,17 @@ import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices
 import { createGitDiffFileContentsLoader } from "../lib/diffFileContents";
 
 import { useReviewFilePatches } from "./diffs/useReviewFilePatches";
-import { useCommitDescriptions, useCommitMenuSnapshot } from "./diffs/useCommitDescriptions";
+import { useCommitDescriptions } from "./diffs/useCommitDescriptions";
 import { DiffFileLoadingBoundary } from "./diffs/DiffFileLoadingBoundary";
 import { DiffFileStatus } from "./diffs/DiffFileStatus";
 import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
-import { gitHubCommitBrowserUrl, useOpenPrLink } from "../lib/openPullRequestLink";
+import { projectCommitUrl } from "@t3tools/client-runtime/change-request-links";
+import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
 const DIFF_FILE_TREE_STORAGE_KEY = "t3code.diffFileTreeOpen";
-const isGitCommandError = Schema.is(GitCommandError);
 const fileEntryCache = new WeakMap<
   FileDiffMetadata,
   { fileDiff: FileDiffMetadata; fileKey: string; fileVersion: number }
@@ -218,7 +218,8 @@ export default function DiffPanel({
     Schema.Boolean,
   );
   const [baseRefQuery, setBaseRefQuery] = useState("");
-  const [commitMenuOpen, setCommitMenuOpen] = useState(false);
+  // The open commit menu keeps the list it opened with, so rows do not move under the pointer.
+  const [openCommitMenu, setOpenCommitMenu] = useState<ReviewBranchCommitsResult | null>(null);
   const [codeViewRevision, setCodeViewRevision] = useState(0);
 
   const routeThreadRef = useThreadRouteRef();
@@ -362,23 +363,7 @@ export default function DiffPanel({
         })
       : null,
   );
-  const branchCommits = {
-    ...branchCommitsQuery,
-    data: useCommitMenuSnapshot(
-      branchCommitsQuery.data,
-      commitMenuOpen,
-      visible && isGitRepo && canReadFiles && activeThread && activeCwd
-        ? JSON.stringify([activeThread.environmentId, activeThreadId, activeCwd, rememberedBaseRef])
-        : null,
-    ),
-  };
-  const commitPreviewFailed =
-    selectedCommitSha !== null && isGitCommandError(branchDiffPreview.failure);
-  // oxlint-disable-next-line t3code/react-effect-budget -- Restore the branch selection when Git rejects the selected commit.
-  useEffect(() => {
-    if (!routeThreadRef || selectedCommitSha === null || !commitPreviewFailed) return;
-    useDiffPanelStore.getState().fallbackFromCommit(routeThreadRef, selectedCommitSha);
-  }, [commitPreviewFailed, routeThreadRef, selectedCommitSha]);
+  const branchCommits = openCommitMenu ?? branchCommitsQuery.data;
   const activeThreadRefreshKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
     : null;
@@ -415,7 +400,7 @@ export default function DiffPanel({
     : selectedGitScopeLabel;
   const selectedCommitUrl =
     selectedRunId === null && selectedCommitSha !== null
-      ? gitHubCommitBrowserUrl(activeProject?.repositoryIdentity, selectedCommitSha)
+      ? projectCommitUrl(activeProject?.repositoryIdentity, selectedCommitSha)
       : null;
   const openPrLink = useOpenPrLink(routeThreadRef ?? undefined);
   const commitDescriptions = useCommitDescriptions({
@@ -428,10 +413,7 @@ export default function DiffPanel({
             .textGenerationModelSelection
         : null,
     ),
-    shas: branchCommitsQuery.data?.commits.map((commit) => commit.sha) ?? [],
-    enabled: isGitRepo && canReadFiles && !!serverConfig?.settings && !!activeProjectId,
-    visible,
-    open: commitMenuOpen,
+    shas: branchCommits?.commits.map((commit) => commit.sha) ?? [],
   });
   const refreshPreviewQuery = branchDiffPreview.refresh;
   const refreshDiffFromUserAction = refreshPreviewQuery;
@@ -743,75 +725,38 @@ export default function DiffPanel({
     <>
       <div className="@container/diff-refs flex min-w-0 flex-1 items-center gap-3 [-webkit-app-region:no-drag]">
         <DropdownMenu>
-          <div
-            className={cn(
-              "min-w-0 max-w-full items-center",
-              selectedCommitSha === null && "flex shrink-0",
-              selectedCommitSha !== null &&
-                "grid h-7 grid-cols-[minmax(0,1fr)_auto_auto] gap-1 rounded-md bg-secondary px-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/90 has-data-popup-open:bg-secondary/80 sm:h-6 sm:text-xs",
-            )}
-            role="group"
-            aria-label="Diff scope"
+          <DropdownMenuTrigger
+            render={<Button size="xs" variant="secondary" />}
+            className="max-w-full"
+            aria-label={`Diff scope: ${selectedScopeLabel}`}
           >
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DropdownMenuTrigger
-                    render={
-                      selectedCommitSha !== null ? (
-                        <button
-                          type="button"
-                          className="col-span-3 col-start-1 row-start-1 grid h-full min-w-0 cursor-pointer grid-cols-subgrid items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                        />
-                      ) : (
-                        <Button size="xs" variant="secondary" />
-                      )
-                    }
-                    className="max-w-full"
-                    aria-label={`Diff scope: ${selectedScopeLabel}`}
-                  />
-                }
-              >
-                <span className="truncate">{selectedScopeLabel}</span>
-                <ChevronDownIcon
-                  className={cn(
-                    "size-3.5 shrink-0 opacity-70",
-                    selectedCommitSha !== null && "col-start-3",
-                  )}
-                />
-              </TooltipTrigger>
-              <TooltipPopup side="top">{selectedScopeLabel}</TooltipPopup>
-            </Tooltip>
-            {selectedCommitSha !== null ? (
+            <span className="truncate">{selectedScopeLabel}</span>
+            <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+          </DropdownMenuTrigger>
+          {selectedRunId === null && selectedCommitSha !== null ? (
+            selectedCommitUrl ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    selectedCommitUrl ? (
-                      <a
-                        href={selectedCommitUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="relative z-10 col-start-2 row-start-1 shrink-0 rounded-sm font-mono text-xs text-muted-foreground underline underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                        onClick={(event) => openPrLink(event, selectedCommitUrl)}
-                      />
-                    ) : (
-                      <span className="relative z-10 col-start-2 row-start-1 shrink-0 font-mono text-xs text-muted-foreground" />
-                    )
+                    <a
+                      href={selectedCommitUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 font-mono text-xs text-muted-foreground underline underline-offset-4"
+                      onClick={(event) => openPrLink(event, selectedCommitUrl)}
+                    />
                   }
                 >
                   {selectedCommitSha.slice(0, 7)}
                 </TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-80">
-                  {selectedScopeLabel}
-                  {selectedCommitUrl ? (
-                    <span className="block font-mono text-muted-foreground">
-                      {selectedCommitUrl}
-                    </span>
-                  ) : null}
-                </TooltipPopup>
+                <TooltipPopup side="top">{selectedCommitUrl}</TooltipPopup>
               </Tooltip>
-            ) : null}
-          </div>
+            ) : (
+              <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                {selectedCommitSha.slice(0, 7)}
+              </span>
+            )
+          ) : null}
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup value={selectedScopeValue} onValueChange={selectScopeValue}>
               <DropdownMenuRadioItem value="branch" closeOnClick>
@@ -850,11 +795,8 @@ export default function DiffPanel({
             </DropdownMenuSub>
             <DropdownMenuSub
               onOpenChange={(open) => {
-                setCommitMenuOpen(open);
-                if (open) {
-                  commitDescriptions.retry();
-                  branchCommits.refresh();
-                }
+                setOpenCommitMenu(open ? (branchCommitsQuery.data ?? null) : null);
+                if (open) commitDescriptions.loadFirst();
               }}
             >
               <DropdownMenuSubTrigger>Commits</DropdownMenuSubTrigger>
@@ -863,9 +805,9 @@ export default function DiffPanel({
                   value={selectedCommitValue}
                   onValueChange={selectScopeValue}
                 >
-                  {branchCommits.data?.commits.map((commit, index) => {
+                  {branchCommits?.commits.map((commit, index) => {
                     const description = commitDescriptions.descriptions.get(commit.sha);
-                    const commitUrl = gitHubCommitBrowserUrl(
+                    const commitUrl = projectCommitUrl(
                       activeProject?.repositoryIdentity,
                       commit.sha,
                     );
@@ -879,11 +821,7 @@ export default function DiffPanel({
                       >
                         <Tooltip>
                           <TooltipTrigger
-                            ref={
-                              index === commitDescriptions.lastIndex
-                                ? commitDescriptions.observeLast
-                                : undefined
-                            }
+                            ref={commitDescriptions.observeRow(index)}
                             render={
                               <DropdownMenuRadioItem
                                 className="min-w-0 flex-1"
@@ -937,21 +875,21 @@ export default function DiffPanel({
                     );
                   })}
                 </DropdownMenuRadioGroup>
-                {branchCommits.error ? (
-                  <DropdownMenuItem disabled>{branchCommits.error}</DropdownMenuItem>
+                {branchCommitsQuery.error ? (
+                  <DropdownMenuItem disabled>{branchCommitsQuery.error}</DropdownMenuItem>
                 ) : !canReadFiles ? (
                   <DropdownMenuItem disabled>
                     {fileAccess.isPending
                       ? "Checking file access..."
                       : (fileAccess.error ?? "This connection cannot read local diffs.")}
                   </DropdownMenuItem>
-                ) : branchCommits.isPending && branchCommits.data === null ? (
+                ) : branchCommits === null ? (
                   <DropdownMenuItem disabled>Loading commits...</DropdownMenuItem>
-                ) : !branchCommits.data ? null : branchCommits.data.commits.length === 0 ? (
+                ) : branchCommits.commits.length === 0 ? (
                   <DropdownMenuItem disabled>No commits on this branch.</DropdownMenuItem>
-                ) : branchCommits.data.truncated ? (
+                ) : branchCommits.truncated ? (
                   <DropdownMenuItem disabled>
-                    {`Showing latest ${branchCommits.data.commits.length} commits`}
+                    {`Showing latest ${branchCommits.commits.length} commits`}
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuSubContent>

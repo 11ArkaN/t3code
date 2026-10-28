@@ -157,7 +157,7 @@ export function useReviewFilePatches({
   };
 }
 
-export function reviewFileQueries({
+function reviewFileQueries({
   environmentId,
   cwd,
   source,

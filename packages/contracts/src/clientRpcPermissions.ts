@@ -3,7 +3,6 @@ import { GitPreparePullRequestThreadInput, GitRunStackedActionInput } from "./gi
 import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
-  AuthFilesystemReadScope,
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthSettingsWriteScope,
@@ -32,7 +31,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.pullRequestsSetFilesViewed]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsRequestReviewers]: AuthSourceControlWriteScope,
   [WS_METHODS.pullRequestsSetLabels]: AuthSourceControlWriteScope,
-  // Writing a guide runs a model on this environment's providers, which reading one does not.
+  // Writing a guide or commit descriptions runs a model on this environment's providers.
   [WS_METHODS.pullRequestsGenerateReviewGuide]: AuthOrchestrationOperateScope,
   [WS_METHODS.reviewGenerateCommitDescriptions]: AuthOrchestrationOperateScope,
   [WS_METHODS.sourceControlCloneRepository]: AuthSourceControlWriteScope,
@@ -73,9 +72,6 @@ export function clientRpcRequiredScopes(
   method: string,
   input: unknown,
 ): readonly AuthEnvironmentScope[] {
-  if (method === WS_METHODS.reviewGenerateCommitDescriptions) {
-    return [AuthFilesystemReadScope, AuthOrchestrationOperateScope];
-  }
   if (method === WS_METHODS.gitPreparePullRequestThread && input !== undefined) {
     const payload = decodePrepareThread(input);
     if (payload.mode === "worktree" && payload.threadId !== undefined)
