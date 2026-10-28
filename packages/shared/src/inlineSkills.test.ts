@@ -7,8 +7,8 @@ describe("formatProviderSkillDisplayName", () => {
     expect(formatProviderSkillDisplayName({ name: "frontend-design:frontend-design" })).toBe(
       "Frontend Design",
     );
-    expect(formatProviderSkillDisplayName({ name: "pstack:comment-sicko" })).not.toBe(
-      formatProviderSkillDisplayName({ name: "comment-sicko" }),
+    expect(formatProviderSkillDisplayName({ name: "pstack:comment-sicko" })).toBe(
+      "Pstack Comment Sicko",
     );
   });
 });
