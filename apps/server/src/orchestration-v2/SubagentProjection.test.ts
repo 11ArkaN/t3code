@@ -264,30 +264,42 @@ it("waits for nested work and retains the report across monitor acknowledgements
 });
 
 it.each([
-  [0, false],
-  [2, false],
-  [0, true],
-  [2, true],
+  [0, "unobserved"],
+  [2, "unobserved"],
+  [0, "acknowledged"],
+  [2, "acknowledged"],
+  [0, "delivered inline"],
+  [2, "delivered inline"],
 ] as const)(
-  "selects the task result after a question wake with %s restarts (observed result: %s)",
-  (restarts, observed) => {
+  "selects the task result after a question wake with %s restarts (child result: %s)",
+  (restarts, observation) => {
     const { projection, run } = taskFixture();
     const wake = { ...run, id: RunId.make("question-wake"), ordinal: 2 };
-    const expectedRunId = observed
-      ? restarts === 0
-        ? wake.id
-        : RunId.make(`question-restart:${restarts - 1}`)
-      : run.id;
+    const grandchildId = NodeId.make("grandchild");
+    const expectedRunId =
+      observation === "unobserved"
+        ? run.id
+        : restarts === 0
+          ? wake.id
+          : RunId.make(`question-restart:${restarts - 1}`);
     const progress = delegatedTaskProgress({
       ...projection,
-      subagents: observed
-        ? [
-            {
-              status: "completed",
-              completionDelivery: { state: "acknowledged", observedByRunId: wake.id },
-            },
-          ]
-        : [],
+      subagents:
+        observation === "acknowledged"
+          ? [
+              {
+                status: "completed",
+                completionDelivery: { state: "acknowledged", observedByRunId: wake.id },
+              },
+            ]
+          : observation === "delivered inline"
+            ? [
+                {
+                  status: "completed",
+                  completionDelivery: { state: "delivered", observedByRunId: null },
+                },
+              ]
+            : [],
       runs: [
         run,
         wake,
@@ -305,13 +317,26 @@ it.each([
           notification: {
             source: {
               kind: "delegated_task",
-              taskIds: [NodeId.make("grandchild")],
+              taskIds: [grandchildId],
               childThreadId: ThreadId.make("grandchild-thread"),
             },
             outcome: "updated",
             summary: "Delegated task has a question",
           },
         },
+        // A completion steered into the running question turn joins that run.
+        ...(observation === "delivered inline"
+          ? [
+              {
+                runId: wake.id,
+                delegatedCompletion: {
+                  parentRunId: run.id,
+                  generation: 1,
+                  taskIds: [grandchildId],
+                },
+              },
+            ]
+          : []),
       ],
     });
     assert.equal(progress.state, "result_available");

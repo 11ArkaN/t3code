@@ -223,7 +223,7 @@ export function subagentResultForRun(
 export function delegatedQuestionRunIds(projection: {
   readonly runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "restartContinuationOfRunId">>;
   readonly messages: ReadonlyArray<
-    Pick<OrchestrationV2ConversationMessage, "runId" | "notification">
+    Pick<OrchestrationV2ConversationMessage, "runId" | "notification" | "delegatedCompletion">
   >;
   readonly subagents: ReadonlyArray<
     Pick<OrchestrationV2ThreadProjection["subagents"][number], "completionDelivery">
@@ -254,14 +254,18 @@ export function delegatedQuestionRunIds(projection: {
       pending.push(continuationId);
     }
   }
-  // A question turn can finish the task when it observes a child result.
-  const observed = new Set(
-    projection.subagents.flatMap((task) =>
+  // A question turn can finish the task when it observes a child result, by
+  // reading it or by receiving its completion steered into the turn.
+  const observed = new Set([
+    ...projection.subagents.flatMap((task) =>
       task.completionDelivery?.observedByRunId == null
         ? []
         : [task.completionDelivery.observedByRunId],
     ),
-  );
+    ...projection.messages.flatMap(({ runId, delegatedCompletion }) =>
+      runId === null || delegatedCompletion === undefined ? [] : [runId],
+    ),
+  ]);
   const resultRuns = [...observed];
   for (const runId of resultRuns) {
     questionRuns.delete(runId);
@@ -277,7 +281,7 @@ export function delegatedQuestionRunIds(projection: {
 export function delegatedTaskProgress(projection: {
   readonly runs: OrchestrationV2ThreadProjection["runs"];
   readonly messages: ReadonlyArray<
-    Pick<OrchestrationV2ConversationMessage, "runId" | "notification">
+    Pick<OrchestrationV2ConversationMessage, "runId" | "notification" | "delegatedCompletion">
   >;
   readonly subagents: ReadonlyArray<
     Pick<OrchestrationV2ThreadProjection["subagents"][number], "status" | "completionDelivery">
