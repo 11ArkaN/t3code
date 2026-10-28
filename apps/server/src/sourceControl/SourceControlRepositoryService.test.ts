@@ -388,7 +388,9 @@ it.effect.each([
   ["a token with an apostrophe", "s3'cret"],
   ["a token with a double quote", 's3"cret'],
   ["a host-only token with an at sign", "abc@secret"],
-] as const)("keeps %s in the query out of a failed clone's error text", ([, token]) =>
+  ["an unquoted token with an apostrophe", "s3'cret", true],
+  ["an unquoted token with a double quote", 's3"cret', true],
+] as const)("keeps %s in the query out of a failed clone's error text", ([, token, unquoted]) =>
   Effect.gen(function* () {
     const remote =
       token === "abc@secret" ? "https://github.com" : "https://github.com/octocat/t3code.git";
@@ -405,7 +407,9 @@ it.effect.each([
                   : cloneUrl;
               yield* (
                 input.progress?.onStderrLine?.(
-                  `fatal: unable to access '${diagnosticUrl}/': Could not resolve host: github.com`,
+                  unquoted
+                    ? `fatal: ${diagnosticUrl}/info/refs not valid: is this a git repository?`
+                    : `fatal: unable to access '${diagnosticUrl}/': Could not resolve host: github.com`,
                 ) ?? Effect.void
               );
               return yield* new GitCommandError({
@@ -423,7 +427,9 @@ it.effect.each([
 
     assert.strictEqual(
       error.detail,
-      `fatal: unable to access '${remote}${token === "abc@secret" ? "/" : ""}': Could not resolve host: github.com`,
+      unquoted
+        ? `fatal: ${remote} not valid: is this a git repository?`
+        : `fatal: unable to access '${remote}${token === "abc@secret" ? "/" : ""}': Could not resolve host: github.com`,
     );
   }),
 );
