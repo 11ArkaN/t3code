@@ -53,7 +53,7 @@ export function useOpenChangeRequestLink(
     MouseEvent<HTMLElement>,
     "preventDefault" | "stopPropagation" | "metaKey" | "ctrlKey"
   > &
-    Partial<Pick<MouseEvent<HTMLElement>, "button">>,
+    Partial<Pick<MouseEvent<HTMLElement>, "button" | "shiftKey" | "altKey">>,
   targetUrl: string,
   targetThreadRef?: ScopedThreadRef,
   targetEnvironmentId?: EnvironmentId,
@@ -139,6 +139,9 @@ export function useOpenChangeRequestLink(
     const parsedCommit = sourceControlClients.parseCommitUrl(targetUrl, identity?.provider);
     if (
       parsedCommit !== null &&
+      // Shift and Alt keep their browser meaning (new window, download) on commit links.
+      !event.shiftKey &&
+      !event.altKey &&
       commitThread &&
       resolvedThreadRef &&
       commitProject?.environmentId === resolvedThreadRef.environmentId &&
