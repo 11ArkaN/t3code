@@ -1312,7 +1312,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 fullscreenAppRowId !== null ||
                 disclosureToggleSettling
                   ? false
-                  : isWorking && !prefersReducedMotion && settlingListIdentity === null
+                  : // Text lands above a live tool card, so an eased follow drops the card, then lifts it.
+                    isWorking &&
+                      !prefersReducedMotion &&
+                      !toolCallCards &&
+                      settlingListIdentity === null
                     ? TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH
                     : TIMELINE_MAINTAIN_SCROLL_AT_END
               }
