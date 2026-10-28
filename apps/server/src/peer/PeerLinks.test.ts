@@ -1,4 +1,5 @@
-import { NodeHttpServer } from "@effect/platform-node";
+import { NodeHttpClient, NodeHttpServer } from "@effect/platform-node";
+import * as Undici from "@effect/platform-node/Undici";
 import { type ExecutionEnvironmentDescriptor, OrchestratorMcpFailure } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
@@ -8,8 +9,11 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { Tool, Toolkit } from "effect/ai";
 import {
   FetchHttpClient,
@@ -78,8 +82,9 @@ const serveB = (descriptor: ExecutionEnvironmentDescriptor) =>
 const makeA = (
   descriptor: ExecutionEnvironmentDescriptor,
   secrets?: typeof ServerSecretStore.layer,
+  machine?: Layer.Layer<never>,
 ) =>
-  layerLinkingEnvironment(descriptor, secrets).pipe(
+  layerLinkingEnvironment(descriptor, secrets, machine).pipe(
     Layer.build,
     Effect.map((context) => ({
       links: Context.get(context, PeerLinks.PeerLinks),
@@ -460,6 +465,93 @@ it.effect(
         expect(self.reason).toBe("self");
         // Neither attempt spent the pairing code on a session.
         expect(yield* linkedSessions(b)).toEqual([]);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+/** A's `tailscale`, whose `status --json` lists `peerIps` as another machine on its tailnet. */
+const layerTailscalePeers = (peerIps: ReadonlyArray<string>) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.succeed(
+        ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.make(
+            new TextEncoder().encode(
+              JSON.stringify({
+                Self: { DNSName: "laptop.tail1234.ts.net.", TailscaleIPs: ["100.101.0.1"] },
+                Peer: {
+                  "nodekey:box": { DNSName: "box.tail1234.ts.net.", TailscaleIPs: peerIps },
+                },
+              }),
+            ),
+          ),
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        }),
+      ),
+    ),
+  );
+
+/** Connections to `host` reach 127.0.0.1 instead, as a tailnet route would reach the peer. */
+const layerRouteHostToLoopback = (host: string) => {
+  const connect = Undici.buildConnector({});
+  return NodeHttpClient.layerUndiciOptions({
+    connect: (options, callback) =>
+      connect(
+        { ...options, hostname: options.hostname === host ? "127.0.0.1" : options.hostname },
+        callback,
+      ),
+  });
+};
+
+it.effect(
+  "links over plain http to a 100.64.0.0/10 address only when Tailscale lists it as a peer",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const b = yield* serveB(box);
+        const port = new URL(b.url).port;
+        const a = yield* makeA(
+          laptop,
+          undefined,
+          Layer.mergeAll(
+            layerTailscalePeers(["100.100.1.2", "fd7a:115c:a1e0::1"]),
+            layerRouteHostToLoopback("100.100.1.2"),
+          ),
+        );
+
+        // WARP and carrier-grade NAT share the range; an address Tailscale does
+        // not know would carry the code and token in clear.
+        const unknown = yield* a.links
+          .link({
+            url: `http://100.96.0.9:${port}`,
+            pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+            access: "auto",
+          })
+          .pipe(Effect.flip);
+        expect(unknown.message).toContain("plain http");
+        expect(yield* linkedSessions(b)).toEqual([]);
+
+        // The address Settings offers for a peer bound to its tailscale0 interface.
+        const linked = yield* a.links.link({
+          url: `http://100.100.1.2:${port}/`,
+          pairingCode: (yield* b.auth.issuePairingCredential()).credential,
+          access: "auto",
+        });
+        expect(linked).toMatchObject({
+          environmentId: box.environmentId,
+          urls: [`http://100.100.1.2:${port}`],
+        });
+        expect((yield* linkedSessions(b)).length).toBe(1);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
