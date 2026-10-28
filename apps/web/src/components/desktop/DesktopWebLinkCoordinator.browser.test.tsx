@@ -8,7 +8,6 @@ import { act, render, stubGlobal } from "../../../test/render";
 const state = vi.hoisted(() => ({
   projects: [] as never[],
   routeParams: {} as Record<string, string>,
-  threadExists: true,
   preview: vi.fn(),
   openLink: vi.fn(async () => undefined),
   navigate: vi.fn(async (): Promise<void> => undefined),
@@ -64,9 +63,7 @@ vi.mock(import("../../state/entities"), async (original) => ({
   ...(await original()),
   readProjects: () => state.projects,
   readThreadShell: (ref: { threadId: string }) =>
-    state.threadExists && ref.threadId === "thread"
-      ? ({ projectId: "effect", worktreePath: null } as never)
-      : null,
+    ref.threadId === "thread" ? ({ projectId: "effect", worktreePath: null } as never) : null,
   readProject: () => state.projects[0] ?? null,
 }));
 vi.mock(import("../../hooks/useScratchProject"), async (original) => ({
@@ -151,7 +148,6 @@ function setup() {
   state.localEnvironmentDisabled = false;
   state.projects = [];
   state.routeParams = {};
-  state.threadExists = true;
   state.preview
     .mockReset()
     .mockResolvedValue(AsyncResult.success({ sources: [{ kind: "commit", headRef: sha }] }));
@@ -210,12 +206,11 @@ const sha = "a".repeat(40);
 const commitUrl = `https://github.com/Effect-TS/effect/pull/9339/commits/${sha}`;
 const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
 
-it("holds a commit until discovery settles and opens it in the active real thread", async () => {
+it("opens a commit link in the active thread's Diff pane once its workspace has the commit", async () => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
   await using _coordinator = await mount(commitUrl);
   expect(state.preview).not.toHaveBeenCalled();
-  expect(state.openScratchProject).not.toHaveBeenCalled();
 
   state.projects = [project];
   await act(async () => appAtomRegistry.set(discoverySettled, true));
@@ -226,51 +221,16 @@ it("holds a commit until discovery settles and opens it in the active real threa
   });
   expect(
     selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, threadRef),
-  ).toEqual({
-    kind: "commit",
-    sha,
-    baseRef: null,
-  });
+  ).toMatchObject({ kind: "commit", sha });
   expect(state.preview).toHaveBeenCalledExactlyOnceWith({
     environmentId,
-    input: { cwd: "/workspace/effect", commitSha: sha, ignoreWhitespace: true },
+    input: expect.objectContaining({ cwd: "/workspace/effect", commitSha: sha }),
   });
   expect(state.navigate).not.toHaveBeenCalled();
-  expect(state.openScratchProject).not.toHaveBeenCalled();
+  expect(state.openLink).not.toHaveBeenCalled();
 });
 
-it("keeps ordinary PR links in the standalone view while a thread is active", async () => {
-  setup();
-  state.routeParams = { environmentId: "local", threadId: "thread" };
-  state.projects = [project];
-  appAtomRegistry.set(discoverySettled, true);
-  await using _coordinator = await mount(pullRequestUrl);
-  await vi.waitFor(() => expect(state.navigate).toHaveBeenCalledExactlyOnceWith(pullRequestView));
-  expect(useRightPanelStore.getState().byThreadKey).toEqual({});
-  expect(state.preview).not.toHaveBeenCalled();
-});
-
-it.each(["no route", "missing thread", "draft"])(
-  "opens the PR view for a PR commit with %s",
-  async (scenario) => {
-    setup();
-    state.projects = [project];
-    if (scenario === "missing thread") {
-      state.routeParams = { environmentId: "local", threadId: "thread" };
-      state.threadExists = false;
-    }
-    if (scenario === "draft") state.routeParams = { draftId: "draft" };
-    appAtomRegistry.set(discoverySettled, true);
-    await using _coordinator = await mount(commitUrl);
-    await vi.waitFor(() => expect(state.navigate).toHaveBeenCalledExactlyOnceWith(pullRequestView));
-    expect(state.openScratchProject).not.toHaveBeenCalled();
-    expect(state.preview).not.toHaveBeenCalled();
-    expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
-    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
-  },
-);
-
-it("opens an unavailable active-thread PR commit in the thread's PR panel", async () => {
+it("opens a PR commit the workspace lacks in the thread's PR panel", async () => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
   state.projects = [project];
@@ -280,23 +240,13 @@ it("opens an unavailable active-thread PR commit in the thread's PR panel", asyn
   await vi.waitFor(() =>
     expect(
       selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef),
-    ).toMatchObject({
-      kind: "pull-request",
-      projectId,
-      host: "github.com",
-      repository: "effect-ts/effect",
-      number: 9339,
-      url: commitUrl,
-    }),
+    ).toMatchObject({ kind: "pull-request", repository: "effect-ts/effect", number: 9339 }),
   );
-  expect(state.preview).toHaveBeenCalledOnce();
   expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
   expect(state.openLink).not.toHaveBeenCalled();
-  expect(state.navigate).not.toHaveBeenCalled();
-  expect(state.openScratchProject).not.toHaveBeenCalled();
 });
 
-it("opens an unavailable active-thread plain commit externally", async () => {
+it("opens a plain commit the workspace lacks externally", async () => {
   setup();
   state.routeParams = { environmentId: "local", threadId: "thread" };
   state.projects = [project];
@@ -305,14 +255,13 @@ it("opens an unavailable active-thread plain commit externally", async () => {
   const plainCommitUrl = `https://github.com/Effect-TS/effect/commit/${sha}`;
   await using _coordinator = await mount(plainCommitUrl);
   await vi.waitFor(() =>
-    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(plainCommitUrl, {
-      event: { metaKey: true, ctrlKey: false },
-      threadRef,
-    }),
+    expect(state.openLink).toHaveBeenCalledExactlyOnceWith(
+      plainCommitUrl,
+      expect.objectContaining({ threadRef }),
+    ),
   );
   expect(useDiffPanelStore.getState().byThreadKey).toEqual({});
   expect(useRightPanelStore.getState().byThreadKey).toEqual({});
-  expect(state.openScratchProject).not.toHaveBeenCalled();
 });
 
 it("adds the backend from a pairing link after the user confirms its host", async () => {

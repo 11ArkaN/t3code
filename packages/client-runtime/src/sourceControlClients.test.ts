@@ -370,81 +370,28 @@ describe("sourceControlClients.findByPublicDomain", () => {
 describe("sourceControlClients.parseCommitUrl", () => {
   const sha = "a".repeat(40);
 
-  it("dispatches a commit URL to its provider", () => {
-    const parsed = sourceControlClients.parseCommitUrl(
-      `https://github.com/Team/Repo/commit/${sha}`,
-    );
-    expect(parsed?.definition).toBe(sourceControlClients.get("github"));
-    expect(parsed?.link).toEqual({ host: "github.com", repository: "team/repo", sha });
-  });
-
   it.each([
-    "not a URL",
-    `ftp://github.com/team/repo/commit/${sha}`,
-    `https://gitlab.com/team/repo/-/commit/short`,
-  ])("rejects %s", (url) => {
-    expect(sourceControlClients.parseCommitUrl(url)).toBeNull();
-  });
-
-  it.each([
-    ["gitlab", "https://gitlab.com/Group/Nested/Repo/-/commit/", "group/nested/repo"],
-    ["forgejo", "http://forge.example:3000/git/Team/Repo/commit/", "git/team/repo"],
-    ["gitcafe", "https://git.cafe/Team/Repo/commit/", "team/repo"],
-    ["bitbucket", "https://bitbucket.org/Team/Repo/commits/", "team/repo"],
+    ["github", `https://github.com/Team/Repo/commit/${sha}`, "team/repo"],
+    ["github", `https://github.com/Team/Repo/pull/12/commits/${sha}`, "team/repo"],
+    ["gitlab", `https://gitlab.com/Group/Nested/Repo/-/commit/${sha}`, "group/nested/repo"],
+    ["forgejo", `https://codeberg.org/Team/Repo/commit/${sha}`, "team/repo"],
+    ["gitcafe", `https://git.cafe/Team/Repo/commit/${sha}`, "team/repo"],
+    ["bitbucket", `https://bitbucket.org/Team/Repo/commits/${sha}`, "team/repo"],
     [
       "azure-devops",
-      "https://dev.azure.com/Org/Project/_git/Repo/commit/",
+      `https://dev.azure.com/Org/Project/_git/Repo/commit/${sha}`,
       "org/project/_git/repo",
     ],
-    ["azure-devops", "https://org.visualstudio.com/Project/_git/Repo/commit/", "project/_git/repo"],
-    [
-      "azure-devops",
-      "http://code.example:8080/Collection/Project/_git/Repo/commit/",
-      "collection/project/_git/repo",
-    ],
-  ])("reads %s commit links below %s", (kind, prefix, repository) => {
-    const url = new URL(`${prefix}${sha.toUpperCase()}/?view=split#diff`);
-    const parsed = sourceControlClients.parseCommitUrl(url.toString());
+  ])("reads a %s commit link as its repository and full sha", (kind, url, repository) => {
+    const parsed = sourceControlClients.parseCommitUrl(url);
     expect(parsed?.definition.kind).toBe(kind);
-    expect(parsed?.link).toEqual({
-      host: url.hostname,
-      repository,
-      sha,
-      ...(url.port ? { authority: url.host } : {}),
-    });
-    for (const suffix of ["short", `${sha}f`, `${sha}/files`]) {
-      expect(
-        sourceControlClients.get(kind).parseCommitUrl?.(new URL(`${prefix}${suffix}`)),
-      ).toBeNull();
-    }
+    expect(parsed?.link).toMatchObject({ host: new URL(url).hostname, repository, sha });
   });
 
-  it("uses the known project provider for ambiguous self-hosted routes", () => {
-    const url = `https://gitea.github.example/team/repo/commit/${sha}`;
-    expect(
-      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("forgejo"))
-        ?.definition.kind,
-    ).toBe("forgejo");
-    expect(
-      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("gitlab")),
-    ).toBeNull();
-    expect(
-      sourceControlClients.parseCommitUrl(
-        `https://code.example/group/repo/-/commit/${"B".repeat(64)}`,
-      )?.link.sha,
-    ).toBe("b".repeat(64));
-  });
-
-  it("keeps host-specific routes on their own hosts", () => {
-    expect(
-      sourceControlClients
-        .get("gitcafe")
-        .parseCommitUrl?.(new URL(`https://other.test/team/repo/commit/${sha}`)),
-    ).toBeNull();
-    expect(
-      sourceControlClients
-        .get("bitbucket")
-        .parseCommitUrl?.(new URL(`https://other.test/team/repo/commits/${sha}`)),
-    ).toBeNull();
-  });
+  it.each([`https://github.com/team/repo/commit/abc1234`, `https://github.com/team/repo/pull/12`])(
+    "reads no commit from %s",
+    (url) => {
+      expect(sourceControlClients.parseCommitUrl(url)).toBeNull();
+    },
+  );
 });

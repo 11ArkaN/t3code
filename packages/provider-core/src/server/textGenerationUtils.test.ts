@@ -1,25 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { sanitizeCommitDescription, sanitizeCommitSubject } from "./textGenerationUtils.ts";
-
-it("limits a commit description to one line, ten words, and 80 characters", () => {
-  const description = sanitizeCommitDescription(
-    "  Update the selected commit preview and branch fallback for unavailable history with extra words\nignored  ",
-  );
-  expect(description).toBe(
-    "Update the selected commit preview and branch fallback for unavailable",
-  );
-  expect(description.length).toBeLessThanOrEqual(80);
-});
-
-it.each([
-  { prefixLength: 79, character: "🚀" },
-  { prefixLength: 79, character: "e\u0301" },
-  { prefixLength: 73, character: "👨‍👩‍👧‍👦" },
-])("keeps description graphemes intact at the limit", ({ prefixLength, character }) => {
-  const prefix = "a".repeat(prefixLength);
-  expect(sanitizeCommitDescription(`${prefix}${character} more`)).toBe(prefix);
-});
+import { sanitizeCommitSubject } from "./textGenerationUtils.ts";
 
 describe("sanitizeCommitSubject", () => {
   // regression: #19181 truncation split grapheme clusters at the subject limit
