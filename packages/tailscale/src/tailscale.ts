@@ -289,6 +289,7 @@ export const readTailscaleStatus = readTailscaleOutput("status", ["status", "--j
 );
 
 const TailscalePeersJson = Schema.Struct({
+  Self: Schema.optional(Schema.Struct({ TailscaleIPs: Schema.optional(Schema.Unknown) })),
   ExitNodeStatus: Schema.optional(Schema.Struct({ Online: Schema.optional(Schema.Unknown) })),
   Peer: Schema.optional(
     Schema.Record(
@@ -338,8 +339,8 @@ export const readTailscaleExitNode = readTailscaleOutput("status", ["status", "-
   Effect.flatMap(parseTailscaleExitNode),
 );
 
-/** The addresses of the other machines on this machine's tailnet. */
-export const readTailscalePeerAddresses = readTailscaleOutput("status", ["status", "--json"]).pipe(
+/** The addresses of this machine and every other machine on its tailnet. */
+export const readTailnetAddresses = readTailscaleOutput("status", ["status", "--json"]).pipe(
   Effect.flatMap((rawStatusJson) =>
     decodeTailscalePeersJson(rawStatusJson).pipe(
       Effect.mapError((cause) => new TailscaleStatusParseError({ cause })),
@@ -348,9 +349,12 @@ export const readTailscalePeerAddresses = readTailscaleOutput("status", ["status
   Effect.map(
     (parsed) =>
       new Set(
-        Object.values(parsed.Peer ?? {}).flatMap((peer) =>
-          Array.isArray(peer.TailscaleIPs)
-            ? peer.TailscaleIPs.filter((address): address is string => typeof address === "string")
+        [
+          ...(parsed.Self === undefined ? [] : [parsed.Self]),
+          ...Object.values(parsed.Peer ?? {}),
+        ].flatMap((node) =>
+          Array.isArray(node.TailscaleIPs)
+            ? node.TailscaleIPs.filter((address): address is string => typeof address === "string")
             : [],
         ),
       ),

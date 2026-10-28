@@ -33,7 +33,7 @@ import {
   isSharedAddressSpaceHost,
   isTailnetHost,
 } from "@t3tools/shared/hostClassification";
-import { readTailscalePeerAddresses } from "@t3tools/tailscale";
+import { readTailnetAddresses } from "@t3tools/tailscale";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -148,8 +148,8 @@ const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => false),
   );
 
-  const isTailscalePeer = (host: string) =>
-    readTailscalePeerAddresses.pipe(
+  const isTailnetAddress = (host: string) =>
+    readTailnetAddresses.pipe(
       Effect.map((addresses) => addresses.has(host)),
       Effect.orElseSucceed(() => false),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -158,7 +158,7 @@ const make = Effect.gen(function* () {
   /**
    * A peer's base URL as its origin. Its pairing code and token travel there, so
    * plain http only where the network encrypts: this machine, or Tailscale. WARP
-   * and CGNAT share 100.64.0.0/10, so those count only as a listed Tailscale peer.
+   * and CGNAT share 100.64.0.0/10, so those count only where Tailscale lists them.
    */
   const peerOrigin = Effect.fn("PeerLinks.peerOrigin")(function* (url: string) {
     const parsed = URL.parse(url);
@@ -172,7 +172,7 @@ const make = Effect.gen(function* () {
       parsed.protocol === "http:" &&
       !isLocalLoopbackHost(parsed.hostname) &&
       !isTailnetHost(parsed.hostname) &&
-      !(isSharedAddressSpaceHost(parsed.hostname) && (yield* isTailscalePeer(parsed.hostname)))
+      !(isSharedAddressSpaceHost(parsed.hostname) && (yield* isTailnetAddress(parsed.hostname)))
     ) {
       return yield* new PeerLinkError({
         reason: "unreachable",
