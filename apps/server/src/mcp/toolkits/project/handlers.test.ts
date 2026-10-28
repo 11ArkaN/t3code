@@ -37,7 +37,11 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as ProjectHandlers from "./handlers.ts";
 import { ProjectToolkit } from "./tools.ts";
 
-const advertisedProvider = (instanceId: string, models: ReadonlyArray<string>): ServerProvider => ({
+const advertisedProvider = (
+  instanceId: string,
+  models: ReadonlyArray<string>,
+  aliases: Readonly<Record<string, ReadonlyArray<string>>> = {},
+): ServerProvider => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver: ProviderDriverKind.make(instanceId),
   enabled: true,
@@ -46,7 +50,13 @@ const advertisedProvider = (instanceId: string, models: ReadonlyArray<string>): 
   status: "ready",
   auth: { status: "authenticated" },
   checkedAt: "2026-10-28T00:00:00.000Z",
-  models: models.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+  models: models.map((slug) => ({
+    slug,
+    name: slug,
+    ...(aliases[slug] === undefined ? {} : { aliases: aliases[slug] }),
+    isCustom: false,
+    capabilities: null,
+  })),
   slashCommands: [],
   skills: [],
 });
@@ -145,7 +155,9 @@ const clientLaunchHarness = (input: {
     }),
     Layer.mock(ProviderRegistry.ProviderRegistry)({
       getProviders: Effect.succeed([
-        advertisedProvider("claudeAgent", ["claude-opus", "claude-sonnet"]),
+        advertisedProvider("claudeAgent", ["claude-opus", "claude-sonnet"], {
+          "claude-opus": ["opus"],
+        }),
         advertisedProvider("codex", ["gpt-settings"]),
       ]),
     }),
@@ -278,6 +290,7 @@ it.effect("a launch with a model its provider does not advertise creates no thre
       ["claudeAgent", "claude-issue-26619-unadvertised"],
       ["claudeAgent", "gpt-settings"],
       ["codex", "claude-opus"],
+      ["codex", "opus"],
     ] as const) {
       expect(yield* launchWith(instanceId, model)).toMatchObject({
         code: "model_unavailable",
@@ -290,7 +303,11 @@ it.effect("a launch with a model its provider does not advertise creates no thre
       projectId,
       modelSelection: { instanceId: "claudeAgent", model: "claude-sonnet" },
     });
-    expect(launched).toHaveLength(1);
+    expect(yield* launchWith("claudeAgent", "Opus")).toMatchObject({
+      projectId,
+      modelSelection: { instanceId: "claudeAgent", model: "Opus" },
+    });
+    expect(launched).toHaveLength(2);
   }),
 );
 

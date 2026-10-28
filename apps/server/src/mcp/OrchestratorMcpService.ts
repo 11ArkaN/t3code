@@ -338,7 +338,12 @@ function capabilityModelOption(descriptor: ProviderOptionDescriptor): Orchestrat
 
 /** A provider that lists no models accepts any slug. */
 export const requireAdvertisedModel = (provider: ServerProvider, model: string) =>
-  provider.models.length > 0 && !provider.models.some((candidate) => candidate.slug === model)
+  provider.models.length > 0 &&
+  !provider.models.some(
+    (candidate) =>
+      candidate.slug === model ||
+      candidate.aliases?.some((alias) => alias.toLowerCase() === model.toLowerCase()),
+  )
     ? Effect.fail(
         failure(
           "model_unavailable",
