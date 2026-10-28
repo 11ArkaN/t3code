@@ -133,9 +133,10 @@ export const make = Effect.fn("ProjectFileReader.make")(function* (
       return yield* fileSystem.readDirectory(directory).pipe(Effect.orElseSucceed(() => undefined));
     }
     // find has no `--`, so a relative path must not start with a dash. NUL-separated because
-    // entry names may contain newlines.
+    // entry names may contain newlines. -H follows a symlinked start directory, as readdir does.
     const start = directory.startsWith("/") ? directory : `./${directory}`;
     const output = yield* readInChild(directory, binaries.find, [
+      "-H",
       start,
       "-mindepth",
       "1",

@@ -116,6 +116,8 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("ProjectFileRea
       yield* fileSystem.makeDirectory(path.join(skillsDir, "review"), { recursive: true });
       yield* fileSystem.makeDirectory(path.join(skillsDir, "multi\nline"));
       yield* fileSystem.writeFileString(path.join(skillsDir, "review", "SKILL.md"), "# Review");
+      const linkedSkillsDir = path.join(tempDir, "linked-skills");
+      yield* fileSystem.symlink(skillsDir, linkedSkillsDir);
 
       yield* Effect.gen(function* () {
         const reader = yield* ProjectFileReader.ProjectFileReader;
@@ -124,6 +126,10 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("ProjectFileRea
           "# Review",
         );
         assert.deepEqual([...((yield* reader.readDirectory(skillsDir)) ?? [])].sort(), [
+          "multi\nline",
+          "review",
+        ]);
+        assert.deepEqual([...((yield* reader.readDirectory(linkedSkillsDir)) ?? [])].sort(), [
           "multi\nline",
           "review",
         ]);
