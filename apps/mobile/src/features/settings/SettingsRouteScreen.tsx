@@ -21,6 +21,7 @@ import { Platform, View } from "react-native";
 import { useWorkspaceSurface } from "../workspace/useWorkspaceSurface";
 import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { deriveProjectGroupLabel } from "@t3tools/client-runtime/state/project-grouping";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
@@ -211,6 +212,7 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
 
 function useSettingsIndexSections(): SettingsListSection[] {
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const noServerTargets = selectedTargets.length === 0;
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
   const scopedProjectMembers =
@@ -220,12 +222,18 @@ function useSettingsIndexSections(): SettingsListSection[] {
         selectedTargets.some((target) => target.environmentId === project.environmentId),
       ) ?? [];
   const projectLabel =
-    scopedProjectMembers.length > 0
-      ? deriveProjectGroupLabel({
-          representative: scopedProjectMembers[0]!,
-          members: scopedProjectMembers,
-        })
-      : (selectedProject?.label ?? "Unavailable project");
+    !selectedProject || scopedProjectMembers.length === 0
+      ? (selectedProject?.label ?? "Unavailable project")
+      : scopedProjectMembers.length === selectedProject.members.length
+        ? selectedProject.label
+        : deriveProjectGroupLabel({
+            representative: scopedProjectMembers[0]!,
+            members: scopedProjectMembers,
+            signedInRepositoryAccounts,
+            avoidLabels: projectGroups
+              .filter((group) => group.key !== selectedProject.key)
+              .map((group) => group.label),
+          });
   const page = (
     target: SettingsPageTarget,
     icon: SettingsListRow["icon"],

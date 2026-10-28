@@ -1,5 +1,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { buildProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  buildProjectGroups,
+  type SignedInRepositoryAccount,
+} from "@t3tools/client-runtime/state/project-grouping";
 import {
   createContext,
   useContext,
@@ -14,6 +17,7 @@ import {
 import { useEnvironments, type EnvironmentPresentation } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useMobileProjectGroupingSettings } from "../../state/project-grouping";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import { toggleSettingsEnvironment } from "./settings-environment-filter.logic";
 
 export type SettingsTarget = EnvironmentPresentation & {
@@ -40,16 +44,21 @@ function connectedSettingsTargets(environments: readonly EnvironmentPresentation
 function settingsProjectGroups(
   projects: Parameters<typeof buildProjectGroups>[0]["projects"],
   groupingMode: Parameters<typeof buildProjectGroups>[0]["settings"]["sidebarProjectGroupingMode"],
+  signedInRepositoryAccounts: readonly SignedInRepositoryAccount[],
 ) {
   let byMode = groupsCache.get(projects);
   if (!byMode) groupsCache.set(projects, (byMode = new Map()));
-  let groups = byMode.get(groupingMode);
+  const cacheKey = `${groupingMode}\0${signedInRepositoryAccounts
+    .map((account) => `${account.provider}\0${account.host ?? ""}\0${account.account}`)
+    .join("\n")}`;
+  let groups = byMode.get(cacheKey);
   if (!groups) {
     groups = buildProjectGroups({
       projects,
       settings: { sidebarProjectGroupingMode: groupingMode, sidebarProjectGroupingOverrides: {} },
+      signedInRepositoryAccounts,
     });
-    byMode.set(groupingMode, groups);
+    byMode.set(cacheKey, groups);
   }
   return groups;
 }
@@ -115,7 +124,8 @@ export function useSettingsEnvironmentFilter() {
   const projects = useProjects();
   const groupingSettings = useMobileProjectGroupingSettings();
   const groupingMode = groupingSettings.sidebarProjectGroupingMode;
-  const projectGroups = settingsProjectGroups(projects, groupingMode);
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
+  const projectGroups = settingsProjectGroups(projects, groupingMode, signedInRepositoryAccounts);
   const availableTargets = connectedSettingsTargets(environments);
   const selectedTargets = useMemo(
     () =>

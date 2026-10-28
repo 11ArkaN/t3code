@@ -1,4 +1,5 @@
 import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -8,8 +9,10 @@ import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
   resolveScratchProjectScopeKey,
+  signedInRepositoryAccountsFromDiscoveries,
   sortProjectsByGroupOrder,
   type ProjectGroupingSettings,
+  type SignedInRepositoryAccount,
 } from "./projectGrouping.ts";
 
 const environmentId = EnvironmentId.make("environment");
@@ -376,6 +379,296 @@ describe("buildProjectGroups", () => {
     });
     expect(groups).toHaveLength(1);
     expect(groups[0]?.members.map((member) => member.project.id)).toEqual(["winner", "sibling"]);
+  });
+});
+
+function ownedRepository(owner: string, name: string, host = "github.com") {
+  return {
+    canonicalKey: `${host}/${owner}/${name}`,
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: `https://${host}/${owner}/${name}.git`,
+    },
+    provider: SourceControlProviderKind.make("github"),
+    owner,
+    name,
+    displayName: `${owner}/${name}`,
+  };
+}
+
+function signedIn(
+  account: string,
+  host = "github.com",
+  provider = "github",
+): SignedInRepositoryAccount {
+  return { provider, account, host };
+}
+
+describe("linked repository labels", () => {
+  const remote = EnvironmentId.make("remote");
+
+  function linked(identity: EnvironmentProject["repositoryIdentity"], title: string) {
+    return buildProjectGroups({
+      projects: [
+        makeProject("local", "/local/repo", { title, repositoryIdentity: identity }),
+        makeProject("remote", "/remote/repo", {
+          title,
+          environmentId: remote,
+          repositoryIdentity: identity,
+        }),
+      ],
+      settings: settings("repository"),
+      signedInRepositoryAccounts: [signedIn("EtanHey")],
+    });
+  }
+
+  it("keeps a single checkout titled with the repository name", () => {
+    const identity = ownedRepository("EtanHey", "orchestrator");
+    const groups = buildProjectGroups({
+      projects: [
+        makeProject("local", "/local/repo", {
+          title: "orchestrator",
+          repositoryIdentity: identity,
+        }),
+      ],
+      settings: settings("repository"),
+      signedInRepositoryAccounts: [signedIn("EtanHey")],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("orchestrator");
+    expect(groups[0]?.key).toBe(identity.canonicalKey);
+  });
+
+  it("drops the owner prefix when it matches the signed-in account", () => {
+    const identity = ownedRepository("EtanHey", "orchestrator");
+    const groups = linked(identity, "orchestrator");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.key).toBe(identity.canonicalKey);
+    expect(groups[0]?.label).toBe("orchestrator");
+    expect(groups[0]?.memberProjectRefs).toHaveLength(2);
+  });
+
+  it("keeps the owner when the signed-in account is unknown", () => {
+    const identity = ownedRepository("EtanHey", "orchestrator");
+    const groups = buildProjectGroups({
+      projects: [
+        makeProject("local", "/local/repo", {
+          title: "orchestrator",
+          repositoryIdentity: identity,
+        }),
+        makeProject("remote", "/remote/repo", {
+          title: "orchestrator",
+          environmentId: remote,
+          repositoryIdentity: identity,
+        }),
+      ],
+      settings: settings("repository"),
+    });
+    expect(groups[0]?.label).toBe("EtanHey/orchestrator");
+    expect(groups[0]?.key).toBe(identity.canonicalKey);
+  });
+
+  it("keeps another account's owner and matches logins without case", () => {
+    expect(linked(ownedRepository("pingdotgg", "t3code"), "t3code")[0]?.label).toBe(
+      "pingdotgg/t3code",
+    );
+    expect(
+      buildProjectGroups({
+        projects: [
+          makeProject("local", "/local/repo", {
+            title: "orchestrator",
+            repositoryIdentity: ownedRepository("EtanHey", "orchestrator"),
+          }),
+          makeProject("remote", "/remote/repo", {
+            title: "orchestrator",
+            environmentId: remote,
+            repositoryIdentity: ownedRepository("EtanHey", "orchestrator"),
+          }),
+        ],
+        settings: settings("repository"),
+        signedInRepositoryAccounts: [signedIn("etanhey")],
+      })[0]?.label,
+    ).toBe("orchestrator");
+  });
+
+  it("keeps an explicit custom title, including one that repeats the qualified name", () => {
+    expect(linked(ownedRepository("EtanHey", "orchestrator"), "Nightly")[0]?.label).toBe("Nightly");
+    expect(
+      linked(ownedRepository("EtanHey", "orchestrator"), "EtanHey/orchestrator")[0]?.label,
+    ).toBe("EtanHey/orchestrator");
+  });
+
+  it("keeps the owner when the host or provider does not match the signed-in account", () => {
+    const identity = ownedRepository("EtanHey", "orchestrator");
+    const projects = [
+      makeProject("local", "/local/repo", { title: "orchestrator", repositoryIdentity: identity }),
+      makeProject("remote", "/remote/repo", {
+        title: "orchestrator",
+        environmentId: remote,
+        repositoryIdentity: identity,
+      }),
+    ];
+    expect(
+      buildProjectGroups({
+        projects,
+        settings: settings("repository"),
+        signedInRepositoryAccounts: [signedIn("EtanHey", "ghe.example.com")],
+      })[0]?.label,
+    ).toBe("EtanHey/orchestrator");
+    expect(
+      buildProjectGroups({
+        projects,
+        settings: settings("repository"),
+        signedInRepositoryAccounts: [signedIn("EtanHey", "gitlab.com", "gitlab")],
+      })[0]?.label,
+    ).toBe("EtanHey/orchestrator");
+    const { provider: _provider, ...withoutProvider } = identity;
+    expect(
+      buildProjectGroups({
+        projects: projects.map((project) => ({ ...project, repositoryIdentity: withoutProvider })),
+        settings: settings("repository"),
+        signedInRepositoryAccounts: [signedIn("EtanHey")],
+      })[0]?.label,
+    ).toBe("EtanHey/orchestrator");
+  });
+
+  it("labels an own fork by its repository name and keeps the upstream owner", () => {
+    const upstream = ownedRepository("pingdotgg", "t3code");
+    const fork = {
+      ...upstream,
+      origin: {
+        canonicalKey: "github.com/EtanHey/t3code",
+        displayName: "EtanHey/t3code",
+      },
+    };
+    const groups = buildProjectGroups({
+      projects: [
+        makeProject("upstream", "/local/t3code", {
+          title: "t3code",
+          repositoryIdentity: upstream,
+        }),
+        makeProject("upstream-remote", "/remote/t3code", {
+          title: "t3code",
+          environmentId: remote,
+          repositoryIdentity: upstream,
+        }),
+        makeProject("fork", "/local/fork", { title: "t3code", repositoryIdentity: fork }),
+        makeProject("fork-remote", "/remote/fork", {
+          title: "t3code",
+          environmentId: remote,
+          repositoryIdentity: fork,
+        }),
+      ],
+      settings: settings("repository"),
+      signedInRepositoryAccounts: [signedIn("EtanHey")],
+    });
+    expect(groups.map((group) => [group.key, group.label])).toEqual([
+      ["github.com/pingdotgg/t3code", "pingdotgg/t3code"],
+      ["github.com/EtanHey/t3code", "t3code"],
+    ]);
+  });
+
+  it("keeps the owner when the short name matches another project label", () => {
+    const identity = ownedRepository("EtanHey", "orchestrator");
+    const groups = buildProjectGroups({
+      projects: [
+        makeProject("local", "/local/repo", {
+          title: "orchestrator",
+          repositoryIdentity: identity,
+        }),
+        makeProject("remote", "/remote/repo", {
+          title: "orchestrator",
+          environmentId: remote,
+          repositoryIdentity: identity,
+        }),
+        makeProject("notes", "/local/notes", {
+          title: "orchestrator",
+          repositoryIdentity: null,
+        }),
+      ],
+      settings: settings("repository"),
+      signedInRepositoryAccounts: [signedIn("EtanHey")],
+    });
+    expect(groups.map((group) => group.label)).toEqual(["EtanHey/orchestrator", "orchestrator"]);
+    expect(groups.map((group) => group.key)).toEqual([
+      identity.canonicalKey,
+      derivePhysicalProjectKey(makeProject("notes", "/local/notes")),
+    ]);
+  });
+
+  it("keeps both owners when two signed-in accounts would share a short name", () => {
+    const groups = buildProjectGroups({
+      projects: [
+        makeProject("own", "/own", {
+          title: "app",
+          repositoryIdentity: ownedRepository("EtanHey", "app"),
+        }),
+        makeProject("own-remote", "/own-remote", {
+          title: "app",
+          environmentId: remote,
+          repositoryIdentity: ownedRepository("EtanHey", "app"),
+        }),
+        makeProject("work", "/work", {
+          title: "app",
+          repositoryIdentity: ownedRepository("work", "app"),
+        }),
+        makeProject("work-remote", "/work-remote", {
+          title: "app",
+          environmentId: remote,
+          repositoryIdentity: ownedRepository("work", "app"),
+        }),
+      ],
+      settings: settings("repository"),
+      signedInRepositoryAccounts: [signedIn("EtanHey"), signedIn("work")],
+    });
+    expect(groups.map((group) => group.label)).toEqual(["EtanHey/app", "work/app"]);
+  });
+
+  it("reads authenticated provider logins and ignores unknown or signed-out providers", () => {
+    expect(
+      signedInRepositoryAccountsFromDiscoveries([
+        null,
+        {
+          sourceControlProviders: [
+            {
+              kind: SourceControlProviderKind.make("github"),
+              auth: {
+                status: "authenticated",
+                account: Option.some("EtanHey"),
+                host: Option.some("github.com"),
+                accounts: [
+                  { host: "github.com", account: "EtanHey", authenticated: true },
+                  { host: "github.com", account: "work", authenticated: true },
+                  { host: "github.com", account: "expired", authenticated: false },
+                ],
+              },
+            },
+            {
+              kind: SourceControlProviderKind.make("gitlab"),
+              auth: {
+                status: "unauthenticated",
+                account: Option.some("EtanHey"),
+                host: Option.some("gitlab.com"),
+                accounts: [{ host: "gitlab.com", account: "EtanHey", authenticated: true }],
+              },
+            },
+            {
+              kind: SourceControlProviderKind.make("forgejo"),
+              auth: {
+                status: "unknown",
+                account: Option.none(),
+                host: Option.none(),
+              },
+            },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { provider: "github", account: "EtanHey", host: "github.com" },
+      { provider: "github", account: "work", host: "github.com" },
+    ]);
+    expect(signedInRepositoryAccountsFromDiscoveries([undefined])).toEqual([]);
   });
 });
 

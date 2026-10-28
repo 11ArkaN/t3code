@@ -2,6 +2,7 @@ import { useClientSettings } from "../../hooks/useSettings";
 import { buildSidebarProjectSnapshots } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects } from "../../state/entities";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 
 export function useSettingsProjectGroups() {
   const projects = useProjects();
@@ -13,6 +14,7 @@ export function useSettingsProjectGroups() {
     (settings) => settings.sidebarProjectGroupingOverrides,
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const { environments } = useEnvironments();
   const labels = new Map(environments.map((entry) => [entry.environmentId, entry.label]));
   return buildSidebarProjectSnapshots({
@@ -20,5 +22,6 @@ export function useSettingsProjectGroups() {
     settings: { sidebarProjectGroupingMode, sidebarProjectGroupingOverrides },
     primaryEnvironmentId,
     resolveEnvironmentLabel: (id) => labels.get(id) ?? null,
+    signedInRepositoryAccounts,
   }).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }

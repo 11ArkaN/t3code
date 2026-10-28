@@ -10,6 +10,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { deriveProjectGroupLabel } from "@t3tools/client-runtime/state/project-grouping";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useNavigation } from "@react-navigation/native";
 import { useRef, useState } from "react";
@@ -133,7 +134,20 @@ function ProjectOverviewContent(props: {
 }) {
   const { isRemoving, setIsRemoving, startRemoval, finishRemoval } = props;
   const representative = props.members[0]!;
-  const displayName = deriveProjectGroupLabel({ representative, members: props.members });
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
+  const { projectGroups } = useSettingsEnvironmentFilter();
+  const group = projectGroups.find((entry) => entry.key === props.projectKey);
+  const displayName =
+    group && props.members.length === group.members.length
+      ? group.label
+      : deriveProjectGroupLabel({
+          representative,
+          members: props.members,
+          signedInRepositoryAccounts,
+          avoidLabels: projectGroups
+            .filter((entry) => entry.key !== props.projectKey)
+            .map((entry) => entry.label),
+        });
   const [draftName, setDraftName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const threads = useThreadShells();

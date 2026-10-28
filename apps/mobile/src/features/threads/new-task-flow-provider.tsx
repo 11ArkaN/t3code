@@ -22,6 +22,7 @@ import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
 import { useProjects, useServerConfigs, useThreadShells } from "../../state/entities";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
@@ -229,11 +230,13 @@ export function NewTaskFlowProvider(
   const groupingSettings = useMobileProjectGroupingSettings();
   const { enabled: legacyPlanModeEnabled } = useLegacyPlanModeState();
 
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const projectScopes = sortHomeProjectScopes({
     scopes: buildHomeProjectScopes({
       projects,
       environmentId: null,
       projectGroupingMode: groupingSettings.sidebarProjectGroupingMode,
+      signedInRepositoryAccounts,
     }),
     threads,
     pendingTasks: [],

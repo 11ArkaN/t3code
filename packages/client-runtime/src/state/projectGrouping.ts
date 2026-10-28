@@ -3,15 +3,129 @@ import {
   repositoryGroupingDisplayNameOf,
   repositoryGroupingKeyOf,
   type EnvironmentId,
+  type RepositoryIdentity,
   type ScopedProjectRef,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import type { ClientSettings } from "@t3tools/contracts/settings";
+import * as Option from "effect/Option";
 
 import type { EnvironmentProject } from "./models.ts";
 import { normalizeProjectPathForComparison } from "./projects.ts";
 
 const SCRATCH_PROJECT_SCOPE_KEY = "\0no-project";
+const NO_SIGNED_IN_REPOSITORY_ACCOUNTS: readonly SignedInRepositoryAccount[] = [];
+
+export interface SignedInRepositoryAccount {
+  readonly provider: string;
+  readonly account: string;
+  readonly host?: string;
+}
+
+export function signedInRepositoryAccountsFromDiscoveries(
+  discoveries: ReadonlyArray<
+    | {
+        readonly sourceControlProviders: ReadonlyArray<{
+          readonly kind: string;
+          readonly auth: {
+            readonly status: string;
+            readonly account: Option.Option<string>;
+            readonly host: Option.Option<string>;
+            readonly accounts?: ReadonlyArray<{
+              readonly host: string;
+              readonly account: string;
+              readonly authenticated: boolean;
+            }>;
+          };
+        }>;
+      }
+    | null
+    | undefined
+  >,
+): readonly SignedInRepositoryAccount[] {
+  const accounts: SignedInRepositoryAccount[] = [];
+  const seen = new Set<string>();
+  const add = (provider: string, account: string, host: string | undefined) => {
+    const trimmedProvider = provider.trim();
+    const trimmedAccount = account.trim();
+    const trimmedHost = host?.trim();
+    if (!trimmedProvider || !trimmedAccount) return;
+    const key = `${trimmedProvider.toLowerCase()}\0${(trimmedHost ?? "").toLowerCase()}\0${trimmedAccount.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    accounts.push(
+      trimmedHost
+        ? { provider: trimmedProvider, account: trimmedAccount, host: trimmedHost }
+        : { provider: trimmedProvider, account: trimmedAccount },
+    );
+  };
+
+  for (const discovery of discoveries) {
+    if (!discovery) continue;
+    for (const provider of discovery.sourceControlProviders) {
+      if (provider.auth.status !== "authenticated") continue;
+      const account = Option.getOrUndefined(provider.auth.account);
+      if (account) add(provider.kind, account, Option.getOrUndefined(provider.auth.host));
+      for (const entry of provider.auth.accounts ?? []) {
+        if (!entry.authenticated) continue;
+        add(provider.kind, entry.account, entry.host);
+      }
+    }
+  }
+
+  return accounts.length === 0 ? NO_SIGNED_IN_REPOSITORY_ACCOUNTS : accounts;
+}
+
+function tokenKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function repositoryLabelHost(identity: RepositoryIdentity): string | undefined {
+  const host = (identity.origin?.canonicalKey ?? identity.canonicalKey).split("/")[0]?.trim();
+  return host || undefined;
+}
+
+function signedInAccountOwnsLabel(
+  owner: string,
+  provider: string,
+  host: string | undefined,
+  accounts: readonly SignedInRepositoryAccount[],
+): boolean {
+  const ownerKey = tokenKey(owner);
+  const providerKey = tokenKey(provider);
+  const hostKey = host ? tokenKey(host) : undefined;
+  if (!ownerKey || !providerKey) return false;
+  return accounts.some((account) => {
+    if (tokenKey(account.account) !== ownerKey || tokenKey(account.provider) !== providerKey) {
+      return false;
+    }
+    return !hostKey || !account.host || tokenKey(account.host) === hostKey;
+  });
+}
+
+function omitOwnOwnerPrefix(
+  qualified: string,
+  members: ReadonlyArray<Pick<EnvironmentProject, "repositoryIdentity">>,
+  accounts: readonly SignedInRepositoryAccount[] | undefined,
+): string | null {
+  if (!accounts || accounts.length === 0) return null;
+  const slash = qualified.indexOf("/");
+  if (slash <= 0 || slash >= qualified.length - 1) return null;
+  const owner = qualified.slice(0, slash);
+  let sawProducer = false;
+  for (const member of members) {
+    const identity = member.repositoryIdentity;
+    if (!identity || repositoryGroupingDisplayNameOf(identity) !== qualified) continue;
+    sawProducer = true;
+    if (
+      !identity.provider ||
+      !signedInAccountOwnsLabel(owner, identity.provider, repositoryLabelHost(identity), accounts)
+    ) {
+      return null;
+    }
+  }
+  return sawProducer ? qualified.slice(slash + 1) : null;
+}
 
 export interface ProjectGroupingSettings {
   readonly sidebarProjectGroupingMode: SidebarProjectGroupingMode;
@@ -201,6 +315,8 @@ export function resolveScratchProjectScopeKey(
 export function deriveProjectGroupLabel(input: {
   readonly representative: Pick<EnvironmentProject, "title" | "repositoryIdentity">;
   readonly members: ReadonlyArray<Pick<EnvironmentProject, "title" | "repositoryIdentity">>;
+  readonly signedInRepositoryAccounts?: readonly SignedInRepositoryAccount[];
+  readonly avoidLabels?: readonly string[];
 }): string {
   const sharedTitles = uniqueNonEmptyValues(input.members.map((member) => member.title));
   const sharedDisplayNames = uniqueNonEmptyValues(
@@ -221,7 +337,15 @@ export function deriveProjectGroupLabel(input: {
     return sharedTitle;
   }
   if (sharedDisplayNames.length === 1) {
-    return sharedDisplayNames[0]!;
+    const qualified = sharedDisplayNames[0]!;
+    if (sharedTitles.length === 1 && sharedTitle === qualified) return qualified;
+    const shortened = omitOwnOwnerPrefix(
+      qualified,
+      input.members,
+      input.signedInRepositoryAccounts,
+    );
+    if (shortened && !input.avoidLabels?.includes(shortened)) return shortened;
+    return qualified;
   }
 
   if (sharedRepositoryNames.length === 1) {
@@ -289,6 +413,7 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
   readonly settings: ProjectGroupingSettings;
   readonly preferredEnvironmentId?: EnvironmentId | null;
   readonly groupScratchProjects?: boolean;
+  readonly signedInRepositoryAccounts?: readonly SignedInRepositoryAccount[];
 }): ReadonlyArray<ProjectGroup<TProject>> {
   const projectsByPhysicalKey = new Map<string, TProject[]>();
   for (const project of input.projects) {
@@ -344,27 +469,48 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
   }
 
   const preferredEnvironmentId = input.preferredEnvironmentId ?? null;
-  return Array.from(groupedMembers, ([key, members]) => {
+  const labeled = Array.from(groupedMembers, ([key, members]) => {
     const representative =
       (preferredEnvironmentId
         ? members.find((member) => member.project.environmentId === preferredEnvironmentId)?.project
         : null) ?? members[0]!.project;
+    const memberProjects = members.map((member) => member.project);
+    const qualifiedLabel =
+      input.groupScratchProjects && representative.isScratch
+        ? "No project"
+        : members.length > 1
+          ? deriveProjectGroupLabel({ representative, members: memberProjects })
+          : representative.title;
+    const label =
+      input.groupScratchProjects && representative.isScratch
+        ? "No project"
+        : members.length > 1
+          ? deriveProjectGroupLabel({
+              representative,
+              members: memberProjects,
+              ...(input.signedInRepositoryAccounts
+                ? { signedInRepositoryAccounts: input.signedInRepositoryAccounts }
+                : {}),
+            })
+          : representative.title;
     return {
       key,
-      label:
-        input.groupScratchProjects && representative.isScratch
-          ? "No project"
-          : members.length > 1
-            ? deriveProjectGroupLabel({
-                representative,
-                members: members.map((member) => member.project),
-              })
-            : representative.title,
+      label,
+      ownerQualified: label === qualifiedLabel ? null : qualifiedLabel,
       representative,
       members,
       memberProjectRefs: projectRefsByLogicalKey.get(key) ?? [],
     };
   });
+  const labelCounts = new Map<string, number>();
+  for (const group of labeled) {
+    labelCounts.set(group.label, (labelCounts.get(group.label) ?? 0) + 1);
+  }
+  return labeled.map(({ ownerQualified, ...group }) =>
+    ownerQualified !== null && (labelCounts.get(group.label) ?? 0) > 1
+      ? { ...group, label: ownerQualified }
+      : group,
+  );
 }
 
 export function sortProjectsByGroupOrder<

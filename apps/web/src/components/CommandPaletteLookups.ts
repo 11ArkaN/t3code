@@ -10,6 +10,7 @@ import { useClientSettings } from "../hooks/useSettings";
 import { getProjectOrderKey } from "@t3tools/client-runtime/state/project-grouping";
 import { useProjects, useThreadShells } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { useSignedInRepositoryAccounts } from "../state/signedInRepositoryAccounts";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
@@ -66,6 +67,7 @@ export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<Environ
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const clientSettings = useClientSettings(selectCommandPaletteClientSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const projectGroupingSettings = {
     sidebarProjectGroupingMode: clientSettings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: clientSettings.sidebarProjectGroupingOverrides,
@@ -84,6 +86,7 @@ export function useSortedProjectGroups(environmentLabelById: ReadonlyMap<Environ
     settings: projectGroupingSettings,
     primaryEnvironmentId,
     resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
+    signedInRepositoryAccounts,
   });
   return sortLogicalProjectsForSidebar(
     unsortedProjectGroups,

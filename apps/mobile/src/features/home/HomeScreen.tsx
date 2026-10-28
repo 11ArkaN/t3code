@@ -38,6 +38,7 @@ import { FloatingActionButton } from "../../components/ui/FloatingActionButton";
 import type { WorkspaceEnvironment, WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import { NativePrimaryColumnContext } from "../../native/v5-workspace-context";
 import { nativeHeaderScrollEdgeEffects } from "../../native/scrollEdgeEffects";
 import {
@@ -361,10 +362,12 @@ export function HomeScreen(props: HomeScreenProps) {
     onScrollBeginDrag: handleScrollBeginDrag,
   });
 
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const projectScopes = buildHomeProjectScopes({
     projects: props.projects,
     environmentId: props.selectedEnvironmentId,
     projectGroupingMode: props.projectGroupingMode,
+    signedInRepositoryAccounts,
   });
   const hasSearchQuery = props.searchQuery.trim().length > 0;
   const projectByKey = (() => {

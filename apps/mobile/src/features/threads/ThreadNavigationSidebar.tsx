@@ -32,6 +32,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
+import { useSignedInRepositoryAccounts } from "../../state/signedInRepositoryAccounts";
 import { useProjects, useNavigationThreadShells } from "../../state/entities";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
@@ -204,14 +205,21 @@ function ThreadNavigationSidebarPane(
     sidebarProjectGroupingMode: options.projectGroupingMode,
     sidebarProjectGroupingOverrides: {},
   });
+  const signedInRepositoryAccounts = useSignedInRepositoryAccounts();
   const projectScopes = useMemo(
     () =>
       buildHomeProjectScopes({
         projects,
         environmentId: options.selectedEnvironmentId,
         projectGroupingMode: options.projectGroupingMode,
+        signedInRepositoryAccounts,
       }),
-    [projects, options.selectedEnvironmentId, options.projectGroupingMode],
+    [
+      projects,
+      options.selectedEnvironmentId,
+      options.projectGroupingMode,
+      signedInRepositoryAccounts,
+    ],
   );
   const projectFilterOptions = projectScopes.map((scope) => ({
     key: scope.key,
