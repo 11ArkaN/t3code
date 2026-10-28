@@ -59,7 +59,9 @@ import {
   useEnvironmentHttpBaseUrl,
   type EnvironmentPresentation,
 } from "../../state/environments";
-import { useProjects } from "../../state/entities";
+import { useProjects, useThreadShell } from "../../state/entities";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { formatEnvironmentQueryError, useEnvironmentQuery } from "../../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -1094,6 +1096,39 @@ function ScheduledTaskEditorDialog({
   );
 }
 
+function ScheduledTaskDestination({
+  environmentId,
+  threadId,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId | null;
+}) {
+  const ref = threadId === null ? null : scopeThreadRef(environmentId, threadId);
+  const thread = useThreadShell(ref);
+  return (
+    <Field label="Destination">
+      {ref === null ? (
+        <p className="text-sm text-muted-foreground">
+          Each run starts a new thread with the workspace and model below.
+        </p>
+      ) : (
+        <div className="space-y-1 text-sm">
+          <Link
+            to="/$environmentId/$threadId"
+            params={buildThreadRouteParams(ref)}
+            className="block truncate underline underline-offset-2"
+          >
+            {thread?.title.trim() || `Thread ${ref.threadId}`}
+          </Link>
+          <p className="text-muted-foreground">
+            Each run continues this conversation, in its workspace and with its current model.
+          </p>
+        </div>
+      )}
+    </Field>
+  );
+}
+
 function ScheduledTaskEditorForm({
   initialEnvironmentId,
   task,
@@ -1369,6 +1404,11 @@ function ScheduledTaskEditorForm({
               }
             />
           </Field>
+
+          <ScheduledTaskDestination
+            environmentId={environmentId}
+            threadId={draft.threadId ? (draft.threadId as ThreadId) : null}
+          />
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Project" htmlFor="scheduled-task-project">
