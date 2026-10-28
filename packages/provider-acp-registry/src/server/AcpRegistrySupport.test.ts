@@ -654,6 +654,11 @@ describe("AcpRegistrySupport", () => {
       expect(yield* fileSystem.readFileString(resolved.spawn.command)).toBe(
         "#!/bin/sh\necho 1.2.4\n",
       );
+
+      expect(yield* resolver.uninstallManagedBinary({ agentId: agent.id })).toMatchObject({
+        removed: true,
+      });
+      expect(yield* resolver.inspect(settings())).toMatchObject({ status: "unprepared" });
     }).pipe(
       Effect.scoped,
       Effect.provide(
