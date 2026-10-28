@@ -88,8 +88,8 @@ export interface PackageManagedProviderMaintenanceDefinition {
     /** The updater cannot detect installs outside `isCommandPath`, so leave those manual-only. */
     readonly requiresCommandPath?: boolean;
     readonly env?: NodeJS.ProcessEnv;
-    /** Read with the native capabilities, for updaters on their own release channel. */
-    readonly latestVersionLookup?: Effect.Effect<Effect.Effect<string | null> | undefined>;
+    /** For updaters on their own release channel; `null` from it means the latest is unknown. */
+    readonly lookupLatestVersion?: Effect.Effect<string | null>;
   } | null;
 }
 
@@ -448,22 +448,20 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
   }
 
   const nativeUpdate = definition.nativeUpdate;
-  const native = Effect.gen(function* () {
-    if (!nativeUpdate) return manual;
-    const lookupLatestVersion = nativeUpdate.latestVersionLookup
-      ? yield* nativeUpdate.latestVersionLookup
-      : undefined;
-    return makeProviderMaintenanceCapabilities({
-      provider: definition.provider,
-      packageName,
-      updateExecutable: context.resolvedCommandPath,
-      updateArgs: nativeUpdate.args,
-      updateLockKey: `${definition.provider}-native`,
-      platform: context.platform,
-      ...(nativeUpdate.env ? { env: nativeUpdate.env } : {}),
-      ...(lookupLatestVersion ? { lookupLatestVersion } : {}),
-    });
-  });
+  const native = nativeUpdate
+    ? makeProviderMaintenanceCapabilities({
+        provider: definition.provider,
+        packageName,
+        updateExecutable: context.resolvedCommandPath,
+        updateArgs: nativeUpdate.args,
+        updateLockKey: `${definition.provider}-native`,
+        platform: context.platform,
+        ...(nativeUpdate.env ? { env: nativeUpdate.env } : {}),
+        ...(nativeUpdate.lookupLatestVersion
+          ? { latestVersion: null, lookupLatestVersion: nativeUpdate.lookupLatestVersion }
+          : {}),
+      })
+    : manual;
   // A native-looking launcher can still delegate to a mise-owned install.
   if (
     nativeUpdate?.isCommandPath &&
@@ -471,14 +469,14 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
     !commandPaths.some(isMiseCommandPath) &&
     !(yield* isMiseWrapperScript(context))
   ) {
-    return yield* native;
+    return native;
   }
   // A `node_modules` path not proven below belongs to another package or a
   // project, so the provider's own updater could act on the wrong install.
   const fallback =
     nativeUpdate?.requiresCommandPath ||
     commandPaths.some((commandPath) => normalizeCommandPath(commandPath).includes("/node_modules/"))
-      ? Effect.succeed(manual)
+      ? manual
       : native;
   if (commandPaths.some(isVitePlusGlobalCommandPath)) {
     return makeProviderMaintenanceCapabilities({
@@ -572,11 +570,11 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
         { provider: definition.provider, packageName },
         homebrew,
         context,
-      )) ?? (yield* fallback)
+      )) ?? fallback
     );
   }
 
-  return yield* fallback;
+  return fallback;
 });
 
 /**

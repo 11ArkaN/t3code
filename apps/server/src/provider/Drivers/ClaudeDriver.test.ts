@@ -28,25 +28,36 @@ import * as ModelManifest from "../ModelManifest.ts";
 import * as ProviderHostLive from "../ProviderHostLive.ts";
 import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
 import { ClaudeDriver } from "./ClaudeDriver.ts";
+import { ClaudeManagedConfigDirectory } from "./ClaudeHome.ts";
 
 // npm dist-tags for @anthropic-ai/claude-code when `stable` trails `latest`.
 const DIST_TAGS: Record<string, string> = { stable: "2.1.308", latest: "2.1.312" };
 
-const npmRegistry = HttpClient.make((request) => {
-  const url = new URL(request.url);
-  const segments = url.pathname.split("/").map(decodeURIComponent).filter(Boolean);
-  const tag = segments.at(-1) ?? "";
-  if (url.hostname !== "registry.npmjs.org" || !segments.join("/").includes("claude-code")) {
-    return Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })));
-  }
-  const body =
-    tag === "dist-tags"
-      ? DIST_TAGS
-      : tag in DIST_TAGS
-        ? { name: "@anthropic-ai/claude-code", version: DIST_TAGS[tag] }
-        : { name: "@anthropic-ai/claude-code", "dist-tags": DIST_TAGS };
-  return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(body)));
-});
+// Records each requested dist-tag; tags in `unavailable` answer HTTP 503.
+const makeNpmRegistry = (requested: Array<string>, unavailable: ReadonlyArray<string> = []) =>
+  HttpClient.make((request) => {
+    const url = new URL(request.url);
+    const segments = url.pathname.split("/").map(decodeURIComponent).filter(Boolean);
+    const tag = segments.at(-1) ?? "";
+    requested.push(tag);
+    if (url.hostname !== "registry.npmjs.org" || !segments.join("/").includes("claude-code")) {
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+      );
+    }
+    if (unavailable.includes(tag)) {
+      return Effect.succeed(
+        HttpClientResponse.fromWeb(request, new Response(null, { status: 503 })),
+      );
+    }
+    const body =
+      tag === "dist-tags"
+        ? DIST_TAGS
+        : tag in DIST_TAGS
+          ? { name: "@anthropic-ai/claude-code", version: DIST_TAGS[tag] }
+          : { name: "@anthropic-ai/claude-code", "dist-tags": DIST_TAGS };
+    return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(body)));
+  });
 
 const layerTest = ProviderHostLive.layer.pipe(
   Layer.provideMerge(
@@ -77,7 +88,7 @@ const layerTest = ProviderHostLive.layer.pipe(
     ),
   ),
   Layer.provideMerge(ProviderLatestVersions.layer),
-  Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, npmRegistry)),
+  Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, makeNpmRegistry([]))),
 );
 
 // The `#!/bin/sh` stub below cannot be resolved as an executable on Windows.
@@ -87,14 +98,19 @@ const noSpawn = ChildProcessSpawner.make(() =>
   Effect.die("Version advisory resolution must not spawn a process"),
 );
 
-// A native launcher at 2.1.308 whose user settings.json holds `settings`.
-const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (settings: object) {
+// A native launcher at 2.1.308 with the given user and managed settings.json contents.
+const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (input: {
+  readonly user: object;
+  readonly managed?: object;
+  readonly unavailableTags?: ReadonlyArray<string>;
+}) {
   const fs = yield* FileSystem.FileSystem;
   const home = yield* fs
     .makeTempDirectoryScoped({ prefix: "t3-claude-native-channel-" })
     .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
   const versionPath = NodePath.join(home, ".local", "share", "claude", "versions", "2.1.308");
   const launcherPath = NodePath.join(home, ".local", "bin", "claude");
+  const managedDirectory = NodePath.join(home, "managed");
   yield* fs.makeDirectory(NodePath.dirname(versionPath), { recursive: true });
   yield* fs.writeFileString(versionPath, "#!/bin/sh\n");
   yield* fs.chmod(versionPath, 0o755);
@@ -103,8 +119,16 @@ const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (sett
   yield* fs.makeDirectory(NodePath.join(home, ".claude"));
   yield* fs.writeFileString(
     NodePath.join(home, ".claude", "settings.json"),
-    JSON.stringify(settings),
+    JSON.stringify(input.user),
   );
+  yield* fs.makeDirectory(managedDirectory);
+  if (input.managed) {
+    yield* fs.writeFileString(
+      NodePath.join(managedDirectory, "managed-settings.json"),
+      JSON.stringify(input.managed),
+    );
+  }
+  const requestedTags: Array<string> = [];
 
   const instance = yield* ClaudeDriver.create({
     instanceId: ProviderInstanceId.make("claude-native-channel"),
@@ -115,6 +139,11 @@ const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (sett
   }).pipe(
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
     Effect.provideService(HostProcess.HomeDirectory, home),
+    Effect.provideService(ClaudeManagedConfigDirectory, managedDirectory),
+    Effect.provideService(
+      HttpClient.HttpClient,
+      makeNpmRegistry(requestedTags, input.unavailableTags),
+    ),
   );
   const capabilities = yield* instance.snapshot.resolveMaintenance();
   const latestVersion = yield* resolveLatestProviderVersion(capabilities).pipe(
@@ -125,12 +154,15 @@ const resolveNativeAdvisory = Effect.fn("resolveNativeAdvisory")(function* (sett
   );
 
   expect(capabilities.update).toMatchObject({ executable: launcherPath, args: ["update"] });
-  return createProviderVersionAdvisory({
-    driver: ClaudeDriver.driverKind,
-    currentVersion: "2.1.308",
-    latestVersion,
-    maintenanceCapabilities: capabilities,
-  });
+  return {
+    requestedTags,
+    advisory: createProviderVersionAdvisory({
+      driver: ClaudeDriver.driverKind,
+      currentVersion: "2.1.308",
+      latestVersion,
+      maintenanceCapabilities: capabilities,
+    }),
+  };
 });
 
 it.layer(layerTest)("ClaudeDriver", (it) => {
@@ -138,7 +170,10 @@ it.layer(layerTest)("ClaudeDriver", (it) => {
     "compares a native install on the stable update channel against npm's stable release",
     () =>
       Effect.gen(function* () {
-        expect(yield* resolveNativeAdvisory({ autoUpdatesChannel: "stable" })).toMatchObject({
+        const { advisory } = yield* resolveNativeAdvisory({
+          user: { autoUpdatesChannel: "stable" },
+        });
+        expect(advisory).toMatchObject({
           status: "current",
           latestVersion: "2.1.308",
         });
@@ -150,10 +185,43 @@ it.layer(layerTest)("ClaudeDriver", (it) => {
     "compares a native install on the latest update channel against npm's latest release",
     () =>
       Effect.gen(function* () {
-        expect(yield* resolveNativeAdvisory({ autoUpdatesChannel: "latest" })).toMatchObject({
+        const { advisory } = yield* resolveNativeAdvisory({
+          user: { autoUpdatesChannel: "latest" },
+        });
+        expect(advisory).toMatchObject({
           status: "behind_latest",
           latestVersion: "2.1.312",
         });
+      }).pipe(Effect.scoped),
+    { skip: windowsHost },
+  );
+
+  it.effect(
+    "follows a managed update channel over the user's settings",
+    () =>
+      Effect.gen(function* () {
+        const { advisory } = yield* resolveNativeAdvisory({
+          user: { autoUpdatesChannel: "stable" },
+          managed: { autoUpdatesChannel: "latest" },
+        });
+        expect(advisory).toMatchObject({
+          status: "behind_latest",
+          latestVersion: "2.1.312",
+        });
+      }).pipe(Effect.scoped),
+    { skip: windowsHost },
+  );
+
+  it.effect(
+    "reports no latest version when the stable channel's release cannot be fetched",
+    () =>
+      Effect.gen(function* () {
+        const { advisory, requestedTags } = yield* resolveNativeAdvisory({
+          user: { autoUpdatesChannel: "stable" },
+          unavailableTags: ["stable"],
+        });
+        expect(advisory).toMatchObject({ status: "unknown", latestVersion: null });
+        expect(requestedTags).toEqual(["stable"]);
       }).pipe(Effect.scoped),
     { skip: windowsHost },
   );

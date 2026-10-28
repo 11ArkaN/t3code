@@ -1,4 +1,5 @@
 import type { ClaudeSettings } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -42,16 +43,29 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   };
 });
 
+/** Where administrators install Claude Code's managed-*.json files, which override user config. */
+export const ClaudeManagedConfigDirectory = Context.Reference<string>(
+  "server/provider/Drivers/ClaudeManagedConfigDirectory",
+  {
+    defaultValue: () => {
+      const platform = HostProcess.Platform.defaultValue();
+      return platform === "darwin"
+        ? "/Library/Application Support/ClaudeCode"
+        : platform === "win32"
+          ? "C:\\Program Files\\ClaudeCode"
+          : "/etc/claude-code";
+    },
+  },
+);
+
+// Windows accepts `/` after a `\\`-separated directory.
+export const claudeManagedConfigPath = (fileName: string) =>
+  Effect.map(ClaudeManagedConfigDirectory, (directory) => `${directory}/${fileName}`);
+
 /** managed-mcp.json excludes other MCP config and forbids --strict-mcp-config; omit the flag when present. */
 export const hasClaudeManagedMcpConfig = Effect.fn("hasClaudeManagedMcpConfig")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcess.Platform;
-  const managedMcpConfigPath =
-    platform === "darwin"
-      ? "/Library/Application Support/ClaudeCode/managed-mcp.json"
-      : platform === "win32"
-        ? "C:\\Program Files\\ClaudeCode\\managed-mcp.json"
-        : "/etc/claude-code/managed-mcp.json";
+  const managedMcpConfigPath = yield* claudeManagedConfigPath("managed-mcp.json");
   return yield* fileSystem.exists(managedMcpConfigPath).pipe(Effect.orElseSucceed(() => false));
 });
 
