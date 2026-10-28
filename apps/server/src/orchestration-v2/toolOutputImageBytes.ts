@@ -66,6 +66,17 @@ function unlistedImage(record: UnknownRecord): UnknownRecord {
     : { type: "image", sizeBytes: base64DecodedLength(data) };
 }
 
+/** Removed from their array outright, so work-log text does not show an `[image]` placeholder. */
+function isPreviewedImage(context: StripContext, value: unknown): boolean {
+  return (
+    context.previewedByPath &&
+    typeof value === "object" &&
+    value !== null &&
+    (value as UnknownRecord).type === "image" &&
+    isListed(context, value as UnknownRecord)
+  );
+}
+
 function strip(
   value: unknown,
   key: string | undefined,
@@ -79,11 +90,10 @@ function strip(
     let next: Array<unknown> | undefined;
     for (let index = 0; index < value.length; index += 1) {
       const entry = value[index];
-      const stripped = strip(entry, undefined, context, depth + 1);
-      if (stripped !== entry) {
-        next ??= value.slice();
-        next[index] = stripped;
-      }
+      const previewed = isPreviewedImage(context, entry);
+      const stripped = previewed ? entry : strip(entry, undefined, context, depth + 1);
+      if (previewed || stripped !== entry) next ??= value.slice(0, index);
+      if (next !== undefined && !previewed) next.push(stripped);
     }
     return next ?? value;
   }

@@ -125,19 +125,18 @@ describe("stripUnservedToolOutputImageBytes", () => {
   });
 
   // regression: #26591 a subagent's Read keeps its image bytes
-  it("strips a Read's content-array image because its preview uses viewedImagePath", () => {
+  it("drops a Read's content-array image because its preview uses viewedImagePath", () => {
     const item = {
-      ...toolItem({
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG_BASE64 } },
-        ],
-      }),
+      ...toolItem([
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG_BASE64 } },
+        { type: "text", text: "note" },
+      ]),
       viewedImagePath: "/tmp/shot.png",
     };
 
     const output = outputOf(stripUnservedToolOutputImageBytes(item));
 
-    expect(JSON.stringify(output)).not.toContain(PNG_BASE64);
+    expect(output).toEqual([{ type: "text", text: "note" }]);
     expect(toolOutputImages(output)).toEqual([]);
   });
 
