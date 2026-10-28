@@ -2,6 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   alignListPaneToHinge,
+  approvalActionsFitOneRow,
+  CHAT_CONTENT_MAX_WIDTH,
+  deriveCenteredContentHorizontalPadding,
   deriveLayout,
   deriveThreadFeedInitialContentInset,
   deriveThreadWorkLogSizing,
@@ -115,6 +118,39 @@ describe("native workspace sizing", () => {
     expect(
       deriveLayout({ ...nativeMetrics, nativeMetrics, nativeWorkspace: true }).usesSplitView,
     ).toBe(split);
+  });
+});
+
+describe("thread content column", () => {
+  it("keeps gutters outside the column so wide content matches desktop's width", () => {
+    const padding = (viewportWidth: number) =>
+      deriveCenteredContentHorizontalPadding({
+        viewportWidth,
+        maxContentWidth: CHAT_CONTENT_MAX_WIDTH,
+        minimumPadding: 20,
+      });
+    // iPad landscape detail column.
+    expect(1000 - padding(1000) * 2).toBe(CHAT_CONTENT_MAX_WIDTH);
+    // iPad portrait beside the sidebar.
+    expect(padding(700)).toBe(20);
+  });
+
+  it("puts approval actions in one row only when every label fits its share", () => {
+    const labels = ["Allow once", "Allow session", "Decline"];
+    // Inside an iPad card on the column, at default and largest standard text.
+    expect(approvalActionsFitOneRow({ width: 706, labels, fontScale: 1 })).toBe(true);
+    expect(approvalActionsFitOneRow({ width: 706, labels, fontScale: 1.35 })).toBe(true);
+    // iPhone portrait, accessibility text, a long provider label, and before layout.
+    expect(approvalActionsFitOneRow({ width: 344, labels, fontScale: 1 })).toBe(false);
+    expect(approvalActionsFitOneRow({ width: 706, labels, fontScale: 1.79 })).toBe(false);
+    expect(
+      approvalActionsFitOneRow({
+        width: 706,
+        labels: ["Decline", "Allow for this session", "Always allow Safari", "Approve"],
+        fontScale: 1,
+      }),
+    ).toBe(false);
+    expect(approvalActionsFitOneRow({ width: 0, labels, fontScale: 1 })).toBe(false);
   });
 });
 

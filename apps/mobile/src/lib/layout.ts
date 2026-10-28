@@ -13,7 +13,8 @@ const SPLIT_SIDEBAR_MIN_WIDTH = 280;
 const SPLIT_SIDEBAR_DEFAULT_MAX_WIDTH = 380;
 
 const AUXILIARY_PANE_MIN_CONTENT_WIDTH = 960;
-export const CHAT_CONTENT_MAX_WIDTH = 960;
+// Desktop's --chat-content-max-width (46rem): the feed, its cards and the composer share it.
+export const CHAT_CONTENT_MAX_WIDTH = 736;
 // Limit Android reading width for wide foldables and keyboard-open split views.
 export const ANDROID_READING_MAX_WIDTH = 640;
 // min-h-8 uses the 14px rem configured in metro.config.js.
@@ -315,6 +316,7 @@ export function constrainAuxiliaryPaneWidth(input: {
   return clamp(Math.round(safePreferredWidth), AUXILIARY_PANE_MIN_WIDTH, maxWidth);
 }
 
+/** Centers content up to `maxContentWidth` wide, with at least `minimumPadding` outside it. */
 export function deriveCenteredContentHorizontalPadding(input: {
   readonly viewportWidth: number;
   readonly maxContentWidth: number | null;
@@ -333,5 +335,29 @@ export function deriveCenteredContentHorizontalPadding(input: {
     return minimumPadding;
   }
 
-  return minimumPadding + Math.max(0, (viewportWidth - input.maxContentWidth) / 2);
+  return Math.max(minimumPadding, (viewportWidth - input.maxContentWidth) / 2);
+}
+
+// Approval buttons: 14 pt labels in pills with 21 pt side padding, 7 pt apart. 0.6 em per
+// character overestimates DM Sans, so a label judged to fit never wraps.
+const APPROVAL_ACTION_LABEL_SIZE = 14;
+const APPROVAL_ACTION_CHARACTER_EM = 0.6;
+const APPROVAL_ACTION_PADDING = 42;
+export const APPROVAL_ACTION_GAP = 7;
+
+/** Equal-width approval buttons share one row only when the longest label fits its share. */
+export function approvalActionsFitOneRow(input: {
+  readonly width: number;
+  readonly labels: ReadonlyArray<string>;
+  readonly fontScale: number;
+}): boolean {
+  const count = input.labels.length;
+  if (count < 2) return false;
+  const share = (input.width - APPROVAL_ACTION_GAP * (count - 1)) / count;
+  const longest = Math.max(...input.labels.map((label) => label.length));
+  return (
+    share >=
+    longest * APPROVAL_ACTION_CHARACTER_EM * APPROVAL_ACTION_LABEL_SIZE * input.fontScale +
+      APPROVAL_ACTION_PADDING
+  );
 }

@@ -315,6 +315,8 @@ export interface ThreadDetailScreenProps {
 
 const USAGE_LIMITS_PANEL_GAP = 12;
 const USAGE_LIMITS_PANEL_MIN_HEIGHT = 44;
+// px-4 at the app's 14 pt rem.
+const COMPOSER_BLOCK_GUTTER = 14;
 
 const USER_INPUT_TOGGLE_TIMING = {
   duration: USER_INPUT_TOGGLE_DURATION_MS,
@@ -1469,7 +1471,16 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                     contentMaxWidth={contentMaxWidth}
                   />
                 ) : null}
-                <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+                <View
+                  className="w-full self-center"
+                  // Its cards keep a px-4 gutter inside; widen by it so they meet the column edge.
+                  style={{
+                    maxWidth:
+                      contentMaxWidth === undefined
+                        ? undefined
+                        : contentMaxWidth + COMPOSER_BLOCK_GUTTER * 2,
+                  }}
+                >
                   {DOCKS_RUN_STATUS ? null : <FloatingWorkingControl {...runStatus} />}
                   {props.queuedRunEdit !== null ? (
                     <Animated.View

@@ -3289,7 +3289,9 @@ export const ThreadFeed = memo(function ThreadFeed({
             // Enable overflow: RN scrollTo clamps against raw insets and ignores the automatic header inset.
             scrollToOverflowEnabled
             estimatedItemSize={180}
-            alignItemsAtEnd
+            // iOS starts a short thread under the header, like desktop. Content that fills the
+            // viewport gets no end padding either way, so long threads still open at the end.
+            alignItemsAtEnd={Platform.OS === "android"}
             initialScrollAtEnd
             onLoad={() => {
               loadedListKeyRef.current = listMountKey;

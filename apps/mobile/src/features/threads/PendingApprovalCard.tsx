@@ -9,9 +9,10 @@ import {
   fullAccessOverrideExplanation,
 } from "@t3tools/client-runtime/state/thread-requests";
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { APPROVAL_ACTION_GAP, approvalActionsFitOneRow } from "../../lib/layout";
 import { useLargeText } from "../../lib/useLargeText";
 import { pendingApprovalPresentation, type PendingApproval } from "../../lib/threadActivity";
 
@@ -44,6 +45,13 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
   const [explanationOpen, setExplanationOpen] = useState(false);
   const presentation = pendingApprovalPresentation(props.approval, props.subject);
   const largeText = useLargeText();
+  const { fontScale } = useWindowDimensions();
+  const [actionsWidth, setActionsWidth] = useState(0);
+  const actionsInRow = approvalActionsFitOneRow({
+    width: actionsWidth,
+    labels: options.map((option) => option.label),
+    fontScale,
+  });
   const location = [props.environmentLabel, props.cwd].filter(Boolean).join(" · ");
   return (
     <View className="gap-2.5 rounded-2xl border border-border bg-card-alt p-4">
@@ -110,23 +118,27 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
       {warning ? (
         <Text className="font-sans text-xs leading-normal text-warning-foreground">{warning}</Text>
       ) : null}
-      {/* One action per row: provider labels run long ("Allow all edits this session"). */}
-      <View className="gap-2">
+      <View
+        className={actionsInRow ? "flex-row" : undefined}
+        style={{ gap: APPROVAL_ACTION_GAP }}
+        onLayout={(event) => setActionsWidth(Math.round(event.nativeEvent.layout.width))}
+      >
         {options.map((option) => (
-          <Button
-            key={option.decision}
-            fullWidth
-            label={option.label}
-            tone={
-              option.decision === "accept"
-                ? "primary"
-                : option.decision === "decline"
-                  ? "danger"
-                  : "secondary"
-            }
-            disabled={disabled || !props.canOperateThread}
-            onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
-          />
+          <View key={option.decision} className={actionsInRow ? "flex-1" : undefined}>
+            <Button
+              fullWidth
+              label={option.label}
+              tone={
+                option.decision === "accept"
+                  ? "primary"
+                  : option.decision === "decline"
+                    ? "danger"
+                    : "secondary"
+              }
+              disabled={disabled || !props.canOperateThread}
+              onPress={() => void props.onRespond(props.approval.requestId, option.decision)}
+            />
+          </View>
         ))}
       </View>
       {!props.canOperateThread ? (
