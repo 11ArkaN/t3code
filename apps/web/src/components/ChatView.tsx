@@ -700,7 +700,12 @@ export default function ChatView(props: ChatViewProps) {
   ] = useState<Record<string, boolean>>({});
   const legendListRef = useRef<LegendListRef | null>(null);
   const conversationArea = workspaceAreaProps("conversation", 1, "Conversation");
-  const composerArea = workspaceAreaProps("composer", 2);
+  // While a queued-run edit saves, the editor is inert and the area itself holds focus.
+  const composerArea = workspaceAreaProps(
+    "composer",
+    2,
+    queuedRunEdit.isSaving ? "Message input" : undefined,
+  );
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
   const composerTimelineInsetRef = useRef(0);

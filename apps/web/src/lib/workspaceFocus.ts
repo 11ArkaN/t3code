@@ -148,7 +148,11 @@ export function createWorkspaceFocusController(doc: Document) {
     // so the conversation reuses a control only while it is still in view.
     const isConversation = area.dataset.workspaceArea === "conversation";
     const targets = new Set([
-      previous && belongs(previous) && (!isConversation || isInScrollView(previous))
+      // An area that took focus itself because its controls were inert is no history to restore.
+      previous &&
+      previous !== area &&
+      belongs(previous) &&
+      (!isConversation || isInScrollView(previous))
         ? previous
         : undefined,
       isConversation ? undefined : restored,

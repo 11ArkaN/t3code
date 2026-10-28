@@ -85,6 +85,19 @@ describe("workspace area focus", () => {
     expect(document.activeElement).toBe(composer.button);
   });
 
+  it("returns to an area's control once it is usable again, not to the area itself", () => {
+    using fixture = setup();
+    const sidebar = fixture.area("sidebar", 0);
+    const composer = fixture.area("composer", 2);
+    composer.button.inert = true;
+    expect(fixture.controller.focus("composer")).toBe(true);
+    expect(document.activeElement).toBe(composer.element);
+    composer.button.inert = false;
+    sidebar.button.focus();
+    fixture.controller.move(1);
+    expect(document.activeElement).toBe(composer.button);
+  });
+
   it("keeps focus inside a dialog or an open popup", () => {
     using fixture = setup();
     fixture.area("sidebar", 0);
