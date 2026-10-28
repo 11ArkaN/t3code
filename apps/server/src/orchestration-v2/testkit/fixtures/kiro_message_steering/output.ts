@@ -8,14 +8,11 @@ import {
   assertSemanticProjectionIntegrity,
   assertUserMessageInputIntents,
   assertUserMessagesInclude,
+  field,
   MESSAGE_STEERING_STEER_PROMPT,
   projectionFor,
 } from "../shared.ts";
 import { KIRO_MESSAGE_STEERING_PROMPT } from "./input.ts";
-
-function field(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
-}
 
 export function assertKiroMessageSteeringOutput(
   result: OrchestratorV2ScenarioResult,

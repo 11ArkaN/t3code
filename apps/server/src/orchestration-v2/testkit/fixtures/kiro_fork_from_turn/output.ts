@@ -2,11 +2,7 @@ import { assert } from "@effect/vitest";
 import type { ProviderReplayTranscript } from "@t3tools/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
-import { assertBaseProjection, assertSemanticProjectionIntegrity } from "../shared.ts";
-
-function field(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
-}
+import { assertBaseProjection, assertSemanticProjectionIntegrity, field } from "../shared.ts";
 
 export function assertKiroForkFromTurnOutput(
   result: OrchestratorV2ScenarioResult,

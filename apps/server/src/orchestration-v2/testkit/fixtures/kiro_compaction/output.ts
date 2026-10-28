@@ -5,13 +5,10 @@ import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts
 import {
   assertBaseProjection,
   assertSemanticProjectionIntegrity,
+  field,
   projectionFor,
 } from "../shared.ts";
 import { KIRO_COMPACTION_MARKER } from "./input.ts";
-
-function field(value: unknown, key: string): unknown {
-  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
-}
 
 function promptText(frame: unknown): string {
   const prompt = field(field(frame, "params"), "prompt");
