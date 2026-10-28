@@ -1,13 +1,19 @@
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
-import { Fragment, type ReactNode } from "react";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { Fragment, useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
+import { KeyboardController } from "react-native-keyboard-controller";
 import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { cn } from "../../lib/cn";
+import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { WorkingTimer } from "./floating-working-control";
 import type { FloatingWorkingStatus, RunStatusSegment } from "./floating-working-status";
+import { ThreadBackgroundWorkPopover } from "./ThreadBackgroundWorkSheet";
+
+type ThreadRef = { readonly environmentId: EnvironmentId; readonly threadId: ThreadId };
 
 const ROW_HEIGHT = 36;
 /** The row plus the gap to the card or composer below it. */
@@ -24,6 +30,7 @@ export function ComposerStatusRow(props: {
   readonly height: SharedValue<number>;
   readonly lift: SharedValue<number>;
   readonly contentMaxWidth: number | undefined;
+  readonly threadRef: ThreadRef;
   readonly status: FloatingWorkingStatus | null;
   readonly agents: SubagentPillSegment | null;
   readonly onOpenAgents: () => void;
@@ -136,7 +143,12 @@ export function ComposerStatusRow(props: {
             <View className="pb-1">
               <RowSurface className="flex-row items-center">
                 {props.status !== null ? (
-                  <StatusSegment status={props.status} />
+                  // Keyed so a popover opened for one status never reopens for the next.
+                  <StatusSegment
+                    key={props.status.kind}
+                    status={props.status}
+                    threadRef={props.threadRef}
+                  />
                 ) : (
                   <View className="flex-1" />
                 )}
@@ -173,12 +185,24 @@ function RowSurface(props: { readonly className: string; readonly children: Reac
   );
 }
 
-function StatusSegment(props: { readonly status: FloatingWorkingStatus }) {
+function StatusSegment(props: {
+  readonly status: FloatingWorkingStatus;
+  readonly threadRef: ThreadRef;
+}) {
   const { status } = props;
-  const onPress =
-    status.kind === "connection" || status.kind === "child-input" || status.kind === "background"
-      ? status.onPress
+  const { layout } = useAdaptiveWorkspaceLayout();
+  const [workPopoverOpen, setWorkPopoverOpen] = useState(false);
+  // iPad lists background work in a popover at this label, like desktop; phones keep the sheet.
+  // It opens once the keyboard is down, so the label it points at has stopped moving.
+  const openWorkPopover =
+    status.kind === "background" && layout.usesSplitView
+      ? () => void KeyboardController.dismiss().then(() => setWorkPopoverOpen(true))
       : null;
+  const onPress =
+    openWorkPopover ??
+    (status.kind === "connection" || status.kind === "child-input" || status.kind === "background"
+      ? status.onPress
+      : null);
   const action = status.kind === "background" || status.kind === "lifecycle" ? status.action : null;
   const icon = statusIcon(status);
   const content = (
@@ -213,6 +237,12 @@ function StatusSegment(props: { readonly status: FloatingWorkingStatus }) {
           className={`${labelClassName} active:opacity-70`}
         >
           {content}
+          {workPopoverOpen ? (
+            <ThreadBackgroundWorkPopover
+              {...props.threadRef}
+              onClose={() => setWorkPopoverOpen(false)}
+            />
+          ) : null}
         </Pressable>
       ) : (
         <View

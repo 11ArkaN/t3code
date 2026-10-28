@@ -160,7 +160,7 @@ export function ThreadPanel(props: {
         </ScrollView>
       ) : null}
       <View className="flex-1">
-        <InThreadPanelContext value>{props.children(tab)}</InThreadPanelContext>
+        <InThreadPanelContext value={presentation}>{props.children(tab)}</InThreadPanelContext>
       </View>
     </View>
   );

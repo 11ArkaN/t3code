@@ -561,6 +561,17 @@ export function buildReviewSectionItems(input: {
   return [...turnItems, ...visibleGitItems];
 }
 
+/** The review header's two lines. A branch diff puts its base on the second ("Changes", "vs main"). */
+export function reviewSectionHeading(
+  section: Pick<ReviewSectionItem, "kind" | "title" | "source"> | null,
+): { readonly title: string; readonly base: string | null } {
+  if (section === null) return { title: "Review changes", base: null };
+  const baseRef = section.kind === "branch-range" ? section.source?.baseRef : null;
+  return baseRef
+    ? { title: CHANGES_TITLE, base: `vs ${baseRef}` }
+    : { title: section.title, base: null };
+}
+
 export function getDefaultReviewSectionId(
   sections: ReadonlyArray<ReviewSectionItem>,
 ): string | null {

@@ -6,15 +6,21 @@ import { vcsEnvironment } from "../../state/vcs";
 import { useThreadGitToolbarActions } from "../threads/ThreadGitControls";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ReviewSectionItem } from "./reviewModel";
-import type { AppBarAction, AppBarMenuItem } from "../../components/ui/AppBar.types";
+import type {
+  AppBarAction,
+  AppBarMenuAction,
+  AppBarMenuItem,
+} from "../../components/ui/AppBar.types";
 import type { AppSymbolName } from "../../components/ui/AppSymbol";
 
 interface ReviewHeaderPresentation {
   readonly title: string;
   readonly subtitle: string;
   readonly gitActions: ReadonlyArray<AppBarAction>;
+  readonly menuTitle: string;
   readonly menuIcon: AppSymbolName;
   readonly refreshAction?: AppBarMenuItem;
+  readonly wrapAction?: AppBarMenuAction;
 }
 
 export function useReviewHeaderPresentation(props: {
@@ -25,6 +31,9 @@ export function useReviewHeaderPresentation(props: {
   readonly androidSubtitle: string;
   readonly selectedThreadCwd: string | null;
   readonly selectedSection: ReviewSectionItem | null;
+  /** Null while no diff shows, so there are no lines to wrap. */
+  readonly wordWrap: boolean | null;
+  readonly onToggleWordWrap: () => void;
   readonly onRefresh: () => Promise<void>;
 }): ReviewHeaderPresentation {
   const { selectedThread } = useThreadSelection();
@@ -52,7 +61,19 @@ export function useReviewHeaderPresentation(props: {
   return {
     title: props.title,
     subtitle: props.subtitle,
+    menuTitle: "More",
     menuIcon: "ellipsis",
     gitActions: gitActionsAvailable ? toolbarActions : [],
+    ...(props.wordWrap === null
+      ? {}
+      : {
+          wrapAction: {
+            id: "word-wrap",
+            title: "Word wrap",
+            icon: "text.alignleft",
+            selected: props.wordWrap,
+            onPress: props.onToggleWordWrap,
+          },
+        }),
   };
 }

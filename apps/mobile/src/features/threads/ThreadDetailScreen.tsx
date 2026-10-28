@@ -1469,6 +1469,10 @@ function ThreadDetailBody(props: ThreadDetailScreenProps) {
                     segments={statusRowSegments}
                     height={runStatusHeight}
                     contentMaxWidth={contentMaxWidth}
+                    threadRef={{
+                      environmentId: props.environmentId,
+                      threadId: props.selectedThread.id,
+                    }}
                   />
                 ) : null}
                 <View

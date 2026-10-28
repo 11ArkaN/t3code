@@ -37,6 +37,7 @@ import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/n
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { Keyboard, Platform, View, useWindowDimensions, type ViewStyle } from "react-native";
+import { KeyboardController } from "react-native-keyboard-controller";
 import { composerImageGallery } from "../../lib/composerImageGallery";
 import { filePreviewGallery } from "../../lib/filePreviewGallery";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
@@ -126,7 +127,10 @@ import {
 } from "../voice-input/ComposerDictationControl";
 import { useVoiceInputController } from "../voice-input/useVoiceInputController";
 import { resolveVoiceComposerPresentation } from "../voice-input/voiceInputPresentation";
-import type { ExistingThreadSettingsRouteParams } from "./ThreadSettingsSheet";
+import {
+  ThreadSettingsPopover,
+  type ExistingThreadSettingsRouteParams,
+} from "./ThreadSettingsSheet";
 import {
   compatibleRuntimeModeForChoices,
   resolveComposerControlsPresentation,
@@ -442,9 +446,16 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const pendingNativeImagePasteCountRef = useRef(0);
   const [pendingPastedTextAttachmentCount, setPendingPastedTextAttachmentCount] = useState(0);
   const settingsRoutePresentedRef = useRef(false);
+  const [settingsPopoverOpen, setSettingsPopoverOpen] = useState(false);
   const settingsSheetPresentation = useThreadSettingsSheetPresentation({
     editorRef: inputRef,
     onPresent: () => {
+      // iPad opens the picker as a popover at the model chip, like desktop; phones push the
+      // sheet. The popover waits for the keyboard to leave, so the chip has stopped moving.
+      if (settingsAnchorsPopover) {
+        void KeyboardController.dismiss().then(() => setSettingsPopoverOpen(true));
+        return;
+      }
       if (settingsRoutePresentedRef.current) return;
       settingsRoutePresentedRef.current = true;
       // The draft composer edits the new-task flow, which owns its own settings route.
@@ -599,6 +610,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const isVoiceInputPresented = voicePresentation.statusLabel !== null;
   const isExpanded = isFocused || settingsSheetPresentation.keepsComposerExpanded;
   const { layout, setComposerEditing } = useAdaptiveWorkspaceLayout();
+  const settingsAnchorsPopover = Platform.OS === "ios" && layout.usesSplitView;
+  const closeSettingsPopover = () => {
+    setSettingsPopoverOpen(false);
+    settingsSheetPresentation.onDismissed();
+  };
   const floatingSidebarComposer = useAndroidFloatingTabs() && layout.usesSplitView;
   const usesLargeControls =
     useSidebarWorkspaceTabs() === "picker" || (Platform.OS === "ios" && Platform.isPad);
@@ -874,7 +890,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   );
   const settingsChips = controls ? (
     <>
-      <View className="min-w-0 shrink">
+      <View className="min-w-0 shrink" collapsable={false}>
         <ComposerModelControl
           size={controlSize}
           modelOption={currentModelOption}
@@ -884,6 +900,20 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
           surfaceColor={composerPanel}
           onPress={openSettings}
         />
+        {settingsPopoverOpen ? (
+          <ThreadSettingsPopover
+            thread={
+              props.isDraft
+                ? null
+                : {
+                    environmentId: props.environmentId,
+                    threadId: props.selectedThread.id,
+                    draftKey: composerDraftKey,
+                  }
+            }
+            onClose={closeSettingsPopover}
+          />
+        ) : null}
       </View>
       {controls.showsTraits ? (
         <View className="min-w-0 shrink">

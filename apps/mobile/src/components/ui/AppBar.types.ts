@@ -13,16 +13,18 @@ export interface AppBarAction {
   readonly tintColor?: ColorValue;
 }
 
+export interface AppBarMenuAction {
+  readonly id: string;
+  readonly title: string;
+  readonly icon?: string;
+  readonly subtitle?: string;
+  readonly disabled?: boolean;
+  readonly selected?: boolean;
+  readonly onPress: () => void;
+}
+
 export type AppBarMenuItem =
-  | {
-      readonly id: string;
-      readonly title: string;
-      readonly icon?: string;
-      readonly subtitle?: string;
-      readonly disabled?: boolean;
-      readonly selected?: boolean;
-      readonly onPress: () => void;
-    }
+  | AppBarMenuAction
   | {
       readonly id: string;
       readonly title?: string;

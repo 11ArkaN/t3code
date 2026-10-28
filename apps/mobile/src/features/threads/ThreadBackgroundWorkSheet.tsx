@@ -20,18 +20,21 @@ import { Platform, Pressable, ScrollView, View } from "react-native";
 import { ScreenStack } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AnchoredPopover } from "../../components/ui/AnchoredPopover";
 import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenContent } from "../../components/ui/ScreenContent";
+import { SheetHeader } from "../../components/ui/SheetHeader";
 import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { NativeHeader, NativeScreen } from "../../native/ThemedScreenStack";
 import { useEnvironmentScope } from "../../state/session";
 import { environmentThreadShells, threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
+import { useOpenLinkedThread } from "./useOpenLinkedThread";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 const KIND_LABELS = {
@@ -48,34 +51,7 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const target = route.params;
-  const thread = useAtomValue(
-    environmentThreadShells.threadShellAtom(scopeThreadRef(target.environmentId, target.threadId)),
-  );
-  const presentation = presentPendingBackgroundWork(thread?.pendingBackgroundTasks ?? []);
-  const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
-  const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
-    reportFailure: false,
-  });
-  const [stopping, setStopping] = useState(false);
-  // Desktop's Stop: interrupting the turn ends its background commands and subagents.
-  const stop = async () => {
-    setStopping(true);
-    const result = await interruptThreadTurn({
-      environmentId: target.environmentId,
-      input: { threadId: target.threadId },
-    });
-    // An accepted interrupt can leave tasks running a moment longer; allow a retry.
-    setStopping(false);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      const error = squashAtomCommandFailure(result);
-      Dialog.alert(
-        "Could not stop background work",
-        error instanceof Error ? error.message : "Try again.",
-      );
-    }
-  };
   const openThread = (threadId: ThreadId) => {
-    void Haptics.selectionAsync();
     // A thread replaces the leaf sheet so workspace back navigation still works.
     navigation.dispatch(
       StackActions.replace("Thread", { environmentId: target.environmentId, threadId }),
@@ -89,27 +65,7 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
       contentContainerClassName="px-5 pb-6"
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
     >
-      {presentation === null ? (
-        <Text className="pt-6 text-center text-sm text-foreground-muted">
-          Nothing running in the background.
-        </Text>
-      ) : (
-        <>
-          {presentation.items.map((item) => (
-            <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
-          ))}
-          <View className="pt-4">
-            <Button
-              label={stopping ? "Stopping..." : "Stop"}
-              accessibilityLabel="Stop background work"
-              tone="danger"
-              fullWidth
-              disabled={!canOperate || stopping}
-              onPress={() => void stop()}
-            />
-          </View>
-        </>
-      )}
+      <BackgroundWorkList target={target} onOpenThread={openThread} />
     </ScrollView>
   );
   if (Platform.OS === "ios") {
@@ -147,6 +103,90 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
       <AndroidSheetHeader title="Background work" onBack={() => navigation.goBack()} />
       <ScreenContent insetHorizontal={layout.usesSplitView}>{content}</ScreenContent>
     </View>
+  );
+}
+
+/** iPad: the work list as a popover at the run status label that opened it, like desktop's. */
+export function ThreadBackgroundWorkPopover(
+  props: BackgroundWorkTarget & { readonly onClose: () => void },
+) {
+  const openLinkedThread = useOpenLinkedThread();
+  return (
+    <AnchoredPopover width={380} onClose={props.onClose}>
+      <View>
+        <SheetHeader presentation="inline" title="Background work" onClose={props.onClose} />
+        <ScrollView style={{ maxHeight: 420 }} contentContainerClassName="px-5 pb-4">
+          <BackgroundWorkList
+            target={props}
+            onOpenThread={(threadId) => {
+              props.onClose();
+              openLinkedThread({
+                environmentId: String(props.environmentId),
+                threadId: String(threadId),
+              });
+            }}
+          />
+        </ScrollView>
+      </View>
+    </AnchoredPopover>
+  );
+}
+
+function BackgroundWorkList(props: {
+  readonly target: BackgroundWorkTarget;
+  readonly onOpenThread: (threadId: ThreadId) => void;
+}) {
+  const { target } = props;
+  const thread = useAtomValue(
+    environmentThreadShells.threadShellAtom(scopeThreadRef(target.environmentId, target.threadId)),
+  );
+  const presentation = presentPendingBackgroundWork(thread?.pendingBackgroundTasks ?? []);
+  const canOperate = useEnvironmentScope(target.environmentId, AuthOrchestrationOperateScope);
+  const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
+    reportFailure: false,
+  });
+  const [stopping, setStopping] = useState(false);
+  // Desktop's Stop: interrupting the turn ends its background commands and subagents.
+  const stop = async () => {
+    setStopping(true);
+    const result = await interruptThreadTurn({
+      environmentId: target.environmentId,
+      input: { threadId: target.threadId },
+    });
+    // An accepted interrupt can leave tasks running a moment longer; allow a retry.
+    setStopping(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      Dialog.alert(
+        "Could not stop background work",
+        error instanceof Error ? error.message : "Try again.",
+      );
+    }
+  };
+  const openThread = (threadId: ThreadId) => {
+    void Haptics.selectionAsync();
+    props.onOpenThread(threadId);
+  };
+  return presentation === null ? (
+    <Text className="pt-6 text-center text-sm text-foreground-muted">
+      Nothing running in the background.
+    </Text>
+  ) : (
+    <>
+      {presentation.items.map((item) => (
+        <BackgroundWorkRow key={item.taskId} item={item} onOpen={openThread} />
+      ))}
+      <View className="pt-4">
+        <Button
+          label={stopping ? "Stopping..." : "Stop"}
+          accessibilityLabel="Stop background work"
+          tone="danger"
+          fullWidth
+          disabled={!canOperate || stopping}
+          onPress={() => void stop()}
+        />
+      </View>
+    </>
   );
 }
 

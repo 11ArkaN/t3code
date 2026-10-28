@@ -1,4 +1,5 @@
 import { getPromptControlledTraits } from "@t3tools/client-runtime/model-traits";
+import { AnchoredPopover } from "../../components/ui/AnchoredPopover";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { Toolbar } from "../../components/ui/Toolbar";
 import * as Dialog from "../../components/ui/Dialog";
@@ -27,6 +28,8 @@ import {
   getProviderOptionCurrentValue,
 } from "@t3tools/shared/model";
 import {
+  NavigationContainer,
+  NavigationIndependentTree,
   useNavigation,
   useRoute,
   type RouteProp,
@@ -36,7 +39,15 @@ import { type NativeStackNavigationProp } from "@react-navigation/native-stack";
 import * as Haptics from "expo-haptics";
 import { AsyncResult } from "effect/reactivity";
 import { createContext, use, useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, Pressable, RefreshControl, ScrollView, TextInput, View } from "react-native";
+import {
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -56,6 +67,7 @@ import {
   type ProviderGroup,
 } from "../../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
+import { useMobileNavigationTheme } from "../../lib/useMobileNavigationTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import {
   rememberModelOptions,
@@ -77,7 +89,7 @@ import {
 import { useQuietThreadStructure } from "../../state/use-thread-detail";
 import { activeComposerDraftKey, useQueuedRunEdit } from "../../state/queued-run-edit";
 import { updateThreadDraftModelSelection } from "../../state/use-thread-composer-state";
-import { useThreadSelection } from "../../state/use-thread-selection";
+import { useResolvedThreadSelection } from "../../state/use-thread-selection";
 import { threadAllowsProviderSwitch } from "../../state/thread-provider-switching";
 import { environmentServerConfigsAtom, serverEnvironment } from "../../state/server";
 import { mobilePreferencesAtom } from "../../state/preferences";
@@ -1367,15 +1379,18 @@ function ThreadSettingsChoiceScreen() {
   );
 }
 
-function ThreadSettingsPickerNavigator(props: ThreadSettingsPickerPresentation) {
+function ThreadSettingsPickerNavigator(
+  props: ThreadSettingsPickerPresentation & { readonly independent?: boolean },
+) {
   const theme = useUniwindTheme();
+  const navigationTheme = useMobileNavigationTheme();
   const solidSheetBackground = theme["--color-sheet-solid"];
   const foreground = theme["--color-foreground"];
   const presentation = {
     onClose: props.onClose,
   };
 
-  return (
+  const navigator = (
     <ThreadSettingsPickerPresentationContext.Provider value={presentation}>
       <ThreadSettingsPickerStack.Navigator
         initialRouteName="ThreadSettingsModels"
@@ -1411,33 +1426,73 @@ function ThreadSettingsPickerNavigator(props: ThreadSettingsPickerPresentation) 
       </ThreadSettingsPickerStack.Navigator>
     </ThreadSettingsPickerPresentationContext.Provider>
   );
+  // A popover is outside the app's stack, so its picker keeps its own navigation state.
+  return props.independent ? (
+    <NavigationIndependentTree>
+      <NavigationContainer theme={navigationTheme}>{navigator}</NavigationContainer>
+    </NavigationIndependentTree>
+  ) : (
+    navigator
+  );
 }
 
+type ThreadSettingsPickerProps = {
+  readonly onClose: () => void;
+  readonly independent?: boolean;
+};
+
 export function ThreadSettingsPickerScreen(
-  props: ThreadSettingsSessionProps & { readonly onClose: () => void },
+  props: ThreadSettingsSessionProps & ThreadSettingsPickerProps,
 ) {
   return (
     <ThreadSettingsSessionProvider {...props}>
-      <ThreadSettingsPickerNavigator onClose={props.onClose} />
+      <ThreadSettingsPickerNavigator onClose={props.onClose} independent={props.independent} />
     </ThreadSettingsSessionProvider>
+  );
+}
+
+/** iPad: the picker as a popover at the composer's model chip, like desktop's. */
+export function ThreadSettingsPopover(props: {
+  /** Null for a new thread, whose draft lives in the new-task flow. */
+  readonly thread: ExistingThreadSettingsRouteParams | null;
+  readonly onClose: () => void;
+}) {
+  const { height } = useWindowDimensions();
+  return (
+    <AnchoredPopover
+      width={400}
+      height={Math.min(600, Math.round(height * 0.7))}
+      onClose={props.onClose}
+    >
+      {props.thread === null ? (
+        <NewTaskThreadSettingsPicker onClose={props.onClose} independent />
+      ) : (
+        <ExistingThreadSettingsPicker {...props.thread} onClose={props.onClose} independent />
+      )}
+    </AnchoredPopover>
   );
 }
 
 export function ExistingThreadSettingsRouteScreen({
   route,
 }: StaticScreenProps<ExistingThreadSettingsRouteParams>) {
-  const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
-  // Reads the same environmentId/threadId params as the Thread route beneath it.
+  const navigation = useNavigation();
+  return <ExistingThreadSettingsPicker {...route.params} onClose={() => navigation.goBack()} />;
+}
+
+function ExistingThreadSettingsPicker(
+  props: ExistingThreadSettingsRouteParams & ThreadSettingsPickerProps,
+) {
   const { selectedThread, selectedThreadDetailRef, selectedEnvironmentRuntime } =
-    useThreadSelection();
+    useResolvedThreadSelection(props);
   // Streamed text would otherwise re-render the whole model picker on every delta.
   const structure = useQuietThreadStructure(selectedThreadDetailRef);
   const reportedModelSelection = useThreadReportedModelSelection(selectedThreadDetailRef);
-  const threadKey = scopedThreadKey(route.params.environmentId, route.params.threadId);
+  const threadKey = scopedThreadKey(props.environmentId, props.threadId);
   const draftSettings = useComposerDraftSettings(threadKey);
   const queuedRunEdit = useQueuedRunEdit(threadKey);
   // A queued edit can end while the sheet is open; the prompt then belongs to the thread's draft.
-  const draftKey = activeComposerDraftKey(threadKey, route.params.draftKey, queuedRunEdit);
+  const draftKey = activeComposerDraftKey(threadKey, props.draftKey, queuedRunEdit);
   const prompt = useComposerDraft(draftKey).text;
 
   if (!selectedThread) {
@@ -1490,15 +1545,20 @@ export function ExistingThreadSettingsRouteScreen({
       }}
       runtimeMode={draftSettings.runtimeMode ?? selectedThread.runtimeMode}
       onUpdateRuntimeMode={(runtimeMode) => updateComposerDraftSettings(threadKey, { runtimeMode })}
-      onClose={() => navigation.goBack()}
+      onClose={props.onClose}
+      independent={props.independent}
     />
   );
 }
 
 /** RNS owns nested sheet dismissal; Reasoning and Runtime remain ordinary pushes. */
 export function NewTaskThreadSettingsRouteScreen() {
+  const navigation = useNavigation();
+  return <NewTaskThreadSettingsPicker onClose={() => navigation.goBack()} />;
+}
+
+function NewTaskThreadSettingsPicker(props: ThreadSettingsPickerProps) {
   const flow = useNewTaskFlow();
-  const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   const optionDescriptors = resolveProviderOptionDescriptors({
     capabilities: flow.selectedModelOption?.capabilities,
     selections: flow.selectedModel?.options,
@@ -1519,7 +1579,8 @@ export function NewTaskThreadSettingsRouteScreen() {
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
-      onClose={() => navigation.goBack()}
+      onClose={props.onClose}
+      independent={props.independent}
     />
   );
 }

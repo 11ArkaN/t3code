@@ -8,6 +8,7 @@ export function useReviewHeaderPresentation(
     title: "Review changes",
     subtitle: props.androidSubtitle || "Select a diff",
     gitActions: [],
+    menuTitle: "Select diff",
     menuIcon: "ellipsis.circle",
     refreshAction: {
       id: "refresh",

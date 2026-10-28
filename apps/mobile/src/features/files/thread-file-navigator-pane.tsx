@@ -44,7 +44,7 @@ export function ThreadFileNavigatorPane(props: {
 }) {
   const [searchQuery, setSearchQuery] = useState("");
   const searchRef = useRef<TextInputInstance>(null);
-  const inPanel = use(InThreadPanelContext);
+  const inPanel = use(InThreadPanelContext) !== null;
   const { toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const { themeAppearance: highlightTheme } = useAppearancePreferences();
   const theme = useUniwindTheme();

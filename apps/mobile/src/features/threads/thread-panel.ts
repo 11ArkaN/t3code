@@ -38,8 +38,8 @@ const TABS_SHOWN_IN_PANEL: Record<ThreadPanelPresentation, ReadonlySet<ThreadPan
   column: new Set(["terminal", "files", "diff", "device"]),
 };
 
-/** True under the panel's tab strip, which is the only header its tabs show. */
-export const InThreadPanelContext = createContext(false);
+/** The panel's presentation under its tab strip, which is the only header its tabs show. */
+export const InThreadPanelContext = createContext<ThreadPanelPresentation | null>(null);
 
 export function threadPanelShowsTab(tab: ThreadPanelTab, presentation: ThreadPanelPresentation) {
   return TABS_SHOWN_IN_PANEL[presentation].has(tab);

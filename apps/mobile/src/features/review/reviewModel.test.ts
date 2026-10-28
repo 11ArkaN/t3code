@@ -4,6 +4,7 @@ import {
   applyReviewDiffMetadata,
   buildReviewParsedDiff,
   resolveReviewSelectedSectionId,
+  reviewSectionHeading,
   type ReviewSectionItem,
 } from "./reviewModel";
 
@@ -29,6 +30,29 @@ describe("resolveReviewSelectedSectionId", () => {
   it("shows the default while the picked section loads and returns to the pick once it does", () => {
     expect(resolveReviewSelectedSectionId([changes], "turn:2")).toBe("git:branch-range");
     expect(resolveReviewSelectedSectionId([turn, changes], "turn:2")).toBe("turn:2");
+  });
+});
+
+describe("reviewSectionHeading", () => {
+  it("moves a branch diff's base to the second line so a narrow header never cuts it", () => {
+    const source = {
+      id: "branch-range",
+      kind: "branch-range",
+      title: "Changes vs origin/main",
+      baseRef: "origin/main",
+      headRef: "HEAD",
+      diff: "",
+      diffHash: "hash",
+      truncated: false,
+    } as const;
+    expect(
+      reviewSectionHeading({ kind: "branch-range", title: "Changes vs origin/main", source }),
+    ).toEqual({ title: "Changes", base: "vs origin/main" });
+    expect(reviewSectionHeading(makeSection("git:branch-range"))).toEqual({
+      title: "git:branch-range",
+      base: null,
+    });
+    expect(reviewSectionHeading(makeSection("turn:2"))).toEqual({ title: "turn:2", base: null });
   });
 });
 

@@ -2,12 +2,21 @@ import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime
 import { AsyncResult } from "effect/reactivity";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import {
+  CommonActions,
+  StackActions,
+  useNavigation,
+  type StaticScreenProps,
+} from "@react-navigation/native";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { AppBar } from "../../components/ui/AppBar";
-import type { AppBarAction, AppBarMenuItem } from "../../components/ui/AppBar.types";
-import type { ReviewSectionItem } from "./reviewModel";
+import type {
+  AppBarAction,
+  AppBarMenuAction,
+  AppBarMenuItem,
+} from "../../components/ui/AppBar.types";
+import { reviewSectionHeading, type ReviewSectionItem } from "./reviewModel";
 import { useReviewHeaderPresentation } from "./useReviewHeaderPresentation";
 import { Screen, ScreenStack, ScreenStackHeaderConfig } from "react-native-screens";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -29,6 +38,7 @@ import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { IconButton } from "../../components/ui/IconButton";
+import { Menu } from "../../components/ui/Menu";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { cn } from "../../lib/cn";
@@ -67,6 +77,17 @@ import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail"
 import { ListFilterMenu } from "../workspace/ListFilterMenu";
 import { InThreadPanelContext } from "../threads/thread-panel";
 
+/** Git's bar buttons as rows of a "…" menu, where the bar has room for one button. */
+function gitMenuItems(actions: ReadonlyArray<AppBarAction>): ReadonlyArray<AppBarMenuAction> {
+  return actions.map((action) => ({
+    id: `git:${action.accessibilityLabel}`,
+    title: action.accessibilityLabel,
+    icon: typeof action.icon === "string" ? action.icon : action.icon.ios,
+    disabled: action.disabled,
+    onPress: action.onPress,
+  }));
+}
+
 function ReviewHeader(
   props: Parameters<typeof useReviewHeaderPresentation>[0] & {
     readonly iconColor: string;
@@ -77,10 +98,12 @@ function ReviewHeader(
     readonly onReturnToThread: () => void;
   },
 ) {
-  const { panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
+  const { layout, panes, toggleAuxiliaryPane } = useAdaptiveWorkspaceLayout();
   const presentation = useReviewHeaderPresentation(props);
+  // A phone's bar fits one button beside a full title, so Git moves into the "…" menu there.
+  const gitInMenu = !layout.usesSplitView;
   const actions: ReadonlyArray<AppBarAction> = [
-    ...presentation.gitActions,
+    ...(gitInMenu ? [] : presentation.gitActions),
     ...(props.showChangedFilesToggle
       ? [
           {
@@ -103,6 +126,40 @@ function ReviewHeader(
       if (section) props.onSelectSection(section.id);
     },
   });
+  const gitItems = gitInMenu ? gitMenuItems(presentation.gitActions) : [];
+  const menuItems: ReadonlyArray<AppBarMenuItem> = [
+    ...(props.showSectionToolbar
+      ? [
+          {
+            id: "sections",
+            inline: true,
+            items: [
+              sectionAction(props.sectionMenu.branchChanges, "Changes"),
+              sectionAction(props.sectionMenu.workingTree, "Uncommitted"),
+              sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
+            ],
+          },
+          ...(props.sectionMenu.turns.length > 0
+            ? [
+                {
+                  id: "turns",
+                  title: "Turn",
+                  items: props.sectionMenu.turns.map((section) => ({
+                    id: `section:${section.id}`,
+                    title: section.title,
+                    subtitle: section.subtitle ?? undefined,
+                    selected: section.id === props.selectedSection?.id,
+                    onPress: () => props.onSelectSection(section.id),
+                  })),
+                },
+              ]
+            : []),
+          ...(presentation.refreshAction ? [presentation.refreshAction] : []),
+        ]
+      : []),
+    ...(presentation.wrapAction ? [presentation.wrapAction] : []),
+    ...(gitItems.length > 0 ? [{ id: "git", inline: true, items: gitItems }] : []),
+  ];
   return (
     <AppBar
       title={presentation.title}
@@ -113,40 +170,8 @@ function ReviewHeader(
       backInSplitView={{ accessibilityLabel: "Back to chat", icon: "chevron.left" }}
       actions={actions.length > 0 ? actions : undefined}
       menus={
-        props.showSectionToolbar
-          ? [
-              {
-                title: "Select diff",
-                icon: presentation.menuIcon,
-                items: [
-                  {
-                    id: "sections",
-                    inline: true,
-                    items: [
-                      sectionAction(props.sectionMenu.branchChanges, "Changes"),
-                      sectionAction(props.sectionMenu.workingTree, "Uncommitted"),
-                      sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
-                    ],
-                  },
-                  ...(props.sectionMenu.turns.length > 0
-                    ? [
-                        {
-                          id: "turns",
-                          title: "Turn",
-                          items: props.sectionMenu.turns.map((section) => ({
-                            id: `section:${section.id}`,
-                            title: section.title,
-                            subtitle: section.subtitle ?? undefined,
-                            selected: section.id === props.selectedSection?.id,
-                            onPress: () => props.onSelectSection(section.id),
-                          })),
-                        },
-                      ]
-                    : []),
-                  ...(presentation.refreshAction ? [presentation.refreshAction] : []),
-                ],
-              },
-            ]
+        menuItems.length > 0
+          ? [{ title: presentation.menuTitle, icon: presentation.menuIcon, items: menuItems }]
           : []
       }
     />
@@ -436,9 +461,14 @@ function ReviewPanelToolbar(
     readonly files: ReadonlyArray<ReviewNavigatorFile>;
     readonly onSelectSection: (sectionId: string) => void;
     readonly onSelectFile: (fileId: string) => void;
+    readonly onOpenFullReview: () => void;
   },
 ) {
-  const { gitActions } = useReviewHeaderPresentation(props);
+  const presentation = useReviewHeaderPresentation(props);
+  const moreItems = [
+    ...(presentation.wrapAction ? [presentation.wrapAction] : []),
+    ...gitMenuItems(presentation.gitActions),
+  ];
   const sectionAction = (section: ReviewSectionItem | null, title: string): MenuAction => ({
     id: section?.id ?? `unavailable:${title}`,
     title,
@@ -484,15 +514,30 @@ function ReviewPanelToolbar(
         />
       ) : null}
       <View className="flex-1" />
-      {gitActions.map((action) => (
-        <IconButton
-          key={action.accessibilityLabel}
-          accessibilityLabel={action.accessibilityLabel}
-          icon={action.icon}
-          disabled={action.disabled}
-          onPress={action.onPress}
-        />
-      ))}
+      {moreItems.length > 0 ? (
+        <Menu
+          title={presentation.menuTitle}
+          actions={moreItems.map((item) => ({
+            id: item.id,
+            title: item.title,
+            image: item.icon,
+            ...(item.selected === undefined ? {} : { state: item.selected ? "on" : "off" }),
+            ...(item.disabled ? { attributes: { disabled: true } } : {}),
+          }))}
+          onPressAction={({ nativeEvent }) =>
+            moreItems.find((item) => item.id === nativeEvent.event)?.onPress()
+          }
+        >
+          <View pointerEvents="none">
+            <IconButton icon="ellipsis" accessibilityLabel={presentation.menuTitle} />
+          </View>
+        </Menu>
+      ) : null}
+      <IconButton
+        icon="arrow.up.left.and.arrow.down.right"
+        accessibilityLabel="Open full review"
+        onPress={props.onOpenFullReview}
+      />
     </View>
   );
 }
@@ -513,9 +558,10 @@ export function ReviewDiff(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
-  const inPanel = use(InThreadPanelContext);
+  const panel = use(InThreadPanelContext);
+  const inPanel = panel !== null;
   const { nativeReviewDiffStyle } = useAppearanceCodeSurface();
-  const { panes } = useAdaptiveWorkspaceLayout();
+  const { layout, panes } = useAdaptiveWorkspaceLayout();
   const navigation = useNavigation();
   const selectDetail = useSelectWorkspaceDetail();
   const insets = useSafeAreaInsets();
@@ -596,6 +642,13 @@ export function ReviewDiff(props: {
     selectedSection,
     nativeReviewDiffData,
   });
+  // Desktop wraps diff lines by default. On iOS a phone-width window or the panel cuts nearly
+  // every line, so those wrap unless toggled off; elsewhere the appearance setting decides.
+  const [wordWrapOverride, setWordWrapOverride] = useState<boolean | null>(null);
+  const wordWrap =
+    wordWrapOverride ??
+    (nativeReviewDiffStyle.wordWrap ||
+      (Platform.OS === "ios" && (inPanel || !layout.usesSplitView)));
   const nativeBridge = useNativeReviewDiffBridge({
     threadKey: reviewCache.threadKey,
     sectionId: selectedSection?.id ?? null,
@@ -605,6 +658,7 @@ export function ReviewDiff(props: {
     viewedFileIds,
     selectedRowIds: commentSelection.selectedRowIds,
     canHighlight: parsedDiff.kind === "files",
+    wordWrap,
   });
   const showcaseReviewKey =
     SHOWCASE_ENABLED && parsedDiff.kind === "files" && selectedSection
@@ -739,7 +793,9 @@ export function ReviewDiff(props: {
 
     return <>{children}</>;
   })();
+  const heading = reviewSectionHeading(selectedSection);
   const headerSubtitle = [
+    heading.base,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
     pendingReviewCommentCount > 0
@@ -748,18 +804,28 @@ export function ReviewDiff(props: {
   ]
     .filter(Boolean)
     .join(" · ");
-  const headerTitleText = selectedSection?.title ?? "Review changes";
+  const handleOpenFullReview = () => {
+    const params = { environmentId, threadId };
+    // The iPhone panel is a sheet, which the review replaces; a column stays beside it.
+    navigation.dispatch(
+      panel === "sheet"
+        ? StackActions.replace("ThreadReview", params)
+        : CommonActions.navigate("ThreadReview", params),
+    );
+  };
 
   const headerProps = {
     environmentId,
     threadId,
-    title: headerTitleText,
+    title: heading.title,
     subtitle: headerSubtitle,
     androidSubtitle: androidHeaderSubtitle,
     selectedThreadCwd,
     sectionMenu,
     selectedSection,
     showSectionToolbar,
+    wordWrap: showChangedFilesPane ? wordWrap : null,
+    onToggleWordWrap: () => setWordWrapOverride(!wordWrap),
     onRefresh: handlePullToRefresh,
     onSelectSection: selectSection,
   };
@@ -771,6 +837,7 @@ export function ReviewDiff(props: {
           {...headerProps}
           files={showChangedFilesPane ? nativeReviewDiffData.files : []}
           onSelectFile={(fileId) => void handleSelectFile(fileId)}
+          onOpenFullReview={handleOpenFullReview}
         />
       ) : (
         <ReviewHeader

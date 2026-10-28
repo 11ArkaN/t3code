@@ -21,6 +21,8 @@ export function useNativeReviewDiffBridge(input: {
   readonly viewedFileIds: ReadonlyArray<string>;
   readonly selectedRowIds: ReadonlyArray<string>;
   readonly canHighlight: boolean;
+  /** Overrides the appearance setting, for a screen with its own wrap toggle. */
+  readonly wordWrap?: boolean;
 }) {
   const {
     canHighlight,
@@ -58,7 +60,11 @@ export function useNativeReviewDiffBridge(input: {
     [collapsedCommentIds],
   );
   const themeJson = useMemo(() => JSON.stringify(theme), [theme]);
-  const styleJson = JSON.stringify(nativeReviewDiffStyle);
+  const styleJson = JSON.stringify(
+    input.wordWrap === undefined
+      ? nativeReviewDiffStyle
+      : { ...nativeReviewDiffStyle, wordWrap: input.wordWrap },
+  );
   const tokensResetKey = useMemo(
     () =>
       `${buildNativeReviewTokensResetKey({

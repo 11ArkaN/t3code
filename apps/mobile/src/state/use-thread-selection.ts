@@ -112,7 +112,8 @@ function threadDetailToShell(
   });
 }
 
-function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefined) {
+/** A thread's selection from explicit params, for views not under its route. */
+export function useResolvedThreadSelection(params: ThreadSelectionRouteParams | undefined) {
   const routeParams = params ?? {};
   const routeEnvironmentId = firstRouteParam(routeParams.environmentId);
   const routeThreadId = firstRouteParam(routeParams.threadId);

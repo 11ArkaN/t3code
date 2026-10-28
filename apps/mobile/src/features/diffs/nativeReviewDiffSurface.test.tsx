@@ -117,7 +117,10 @@ vi.mock("@t3tools/client-runtime/state/runtime", () => ({
   },
   squashAtomCommandFailure: () => "tokenization failed",
 }));
-vi.mock("../review/nativeReviewDiffAdapter", () => ({ createNativeReviewDiffTheme: () => ({}) }));
+vi.mock("../review/nativeReviewDiffAdapter", () => ({
+  createNativeReviewDiffTheme: () => ({}),
+  withNameFirstFileHeaders: (rows: unknown) => rows,
+}));
 vi.mock("../settings/appearance/useAppearanceCodeSurface", () => ({
   useAppearanceCodeSurface: () => ({ nativeReviewDiffStyle: {} }),
 }));
