@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { threadRouteIsHydrating } from "./thread-route-hydration";
+import { threadRouteIsHydrating, threadRouteOpensDraft } from "./thread-route-hydration";
 
 const settled = {
   isLoadingConnections: false,
@@ -87,5 +87,25 @@ describe("threadRouteIsHydrating", () => {
         detailStatus: "synchronizing",
       }),
     ).toBe(false);
+  });
+});
+
+describe("threadRouteOpensDraft", () => {
+  it("keeps the route while a reconnecting environment may still deliver the thread", () => {
+    expect(threadRouteOpensDraft({ connectionState: "reconnecting", detailStatus: "empty" })).toBe(
+      false,
+    );
+    expect(
+      threadRouteOpensDraft({ connectionState: "reconnecting", detailStatus: "synchronizing" }),
+    ).toBe(false);
+  });
+
+  it("opens a draft once the thread can't arrive", () => {
+    expect(
+      threadRouteOpensDraft({ connectionState: "reconnecting", detailStatus: "deleted" }),
+    ).toBe(true);
+    for (const connectionState of ["offline", "error", "available", "connected"] as const) {
+      expect(threadRouteOpensDraft({ connectionState, detailStatus: "empty" })).toBe(true);
+    }
   });
 });
