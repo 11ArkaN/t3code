@@ -24,7 +24,7 @@ vi.mock("../state/server", async (original) => {
   const { Atom } = await import("effect/reactivity");
   return {
     ...(await original<typeof import("../state/server")>()),
-    environmentServerConfigsAtom: Atom.make(new Map()),
+    environmentServerConfigsAtom: Atom.make(new Map([["local", {}]])),
   };
 });
 
@@ -54,11 +54,12 @@ const project = {
   },
 };
 const commitUrl = `https://github.com/Effect-TS/effect/commit/${"a".repeat(40)}?plain=1#diff-original`;
+const pullRequestCommitUrl = `https://github.com/Effect-TS/effect/pull/1/commits/${"a".repeat(40)}`;
 
-function CommitLink() {
+function CommitLink({ url = commitUrl }: { url?: string }) {
   const open = useOpenChangeRequestLink(threadRef);
   return (
-    <a href={commitUrl} onClick={(event) => open(event, commitUrl)}>
+    <a href={url} onClick={(event) => open(event, url)}>
       Commit
     </a>
   );
@@ -76,11 +77,15 @@ function setup() {
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
 }
 
-it.each(["shiftKey", "altKey"] as const)("keeps %s commit clicks native", async (modifier) => {
+it.each([
+  ["shiftKey", commitUrl],
+  ["altKey", commitUrl],
+  ["shiftKey", pullRequestCommitUrl],
+] as const)("keeps %s clicks on %s native", async (modifier, url) => {
   setup();
   await using screen = await render(
     <AppAtomRegistryProvider>
-      <CommitLink />
+      <CommitLink url={url} />
     </AppAtomRegistryProvider>,
   );
   const event = new MouseEvent("click", { bubbles: true, cancelable: true, [modifier]: true });

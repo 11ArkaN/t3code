@@ -137,11 +137,10 @@ export function useOpenChangeRequestLink(
         : null;
     const identity = commitProject?.repositoryIdentity;
     const parsedCommit = sourceControlClients.parseCommitUrl(targetUrl, identity?.provider);
+    // Shift and Alt keep their browser meaning (new window, download) on commit links.
+    if (parsedCommit !== null && (event.shiftKey || event.altKey)) return false;
     if (
       parsedCommit !== null &&
-      // Shift and Alt keep their browser meaning (new window, download) on commit links.
-      !event.shiftKey &&
-      !event.altKey &&
       commitThread &&
       resolvedThreadRef &&
       commitProject?.environmentId === resolvedThreadRef.environmentId &&
