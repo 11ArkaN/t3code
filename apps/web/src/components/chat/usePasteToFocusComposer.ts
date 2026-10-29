@@ -23,6 +23,7 @@ export function usePasteToFocusComposer(input: {
 }) {
   const { activeThreadId, composerRef, embedded, focusedSideChatId, sideComposerRef } = input;
   const pasteAsTextShortcutUntilRef = useRef(0);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- attaches window keydown and paste capture listeners that route stray pastes into the composer
   useEffect(() => {
     if (embedded) return;
     const keyHandler = (event: KeyboardEvent) => {
