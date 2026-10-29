@@ -152,29 +152,37 @@ function layerMockSpawner(
   );
 }
 
+/**
+ * A Serve daemon whose root a `serve --bg` write replaces. `racer` is another
+ * server's target written just after each of ours.
+ */
 function layerServeFixture(
   rootProxy: string | null,
   listener: object = { HTTPS: true },
   extra: object = {},
+  racer?: string,
 ) {
   const writes: Array<ReadonlyArray<string>> = [];
-  const serveStatus = JSON.stringify({
-    TCP: { "443": listener },
-    Web: {
-      "desktop.tail.ts.net:443": {
-        Handlers: {
-          ...(rootProxy === null ? {} : { "/": { Proxy: rootProxy } }),
-          "/keep/": { Proxy: "http://127.0.0.1:8081" },
-        },
-      },
-    },
-    ...extra,
-  });
+  let root = rootProxy;
   const layer = layerMockSpawner((_command, args) => {
     if (args.join(" ") === "serve status --json") {
-      return { stdout: serveStatus };
+      return {
+        stdout: JSON.stringify({
+          TCP: { "443": listener },
+          Web: {
+            "desktop.tail.ts.net:443": {
+              Handlers: {
+                ...(root === null ? {} : { "/": { Proxy: root } }),
+                "/keep/": { Proxy: "http://127.0.0.1:8081" },
+              },
+            },
+          },
+          ...extra,
+        }),
+      };
     }
     writes.push(args);
+    if (args.includes("--bg")) root = racer ?? args.at(-1)!;
     return {};
   });
   return { layer, writes };
@@ -637,9 +645,14 @@ describe("tailscale", () => {
         ["not-json", false],
       ] as const) {
         const writes: Array<ReadonlyArray<string>> = [];
+        let status: string = stdout;
         const layer = layerMockSpawner((_command, args) => {
-          if (args.join(" ") === "serve status --json") return { stdout };
+          if (args.join(" ") === "serve status --json") return { stdout: status };
           writes.push(args);
+          status = JSON.stringify({
+            TCP: { "443": { HTTPS: true } },
+            Web: { "desktop.tail.ts.net:443": { Handlers: { "/": { Proxy: args.at(-1) } } } },
+          });
           return {};
         });
         const claimed = yield* claimTailscaleServe({ localPort: 3773 }).pipe(
@@ -671,6 +684,19 @@ describe("tailscale", () => {
 
       yield* claimTailscaleServe({ localPort: 3773 }).pipe(Effect.provide(fixture.layer));
       assert.deepEqual(fixture.writes, [["serve", "--bg", "--https=443", "http://127.0.0.1:3773"]]);
+    }),
+  );
+
+  it.effect("reports a Serve port another server wrote at the same time as occupied", () =>
+    Effect.gen(function* () {
+      const fixture = layerServeFixture(null, { HTTPS: true }, {}, "http://127.0.0.1:3774");
+      const claimed = yield* claimTailscaleServe({ localPort: 3773 }).pipe(
+        Effect.result,
+        Effect.provide(fixture.layer),
+      );
+      assert.isTrue(
+        Result.isFailure(claimed) && claimed.failure._tag === "TailscaleServeOccupiedError",
+      );
     }),
   );
 

@@ -832,6 +832,12 @@ export const claimTailscaleServe = Effect.fn("tailscale.claimTailscaleServe")(fu
     return yield* new TailscaleServeOccupiedError({ servePort });
   }
   yield* ensureTailscaleServe(input);
+  // Serve has no conditional write, so a server that checked at the same time
+  // may have written after us. The caller retries and finds it live.
+  const after = tailscaleServePortHolder(yield* readTailscaleServeConfig, servePort);
+  if (after._tag !== "proxy" || after.target !== serveProxyTarget(input)) {
+    return yield* new TailscaleServeOccupiedError({ servePort });
+  }
 });
 
 /**
