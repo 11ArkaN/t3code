@@ -1,3 +1,4 @@
+import { themeAccentWithContrast } from "./colorContrast.ts";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -178,6 +179,8 @@ export function htmlRenderTheme(
   fonts: HtmlRenderFonts = HTML_RENDER_DEFAULT_FONTS,
 ): HtmlRenderTheme {
   const fixed = FIXED_COLORS[appearance];
+  // Charts draw lines and markers in the accent; WCAG 1.4.11 asks 3:1 for them on the canvas.
+  const accent = themeAccentWithContrast(colors.accent, [colors.canvas], 3);
   return {
     appearance,
     variables: {
@@ -196,7 +199,7 @@ export function htmlRenderTheme(
       "--ring": colors.focus,
       "--primary": colors.messageAction,
       "--primary-foreground": colors.messageActionForeground,
-      "--accent": colors.accent,
+      "--accent": accent,
       "--accent-foreground": colors.accentForeground,
       "--accent-surface": colors.accentSurface,
       "--accent-surface-foreground": colors.accentSurfaceForeground,
@@ -212,7 +215,7 @@ export function htmlRenderTheme(
       "--info-foreground": fixed.infoForeground,
       "--code-background": colors.codeBackground,
       "--code-foreground": colors.codeForeground,
-      "--chart-1": colors.accent,
+      "--chart-1": accent,
       ...Object.fromEntries(fixed.chart.map((color, index) => [`--chart-${index + 2}`, color])),
       "--radius": "0.625rem",
       "--font-sans": fonts.sans,
