@@ -279,6 +279,14 @@ describe("Pi MCP tool exposure", () => {
       "aliases duplicate the codemode catalog",
     );
 
+    const requestCount = bridge.requests.length;
+    bridge.restoreActiveTools(
+      bridge.getActiveTools().filter((name) => name !== "mcp__t3-code__delegate_task"),
+    );
+    const late = await bridge.callModelTool("mcp__t3_code__delegate_task", {});
+    assert.isTrue(late.isError, "an alias runs after its public tool was switched off");
+    assert.equal(bridge.requests.length, requestCount);
+
     bridge.restoreActiveTools(["read", "mcp__t3-code__task_status"]);
     await bridge.handlers.get("session_tree")!(event, discoveryContext);
     assert.deepEqual(
