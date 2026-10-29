@@ -132,9 +132,18 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       const installed = yield* command.install;
       expect(installed.installedPath).toBe(link);
       expect(installed.launcherPath).toBe(path.join(home, ".t3", "bin", "t3"));
-      expect(installed.pathCommand).toContain("$HOME/.local/bin");
+      expect(installed.pathSetup).toEqual({ file: "~/.zshrc", added: false });
       expect(yield* fs.readLink(link)).toBe(path.join(home, ".t3", "bin", "t3"));
       expect((yield* command.install).installedPath).toBe(link);
+
+      // Add to PATH appends one line, once, and keeps a final line with no newline intact.
+      const zshrc = path.join(home, ".zshrc");
+      yield* fs.writeFileString(zshrc, "# mine");
+      yield* command.addToPath;
+      expect((yield* command.addToPath).pathSetup).toEqual({ file: "~/.zshrc", added: true });
+      expect(yield* fs.readFileString(zshrc)).toBe(
+        '# mine\n# Added by T3 Code\nexport PATH="$HOME/.local/bin:$PATH"\n',
+      );
 
       expect((yield* command.uninstall).installedPath).toBeNull();
       expect(yield* fs.exists(link)).toBe(false);

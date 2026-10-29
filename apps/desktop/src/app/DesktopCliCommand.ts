@@ -9,7 +9,7 @@ import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { pathSetupCommand } from "@t3tools/shared/shell";
+import { pathSetup } from "@t3tools/shared/shell";
 
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -63,6 +63,8 @@ export class DesktopCliCommand extends Context.Service<
     readonly state: Effect.Effect<DesktopCliCommandState>;
     readonly install: Effect.Effect<DesktopCliCommandState, DesktopCliCommandError>;
     readonly uninstall: Effect.Effect<DesktopCliCommandState, DesktopCliCommandError>;
+    /** Adds the installed command's folder to PATH in the user's shell startup file. */
+    readonly addToPath: Effect.Effect<DesktopCliCommandState, DesktopCliCommandError>;
     /** Installs the command on an app's first launch; removing it in Settings sticks. */
     readonly installOnFirstLaunch: Effect.Effect<void>;
   }
@@ -159,6 +161,21 @@ export const make = Effect.gen(function* () {
     return Option.none<string>();
   });
 
+  const startupLine = (installedPath: string) => {
+    const setup = pathSetup({
+      directory: path.dirname(installedPath),
+      home: environment.homeDirectory,
+      shell: process.env.SHELL,
+      platform: environment.platform,
+    });
+    return setup && { ...setup, path: path.join(environment.homeDirectory, setup.file.slice(2)) };
+  };
+  const hasLine = (setup: { readonly path: string; readonly line: string }) =>
+    fs.readFileString(setup.path).pipe(
+      Effect.map((content) => content.split("\n").some((line) => line.trim() === setup.line)),
+      Effect.orElseSucceed(() => false),
+    );
+
   const state: DesktopCliCommand["Service"]["state"] = Effect.gen(function* () {
     if (!environment.isPackaged) {
       return { supported: false, installedPath: null, onPath: false, launcherPath: null } as const;
@@ -172,21 +189,16 @@ export const make = Effect.gen(function* () {
     }
     const first = yield* firstOnPath;
     const onPath = windows || (Option.isSome(first) && (yield* isOurLink(first.value)));
-    const pathCommand = onPath
-      ? undefined
-      : pathSetupCommand({
-          directory: path.dirname(installed.value),
-          home: environment.homeDirectory,
-          shell: process.env.SHELL,
-          platform: environment.platform,
-        });
+    const setup = onPath ? undefined : startupLine(installed.value);
     return {
       supported: true,
       installedPath: installed.value,
       onPath,
       launcherPath,
       ...shadow,
-      ...(pathCommand === undefined ? {} : { pathCommand }),
+      ...(setup === undefined
+        ? {}
+        : { pathSetup: { file: setup.file, added: yield* hasLine(setup) } }),
     };
   }).pipe(
     Effect.orElseSucceed(() => ({
@@ -286,6 +298,22 @@ export const make = Effect.gen(function* () {
     return yield* state;
   }).pipe(Effect.withSpan("desktop.cliCommand.uninstall"));
 
+  const addToPath: DesktopCliCommand["Service"]["addToPath"] = Effect.gen(function* () {
+    const installed = yield* installedAt;
+    if (Option.isNone(installed)) return yield* fail("Install the t3 command first.");
+    const setup = startupLine(installed.value);
+    if (setup === undefined) return yield* fail("T3 Code cannot add t3 to this shell's PATH.");
+    if (!(yield* hasLine(setup))) {
+      yield* fs.makeDirectory(path.dirname(setup.path), { recursive: true }).pipe(
+        Effect.andThen(
+          fs.writeFileString(setup.path, `\n# Added by T3 Code\n${setup.line}\n`, { flag: "a" }),
+        ),
+        Effect.mapError(() => fail(`Could not add t3 to ${setup.file}.`)),
+      );
+    }
+    return yield* state;
+  }).pipe(Effect.withSpan("desktop.cliCommand.addToPath"));
+
   const installOnFirstLaunch: DesktopCliCommand["Service"]["installOnFirstLaunch"] = Effect.gen(
     function* () {
       if (!environment.isPackaged || (yield* exists(firstLaunchMarker))) return;
@@ -304,7 +332,7 @@ export const make = Effect.gen(function* () {
     Effect.withSpan("desktop.cliCommand.installOnFirstLaunch"),
   );
 
-  return DesktopCliCommand.of({ state, install, uninstall, installOnFirstLaunch });
+  return DesktopCliCommand.of({ state, install, uninstall, addToPath, installOnFirstLaunch });
 });
 
 export const layer = Layer.effect(DesktopCliCommand, make);

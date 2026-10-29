@@ -72,16 +72,12 @@ import {
   useEnvironmentsWithScope,
 } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
-import {
-  desktopCliCommandStateAtom,
-  getDesktopCliCommandBridge,
-} from "../../state/desktopCliCommand";
-import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { connectPairing } from "../../connection/onboarding";
 import { getProviderSummary } from "../settings/providerStatus";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ChatGptWelcomeCoordinator } from "../settings/ChatGptWelcomeCoordinator";
+import { useDesktopCliCommand } from "../settings/CliCommandSettingsRow";
 import { AddManagedCodexAccountDialog, CodexSetupSection } from "../settings/CodexSetupSection";
 import { readCodexSetupMode } from "../settings/CodexSetupSection.logic";
 import { buildProviderInstanceUpdatePatch } from "../settings/SettingsPanels.logic";
@@ -92,7 +88,6 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { T3Wordmark } from "../T3Wordmark";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-import { CommandBlock } from "../CommandBlock";
 import { InstallT3Commands } from "../InstallT3Commands";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -1763,18 +1758,30 @@ function ImportRowMeta({
   );
 }
 
-/** The desktop app links `t3` on first launch; this shows how to put its folder on PATH. */
+/** The desktop app links `t3` on first launch; this puts its folder on PATH when it is not. */
 function CliPathSetup() {
-  const bridge = getDesktopCliCommandBridge();
-  const pathCommand = useEnvironmentQuery(bridge ? desktopCliCommandStateAtom : null).data
-    ?.pathCommand;
-  if (!pathCommand) return null;
+  const { state, busy, run } = useDesktopCliCommand();
+  const setup = state?.pathSetup;
+  if (!setup) return null;
   return (
-    <div className="mt-5">
+    <div className="mt-5 flex items-center justify-between gap-3">
       <p className="text-sm text-muted-foreground">
-        Run this once to use <code className="font-mono">t3</code> in new terminals.
+        {setup.added ? (
+          <>
+            Added to {setup.file}. Open a new terminal to use <code className="font-mono">t3</code>.
+          </>
+        ) : (
+          <>
+            Use <code className="font-mono">t3</code> from any terminal. Adds one line to{" "}
+            {setup.file}.
+          </>
+        )}
       </p>
-      <CommandBlock command={pathCommand} className="mt-2" />
+      {setup.added ? null : (
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => run("addToPath")}>
+          Add to PATH
+        </Button>
+      )}
     </div>
   );
 }

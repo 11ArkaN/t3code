@@ -89,11 +89,11 @@ update fails. Download the new `.deb` and install it the same way.
 The desktop app includes the `t3` command-line tool and installs it on first
 launch. On macOS and Linux it adds a `t3` link in `~/.local/bin` (or `~/bin`);
 on Windows it adds the app's command folder to your `PATH`. Open a new terminal
-afterwards. If the folder is not on your `PATH`, the welcome setup and
-**Settings → About** show the command that adds it. On a new Ubuntu account, `~/.local/bin` joins your `PATH`
-the next time you log in, so logging out and back in also works. **Remove** next
-to **t3 command** takes it off, and the app does not add it again; **Install**
-puts it back. If you already have another `t3`, it stays as it is.
+afterwards. If the folder is not on your `PATH`, **Add to PATH** in the welcome
+setup or **Settings → About** adds one line to your shell's startup file. On a
+new Ubuntu account, `~/.local/bin` joins your `PATH` the next time you log in, so
+logging out and back in also works. **Remove** next to **t3 command** takes it
+off, and the app does not add it again; **Install** puts it back. If you already have another `t3`, it stays as it is.
 
 ### Windows Subsystem for Linux
 
