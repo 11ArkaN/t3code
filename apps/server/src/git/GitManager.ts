@@ -172,6 +172,7 @@ const PR_LOOKUP_FAILURE_MAX_TTL = Duration.minutes(15);
 const PR_LOOKUP_CACHE_CAPACITY = 2_048;
 const PR_LOOKUP_GIT_STATE_TTL = Duration.minutes(5);
 const PR_THREAD_CONTEXT_BYTES = 16_000;
+const NO_THREAD_CONTEXT = { history: undefined, producedBy: undefined };
 const PR_THREAD_COMMAND_OUTPUT_CHARS = 2_000;
 const isSourceControlProviderError = Schema.is(SourceControlProviderError);
 
@@ -689,8 +690,8 @@ export const make = Effect.gen(function* () {
   });
   const readThreadContext = Effect.fnUntraced(
     function* (threadId: ThreadId | undefined) {
-      if (threadId === undefined) return undefined;
-      const { visibleTurnItems } = yield* threads.getThreadProjection(threadId);
+      if (threadId === undefined) return NO_THREAD_CONTEXT;
+      const { thread, runs, visibleTurnItems } = yield* threads.getThreadProjection(threadId);
       const selected = selectHistory({
         messages: visibleTurnItems.flatMap(
           ({ item }) => historicalMessage(limitCommandOutput(item)) ?? [],
@@ -698,9 +699,29 @@ export const make = Effect.gen(function* () {
         coverage: "Digest of the thread that made this change, oldest first.",
         budget: PR_THREAD_CONTEXT_BYTES,
       });
-      return selected.messages.length === 0
-        ? undefined
-        : renderHistory(selected.messages, selected.context);
+      // A thread can switch models mid-way; credit every model whose runs still stand.
+      const runSelections = runs
+        .filter((run) => run.startedAt !== null && run.status !== "rolled_back")
+        .map((run) => run.modelSelection);
+      const providers = yield* providerRegistry.getProviders;
+      const producedBy = Arr.dedupeWith(
+        (runSelections.length > 0 ? runSelections : [thread.modelSelection]).map(
+          ({ instanceId, model }) => ({
+            model,
+            harness:
+              providers.find((provider) => provider.instanceId === instanceId)?.displayName ??
+              instanceId,
+          }),
+        ),
+        (left, right) => left.model === right.model && left.harness === right.harness,
+      );
+      return {
+        producedBy,
+        history:
+          selected.messages.length === 0
+            ? undefined
+            : renderHistory(selected.messages, selected.context),
+      };
     },
     (effect, threadId) =>
       effect.pipe(
@@ -708,7 +729,7 @@ export const make = Effect.gen(function* () {
           Effect.logWarning("GitManager.readThreadContext failed", {
             threadId,
             errorTag: error._tag,
-          }).pipe(Effect.as(undefined)),
+          }).pipe(Effect.as(NO_THREAD_CONTEXT)),
         ),
       ),
   );
@@ -2281,7 +2302,7 @@ export const make = Effect.gen(function* () {
             yield* provider.readChangeRequestTemplate({ cwd, treeish: baseRangeRef }),
           )
         : undefined;
-    const threadContext = yield* readThreadContext(threadId);
+    const { history: threadContext, producedBy } = yield* readThreadContext(threadId);
 
     const generated = yield* textGeneration.generatePrContent({
       cwd,
@@ -2292,6 +2313,7 @@ export const make = Effect.gen(function* () {
       diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       ...(changeRequestTemplate ? { changeRequestTemplate } : {}),
       ...(threadContext ? { threadContext } : {}),
+      producedBy,
       ...(policy ? { policy } : {}),
       modelSelection: settings.modelSelection,
     });
