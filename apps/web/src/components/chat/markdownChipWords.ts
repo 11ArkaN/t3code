@@ -6,16 +6,15 @@ type HastNode = {
   children?: HastNode[];
 };
 
-const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const FORMATTING_TAGS = new Set(["strong", "em", "del"]);
-const PUNCTUATION = /^\p{P}/u;
+// Each grapheme of such a run is one punctuation mark plus its combining marks.
+const PUNCTUATION_RUN = /^\p{P}[\p{P}\p{M}]*$/u;
+const FIRST_MARK = /^\p{P}\p{M}*/u;
+const LAST_MARK = /\p{P}\p{M}*$/u;
+const LEADING_WORD = /^\S*/u;
+const WHITESPACE = /\s/u;
 
-// Which of these become chips is only known at render time; the CSS rule for
-// `data-chip-word` applies `nowrap` only to the wrappers that hold one.
-function canRenderAsChip(node: HastNode): boolean {
-  if (FORMATTING_TAGS.has(node.tagName ?? "")) {
-    return node.children?.length === 1 && canRenderAsChip(node.children[0]!);
-  }
+function isChipElement(node: HastNode): boolean {
   return (
     node.tagName === "a" ||
     node.tagName === "img" ||
@@ -23,22 +22,34 @@ function canRenderAsChip(node: HastNode): boolean {
   );
 }
 
-// Only punctuation moves: letters or `$` would split skill tokens matched later.
-function touchingPunctuation(node: HastNode | undefined, side: "first" | "last"): string {
-  if (node?.type !== "text" || !node.value) return "";
-  const at = side === "first" ? 0 : node.value.length - 1;
-  const grapheme = graphemes.segment(node.value).containing(at)?.segment ?? "";
-  return PUNCTUATION.test(grapheme) ? grapheme : "";
+function trailingWord(value: string): string {
+  let start = value.length;
+  while (start > 0 && !WHITESPACE.test(value[start - 1]!)) start--;
+  return value.slice(start);
 }
 
-function glueChips(parent: HastNode): void {
-  const children = parent.children;
-  if (!children || parent.tagName === "pre") return;
+// Skill names may contain `_`, `-` and `:`, and the skill matcher treats text
+// node edges as token boundaries. A mark moves only when everything between
+// the chip and the next space is punctuation, so no skill token is touched.
+function touchingPunctuation(node: HastNode | undefined, side: "first" | "last"): string {
+  if (node?.type !== "text" || !node.value) return "";
+  const run = side === "first" ? LEADING_WORD.exec(node.value)![0] : trailingWord(node.value);
+  if (!PUNCTUATION_RUN.test(run)) return "";
+  return (side === "first" ? FIRST_MARK : LAST_MARK).exec(run)![0];
+}
+
+// Glues inside `node` and returns whether it can render as a chip. Which of
+// these become chips is only known at render time; the CSS rule for
+// `data-chip-word` applies `nowrap` only to the wrappers that hold one.
+function glueChips(node: HastNode): boolean {
+  if (isChipElement(node)) return true;
+  const children = node.children;
+  if (!children || node.tagName === "pre") return false;
+  const chips = children.map(glueChips);
   const glued: HastNode[] = [];
   for (let index = 0; index < children.length; index++) {
     const child = children[index]!;
-    if (!canRenderAsChip(child)) {
-      glueChips(child);
+    if (!chips[index]) {
       glued.push(child);
       continue;
     }
@@ -68,7 +79,8 @@ function glueChips(parent: HastNode): void {
       children: word,
     });
   }
-  parent.children = glued;
+  node.children = glued;
+  return FORMATTING_TAGS.has(node.tagName ?? "") && children.length === 1 && chips[0]!;
 }
 
 /**
@@ -78,5 +90,7 @@ function glueChips(parent: HastNode): void {
  * line; text beyond those marks already follows the usual line-breaking rules.
  */
 export function rehypeChipWords() {
-  return (tree: HastNode) => glueChips(tree);
+  return (tree: HastNode) => {
+    glueChips(tree);
+  };
 }

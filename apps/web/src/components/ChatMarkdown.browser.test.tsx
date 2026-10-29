@@ -308,6 +308,23 @@ describe("ChatMarkdown skill chips", () => {
     await userEvent.click(page.getByRole("button", { name: "View instructions" }));
 
     expect(openFile).toHaveBeenCalledExactlyOnceWith(threadRef, "/skills/review/SKILL.md");
+
+    const skills = [
+      { name: "review", displayName: "Review", path: "/skills/review/SKILL.md", enabled: true },
+      { name: "review_", displayName: "Draft", path: "/skills/review_/SKILL.md", enabled: true },
+    ];
+    const skillChips = () =>
+      [...screen.container.querySelectorAll("button")]
+        .map((button) => button.getAttribute("aria-label"))
+        .filter((label) => label?.startsWith("Skill "));
+    await screen.rerender(
+      <ChatMarkdown cwd="/tmp/project" text="Run $review_[a.ts](a.ts) now" skills={skills} />,
+    );
+    expect(skillChips()).toEqual(["Skill Draft. Show details"]);
+    await screen.rerender(
+      <ChatMarkdown cwd="/tmp/project" text="Run $review.[a.ts](a.ts)" skills={skills} />,
+    );
+    expect(skillChips()).toEqual([]);
   });
 });
 

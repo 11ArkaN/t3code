@@ -55,6 +55,21 @@ describe("rehypeChipWords", () => {
     expect(glued(text("«"), link, text("»、")).map(textOf)).toEqual(["«utils.ts»", "、"]);
   });
 
+  it("moves a mark only when the chip's side is punctuation up to the next space", () => {
+    expect(glued(link, text("), and")).map(textOf)).toEqual(["utils.ts)", ", and"]);
+    expect(glued(link, text(". Did")).map(textOf)).toEqual(["utils.ts.", " Did"]);
+    expect(glued(text("x (\u0301"), link).map(textOf)).toEqual(["x ", "(\u0301utils.ts"]);
+    for (const [before, after] of [
+      ["", ".$review"],
+      ["Run $review_", ""],
+      ["Run $review.", ""],
+      ["", "'s"],
+    ]) {
+      const children = glued(text(before!), link, text(after!));
+      expect(children.map(textOf)).toEqual([before, "utils.ts", after]);
+    }
+  });
+
   it("treats inline code and images as chips but not code blocks", () => {
     const code = element("code", [text("a.ts")], { dataInlineCode: "" });
     const image = element("img", [], { src: "t3-context://terminal/1" });
