@@ -3392,167 +3392,259 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  const claudeWorkProvider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claude_work"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    displayName: "Work account",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-09-27T00:00:00.000Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+
+  const seedPrThread = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly worktreePath: string;
+    readonly forkedFrom?: { readonly threadId: ThreadId; readonly runId: RunId };
+    readonly runs: ReadonlyArray<{
+      readonly modelSelection: ModelSelection;
+      readonly text: string;
+      readonly status?: "rolled_back";
+    }>;
+  }) {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const { threadId } = input;
+    const createdAt = DateTime.makeUnsafe("2026-09-27T00:00:00.000Z");
+    const modelSelection = input.runs[0]!.modelSelection;
+    yield* store.apply({
+      id: EventId.make(`event:${threadId}:thread`),
+      type: "thread.created",
+      threadId,
+      providerInstanceId: modelSelection.instanceId,
+      occurredAt: createdAt,
+      payload: {
+        createdBy: "user",
+        creationSource: "web",
+        id: threadId,
+        projectId: ProjectId.make("project:pr-thread-model"),
+        title: "PR thread model",
+        providerInstanceId: modelSelection.instanceId,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: input.worktreePath,
+        activeProviderThreadId: null,
+        lineage: input.forkedFrom
+          ? {
+              parentThreadId: input.forkedFrom.threadId,
+              relationshipToParent: "fork",
+              rootThreadId: input.forkedFrom.threadId,
+            }
+          : { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: input.forkedFrom ? { type: "run", ...input.forkedFrom } : null,
+        createdAt,
+        updatedAt: createdAt,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      },
+    });
+    for (const [index, spec] of input.runs.entries()) {
+      const ordinal = index + 1;
+      const runId = RunId.make(`run:${threadId}:${ordinal}`);
+      const messageId = MessageId.make(`message:${threadId}:${ordinal}`);
+      yield* store.apply({
+        id: EventId.make(`event:${threadId}:run:${ordinal}`),
+        type: "run.updated",
+        threadId,
+        runId,
+        occurredAt: createdAt,
+        payload: {
+          id: runId,
+          threadId,
+          ordinal,
+          providerInstanceId: spec.modelSelection.instanceId,
+          modelSelection: spec.modelSelection,
+          providerThreadId: null,
+          userMessageId: messageId,
+          rootNodeId: null,
+          activeAttemptId: null,
+          status: spec.status ?? "completed",
+          requestedAt: createdAt,
+          startedAt: createdAt,
+          completedAt: createdAt,
+          checkpointId: null,
+          contextHandoffId: null,
+        },
+      });
+      yield* store.apply({
+        id: EventId.make(`event:${threadId}:item:${ordinal}`),
+        type: "turn-item.updated",
+        threadId,
+        runId,
+        occurredAt: createdAt,
+        payload: {
+          id: TurnItemId.make(`item:${threadId}:${ordinal}`),
+          threadId,
+          runId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal,
+          status: "completed",
+          title: null,
+          startedAt: createdAt,
+          completedAt: createdAt,
+          updatedAt: createdAt,
+          type: "user_message",
+          messageId,
+          createdBy: "user",
+          creationSource: "web",
+          inputIntent: "turn_start",
+          text: spec.text,
+          attachments: [],
+        },
+      });
+    }
+  });
+
+  const createPrPrompt = Effect.fnUntraced(function* (
+    seed: (
+      worktreePath: string,
+    ) => Effect.Effect<
+      void,
+      ProjectionStore.ProjectionStoreV2Error,
+      ProjectionStore.ProjectionStoreV2
+    >,
+    threadId: ThreadId,
+  ) {
+    const repoDir = yield* makeTempDir("t3code-git-manager-");
+    yield* initRepo(repoDir);
+    yield* runGit(repoDir, ["checkout", "-b", "feature/thread-model"]);
+    NodeFS.writeFileSync(NodePath.join(repoDir, "thread-model.txt"), "model\n");
+    yield* runGit(repoDir, ["add", "thread-model.txt"]);
+    yield* runGit(repoDir, ["commit", "-m", "Thread model"]);
+    const remoteDir = yield* createBareRemote();
+    yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+    let generatedPrompt = "";
+    const writer = fromRunner("test", (request) => {
+      generatedPrompt = request.prompt;
+      return decodeJsonReply(request, "test", '{"title":"Thread model","body":"Body"}');
+    });
+    const { manager } = yield* makeManager({
+      serverSettings: {
+        textGenerationModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6.1-terra",
+        },
+      },
+      textGeneration: { generatePrContent: writer.generatePrContent },
+      providers: [claudeWorkProvider],
+      seed: seed(repoDir),
+    });
+    yield* manager.runStackedAction({
+      actionId: "test-action-id",
+      cwd: repoDir,
+      action: "create_pr",
+      threadId,
+    });
+    return generatedPrompt;
+  });
+
   it.effect("create_pr tells the writer which model and harness made the change", () =>
     Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      yield* runGit(repoDir, ["checkout", "-b", "feature/thread-model"]);
-      NodeFS.writeFileSync(NodePath.join(repoDir, "thread-model.txt"), "model\n");
-      yield* runGit(repoDir, ["add", "thread-model.txt"]);
-      yield* runGit(repoDir, ["commit", "-m", "Thread model"]);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       const threadId = ThreadId.make("thread:pr-thread-model");
-      const providerInstanceId = ProviderInstanceId.make("claude_work");
-      const modelSelection = { instanceId: providerInstanceId, model: "claude-opus-5-5" };
-      const createdAt = DateTime.makeUnsafe("2026-09-27T00:00:00.000Z");
-      const provider: ServerProvider = {
-        instanceId: providerInstanceId,
-        driver: ProviderDriverKind.make("claudeAgent"),
-        displayName: "Work account",
-        enabled: true,
-        installed: true,
-        version: "1.0.0",
-        status: "ready",
-        auth: { status: "authenticated" },
-        checkedAt: "2026-09-27T00:00:00.000Z",
-        models: [],
-        slashCommands: [],
-        skills: [],
-      };
-      const run = {
-        id: RunId.make("run:pr-thread-model:1"),
-        threadId,
-        ordinal: 1,
-        providerInstanceId,
-        modelSelection,
-        providerThreadId: null,
-        userMessageId: MessageId.make("message:pr-thread-model:1"),
-        rootNodeId: null,
-        activeAttemptId: null,
-        status: "completed" as const,
-        requestedAt: createdAt,
-        startedAt: createdAt,
-        completedAt: createdAt,
-        checkpointId: null,
-        contextHandoffId: null,
-      };
-      let generatedPrompt = "";
-      const writer = fromRunner("test", (request) => {
-        generatedPrompt = request.prompt;
-        return decodeJsonReply(request, "test", '{"title":"Thread model","body":"Body"}');
-      });
-
-      const { manager } = yield* makeManager({
-        serverSettings: {
-          textGenerationModelSelection: {
-            instanceId: ProviderInstanceId.make("codex"),
-            model: "gpt-6.1-terra",
-          },
-        },
-        textGeneration: { generatePrContent: writer.generatePrContent },
-        providers: [provider],
-        seed: Effect.gen(function* () {
-          const store = yield* ProjectionStore.ProjectionStoreV2;
-          yield* store.apply({
-            id: EventId.make("event:pr-thread-model:thread"),
-            type: "thread.created",
+      const instanceId = claudeWorkProvider.instanceId;
+      const prompt = yield* createPrPrompt(
+        (worktreePath) =>
+          seedPrThread({
             threadId,
-            providerInstanceId,
-            occurredAt: createdAt,
-            payload: {
-              createdBy: "user",
-              creationSource: "web",
-              id: threadId,
-              projectId: ProjectId.make("project:pr-thread-model"),
-              title: "PR thread model",
-              providerInstanceId,
-              modelSelection,
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              branch: null,
-              worktreePath: repoDir,
-              activeProviderThreadId: null,
-              lineage: {
-                parentThreadId: null,
-                relationshipToParent: null,
-                rootThreadId: threadId,
+            worktreePath,
+            runs: [
+              {
+                modelSelection: { instanceId, model: "claude-opus-5-5" },
+                text: "Add the thread model file",
               },
-              forkedFrom: null,
-              createdAt,
-              updatedAt: createdAt,
-              archivedAt: null,
-              settledOverride: null,
-              settledAt: null,
-              lastVisitedAt: null,
-              deletedAt: null,
-            },
-          });
-          for (const payload of [
-            run,
-            {
-              ...run,
-              id: RunId.make("run:pr-thread-model:2"),
-              ordinal: 2,
-              modelSelection: { instanceId: providerInstanceId, model: "claude-haiku-5-5" },
-              userMessageId: MessageId.make("message:pr-thread-model:2"),
-              status: "rolled_back" as const,
-            },
-          ]) {
-            yield* store.apply({
-              id: EventId.make(`event:pr-thread-model:run:${payload.ordinal}`),
-              type: "run.updated",
-              threadId,
-              runId: payload.id,
-              occurredAt: createdAt,
-              payload,
-            });
-          }
-          const item = {
-            id: TurnItemId.make("item:pr-thread-model:1"),
-            threadId,
-            runId: run.id,
-            nodeId: null,
-            providerThreadId: null,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal: 1,
-            status: "completed" as const,
-            title: null,
-            startedAt: createdAt,
-            completedAt: createdAt,
-            updatedAt: createdAt,
-            type: "user_message" as const,
-            messageId: run.userMessageId,
-            createdBy: "user" as const,
-            creationSource: "web" as const,
-            inputIntent: "turn_start" as const,
-            text: "Add the thread model file",
-            attachments: [],
-          };
-          yield* store.apply({
-            id: EventId.make("event:pr-thread-model:item:1"),
-            type: "turn-item.updated",
-            threadId,
-            runId: run.id,
-            occurredAt: createdAt,
-            payload: item,
-          });
-        }),
-      });
-
-      yield* manager.runStackedAction({
-        actionId: "test-action-id",
-        cwd: repoDir,
-        action: "create_pr",
+              {
+                modelSelection: { instanceId, model: "claude-haiku-5-5" },
+                text: "Undo that",
+                status: "rolled_back",
+              },
+              {
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("claude_removed"),
+                  model: "claude-sonnet-5-5",
+                },
+                text: "Polish the file",
+              },
+            ],
+          }),
         threadId,
-      });
+      );
 
-      expect(generatedPrompt).toContain("Add the thread model file");
-      expect(generatedPrompt).toContain("- model `claude-opus-5-5`, harness Claude");
-      expect(generatedPrompt).not.toContain("Work account");
-      expect(generatedPrompt).not.toContain("claude-haiku-5-5");
+      expect(prompt).toContain("Add the thread model file");
+      expect(prompt).toContain("- model `claude-opus-5-5`, harness Claude\n");
+      expect(prompt).toContain("- model `claude-sonnet-5-5`\n");
+      expect(prompt).not.toContain("Work account");
+      expect(prompt).not.toContain("claude_removed");
+      expect(prompt).not.toContain("claude-haiku-5-5");
+    }),
+  );
+
+  it.effect("create_pr credits the models a fork inherited its history from", () =>
+    Effect.gen(function* () {
+      const sourceThreadId = ThreadId.make("thread:pr-fork-source");
+      const forkThreadId = ThreadId.make("thread:pr-fork");
+      const prompt = yield* createPrPrompt(
+        (worktreePath) =>
+          Effect.gen(function* () {
+            yield* seedPrThread({
+              threadId: sourceThreadId,
+              worktreePath,
+              runs: [
+                {
+                  modelSelection: {
+                    instanceId: claudeWorkProvider.instanceId,
+                    model: "claude-opus-5-5",
+                  },
+                  text: "Implement the thread model file",
+                },
+              ],
+            });
+            yield* seedPrThread({
+              threadId: forkThreadId,
+              worktreePath,
+              forkedFrom: {
+                threadId: sourceThreadId,
+                runId: RunId.make(`run:${sourceThreadId}:1`),
+              },
+              runs: [
+                {
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make("codex"),
+                    model: "gpt-6.2",
+                  },
+                  text: "Review the change",
+                },
+              ],
+            });
+          }),
+        forkThreadId,
+      );
+
+      expect(prompt).toContain("Implement the thread model file");
+      expect(prompt).toContain("- model `claude-opus-5-5`, harness Claude\n");
+      expect(prompt).toContain("- model `gpt-6.2`, harness Codex\n");
     }),
   );
 
