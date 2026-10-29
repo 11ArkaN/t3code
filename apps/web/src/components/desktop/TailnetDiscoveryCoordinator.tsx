@@ -20,10 +20,20 @@ export function TailnetDiscoveryCoordinator() {
   // Each conflict is worth one warning per app run, not one every few minutes.
   const warned = useRef(new Set<string>());
   const lastRunAt = useRef(0);
+  const trailing = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const run = useEffectEvent(async () => {
     const bridge = window.desktopBridge;
-    if (!bridge || Date.now() - lastRunAt.current < DISCOVERY_MIN_GAP_MS) return;
+    if (!bridge) return;
+    // A machine that connects inside the gap is covered once the gap ends.
+    const wait = lastRunAt.current + DISCOVERY_MIN_GAP_MS - Date.now();
+    if (wait > 0) {
+      trailing.current ??= setTimeout(() => {
+        trailing.current = undefined;
+        void run();
+      }, wait);
+      return;
+    }
     lastRunAt.current = Date.now();
     const found = await bridge.discoverTailnetEnvironments().catch(() => []);
     const result = await discover(found);
@@ -58,6 +68,7 @@ export function TailnetDiscoveryCoordinator() {
     return () => {
       unsubscribe();
       clearInterval(timer);
+      clearTimeout(trailing.current);
     };
   }, [registry]);
 

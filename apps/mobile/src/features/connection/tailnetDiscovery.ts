@@ -19,6 +19,7 @@ const DISCOVERY_MIN_GAP_MS = 30_000;
 export function installTailnetDiscovery(): () => void {
   let lastRunAt = 0;
   let connectedKey = "";
+  let trailing: ReturnType<typeof setTimeout> | undefined;
   // Each conflict is worth one warning per launch, not one every few minutes.
   const warned = new Set<string>();
 
@@ -56,9 +57,20 @@ export function installTailnetDiscovery(): () => void {
       .map(([id]) => id)
       .join(",");
     const changed = connected !== connectedKey;
+    if (connected === "" || (!force && !changed)) {
+      connectedKey = connected;
+      return;
+    }
+    // A change inside the gap runs once the gap ends, not at the next interval.
+    const wait = lastRunAt + DISCOVERY_MIN_GAP_MS - Date.now();
+    if (wait > 0) {
+      trailing ??= setTimeout(() => {
+        trailing = undefined;
+        update(true);
+      }, wait);
+      return;
+    }
     connectedKey = connected;
-    if (connected === "" || (!force && !changed)) return;
-    if (Date.now() - lastRunAt < DISCOVERY_MIN_GAP_MS) return;
     void run();
   };
 
@@ -73,5 +85,6 @@ export function installTailnetDiscovery(): () => void {
     unsubscribePresentations();
     unsubscribeAppState();
     clearInterval(timer);
+    clearTimeout(trailing);
   };
 }
