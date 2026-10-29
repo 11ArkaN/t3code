@@ -158,7 +158,7 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       expect(yield* latestRecordedMigrationId).toBe(recordedMigrationId);
       expect(cliStorage._tag).toBe("Failure");
       if (cliStorage._tag === "Failure") {
-        expect(cliStorage.failure.message).toMatch(/server .*owns/i);
+        expect(cliStorage.failure.message).toMatch(/running server, owns/i);
       }
     }).pipe(Effect.provide(layerServerConfig())),
   );
