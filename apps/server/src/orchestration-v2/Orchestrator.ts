@@ -3022,7 +3022,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       command.snapshotSequence !== undefined
     ) {
       const currentSequence = yield* eventSink
-        .latestSequence({ threadId: command.threadId })
+        .latestSequence({
+          threadId: command.threadId,
+          // Shutdown and restart recovery stop every live session; the user changed nothing.
+          exceptEventTypes: ["provider-session.updated"],
+        })
         .pipe(
           Effect.mapError(
             (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),

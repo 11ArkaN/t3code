@@ -5908,6 +5908,7 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
       Effect.gen(function* () {
         const projects = yield* ProjectService.ProjectService;
         const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const eventSink = yield* EventSink.EventSinkV2;
         const projectId = ProjectId.make("runtime-layer-triage-version-project");
         const threadId = ThreadId.make("runtime-layer-triage-version-thread");
         const snoozedUntil = "2099-07-25T09:00:00.000Z";
@@ -5976,7 +5977,41 @@ it.layer(layerSharedApplicationDataPlaneTest)("snooze projection", (it) => {
         assert.isNull(untouched.settledOverride);
         assert.isNull(untouched.snoozedUntil ?? null);
 
+        // Shutdown and restart recovery stop live sessions; that is not a change the user made.
+        const now = yield* DateTime.now;
+        const session = {
+          id: ProviderSessionId.make("runtime-layer-triage-version-session"),
+          driver,
+          providerInstanceId: modelSelection.instanceId,
+          status: "ready" as const,
+          cwd: "/tmp/runtime-layer-triage-version-project",
+          model: modelSelection.model,
+          capabilities: CodexProviderCapabilitiesV2,
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        };
+        const sessionEvent = (type: "provider-session.attached" | "provider-session.updated") =>
+          eventSink.write({
+            commandId: CommandId.make(`runtime-layer-triage-version-${type}`),
+            events: [
+              {
+                id: EventId.make(`runtime-layer-triage-version-${type}`),
+                type,
+                threadId,
+                driver,
+                providerInstanceId: session.providerInstanceId,
+                occurredAt: now,
+                payload:
+                  type === "provider-session.attached"
+                    ? session
+                    : { ...session, status: "stopped" },
+              },
+            ],
+          });
+        yield* sessionEvent("provider-session.attached");
         const current = yield* versionOf();
+        yield* sessionEvent("provider-session.updated");
         const settle = {
           type: "thread.settle" as const,
           commandId: CommandId.make("runtime-layer-triage-version-settle"),
