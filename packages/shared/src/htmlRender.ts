@@ -177,12 +177,12 @@ const FIXED_COLORS = {
   },
 } as const;
 
+// rgbChannels drops alpha, so only an opaque color can be measured as painted.
+const isOpaqueHex = (color: string) => /^#[\da-f]{6}(?:ff)?$/i.test(color);
+
 function readableForeground(foreground: string, background: string): string {
   const backgroundChannels = rgbChannels(background)!;
-  // rgbChannels drops alpha, so only an opaque foreground can be measured as painted.
-  const foregroundChannels = /^#[\da-f]{6}(?:ff)?$/i.test(foreground)
-    ? rgbChannels(foreground)
-    : null;
+  const foregroundChannels = isOpaqueHex(foreground) ? rgbChannels(foreground) : null;
   if (foregroundChannels && contrastRatio(foregroundChannels, backgroundChannels) >= 4.5) {
     return foreground;
   }
@@ -201,11 +201,12 @@ export function htmlRenderTheme(
   const fixed = FIXED_COLORS[appearance];
   // Charts draw lines and markers in the accent; WCAG 1.4.11 asks 3:1 for them on the canvas,
   // measured as painted, so a translucent hex accent is composited over the canvas first.
+  // Over a translucent canvas the backdrop is unknown, so the accent is left as given.
   const painted = rgbChannels(colors.accent)
     ? flattenThemeColor(colors.accent, colors.canvas)
     : colors.accent;
   const lifted = themeAccentWithContrast(painted, [colors.canvas], 3);
-  const accent = lifted === painted ? colors.accent : lifted;
+  const accent = lifted === painted || !isOpaqueHex(colors.canvas) ? colors.accent : lifted;
   const accentForeground =
     accent === colors.accent
       ? colors.accentForeground

@@ -157,6 +157,14 @@ describe("htmlRenderTheme", () => {
     }
   });
 
+  it("leaves the accent as given over a translucent canvas", () => {
+    const colors = { ...T3_CODE_LIGHT_THEME_COLORS, canvas: "#73737300", accent: "#737373" };
+    const { variables } = htmlRenderTheme(colors, "light");
+    expect(variables["--accent"]).toBe("#737373");
+    expect(variables["--chart-1"]).toBe("#737373");
+    expect(variables["--accent-foreground"]).toBe(colors.accentForeground);
+  });
+
   it("passes the T3 Code default themes' accent through unchanged", () => {
     for (const [colors, appearance] of [
       [T3_CODE_DARK_THEME_COLORS, "dark"],
