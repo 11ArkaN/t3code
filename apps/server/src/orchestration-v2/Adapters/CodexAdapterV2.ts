@@ -1342,7 +1342,7 @@ function codexThreadRuntimeParams(input: {
     ...(input.modelSelection === undefined ? {} : { model: input.modelSelection.model }),
     config: {
       ...CODEX_THREAD_CONFIG,
-      // Codex's WebSocket transport reads the session effort and ignores turn/start's.
+      // Codex 0.165's WebSocket path also sends the session effort; a rejected one fails the turn.
       ...(effort === undefined ? {} : { model_reasoning_effort: effort }),
       ...(mcpSession === undefined
         ? {}

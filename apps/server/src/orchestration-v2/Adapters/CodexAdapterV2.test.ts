@@ -2255,7 +2255,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  // regression: #26863 Codex 0.165 sends the session effort over WebSocket, not the turn's
+  // regression: #26863 Codex 0.165 also sends the session effort over WebSocket
   it.effect("starts a thread with the selected reasoning effort", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -2315,7 +2315,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
-  // regression: #26863 Codex 0.165 sends the session effort over WebSocket, not the turn's
+  // regression: #26863 Codex 0.165 also sends the session effort over WebSocket
   it.effect("resumes a thread with the selected reasoning effort", () =>
     Effect.scoped(
       Effect.gen(function* () {
