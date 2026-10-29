@@ -17,6 +17,7 @@ import {
   type ConnectionFailureCause,
   type ConnectionHop,
   type ConnectionRouteOutcome,
+  failureDidNotAnswer,
   routeDidNotAnswer,
   type SupervisorConnectionState,
 } from "./model.ts";
@@ -508,8 +509,8 @@ export function presentConnectionDiagnosis(
   const tailnetRoutes =
     located.hop === "server" &&
     located.cause === null &&
-    refusal === undefined &&
-    failure?._tag === "ConnectionTransientError"
+    failure !== null &&
+    failureDidNotAnswer(failure)
       ? failedTailnetRoutes(input.state.routes)
       : [];
   const tailnet = tailnetRoutes.length > 0;

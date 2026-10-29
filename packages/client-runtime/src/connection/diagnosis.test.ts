@@ -172,6 +172,16 @@ describe("presentConnectionDiagnosis", () => {
       "Check that Tailscale is on and signed in on this device and on Mac mini.",
     );
     expect(plain?.facts).toContainEqual(["Failed route", "Tailscale http://100.64.0.1:3773/"]);
+    // Another route reached the host and it failed there, so Tailscale is not the story.
+    const hostFailed = diagnose(
+      {
+        ...backoff(new ConnectionTransientError({ reason: "remote-unavailable", detail: "500" })),
+        routes: [TAILNET_FAILED],
+      },
+      "direct",
+    );
+    expect(hostFailed?.headline).not.toMatch(/Tailscale/);
+    expect(hostFailed?.facts.map(([label]) => label)).not.toContain("Failed route");
     expect(plain?.moreInfoUrl).toMatch(/remote-access\.md#tailscale-troubleshooting$/);
 
     const relayOnline = presentConnectionDiagnosis({

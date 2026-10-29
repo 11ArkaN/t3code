@@ -191,14 +191,20 @@ const UNANSWERED_REASONS: ReadonlySet<ConnectionTransientReason> = new Set([
   "transport",
 ]);
 
+/** A failure that gave no sign the host is there, as opposed to one where it answered. */
+export function failureDidNotAnswer(error: ConnectionAttemptError): boolean {
+  return (
+    error._tag === "ConnectionTransientError" &&
+    UNANSWERED_REASONS.has(error.reason) &&
+    error.tailnetRefusal === undefined
+  );
+}
+
 /** A route that gave no sign the host is there, as opposed to one that answered and refused. */
 export function routeDidNotAnswer(outcome: ConnectionRouteOutcome): boolean {
   return (
     outcome.result === "silent" ||
-    (outcome.result === "failed" &&
-      outcome.error._tag === "ConnectionTransientError" &&
-      UNANSWERED_REASONS.has(outcome.error.reason) &&
-      outcome.error.tailnetRefusal === undefined)
+    (outcome.result === "failed" && failureDidNotAnswer(outcome.error))
   );
 }
 
