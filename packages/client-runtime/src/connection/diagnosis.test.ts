@@ -211,10 +211,17 @@ describe("presentConnectionDiagnosis", () => {
     };
     expect(refused("blocked")).toMatchObject({
       headline: "Mac mini blocked this device",
-      steps: ["On Mac mini, open Settings > Sharing & access and unblock this device."],
+      steps: [
+        "On another device connected to Mac mini, open Settings > Environments and unblock this device.",
+        "Or run `t3 pair` on Mac mini, pair this device with the code, then unblock it.",
+      ],
       moreInfoUrl: expect.stringMatching(/#tailscale-troubleshooting$/),
     });
     expect(refused("blocked")?.facts).toContainEqual(["Cause", "blocked"]);
+    // Add forms show the error itself, so it reads as a sentence.
+    expect(tailnetRefusalError("routes_for_others").message).toBe(
+      "This device is a subnet router, so it cannot sign in. Stop advertising routes on this device. Or pair this device with a code instead.",
+    );
     // A transient refusal answered, so it is not an unreachable tailnet.
     expect(refused("rate_limited")?.headline).toBe("Mac mini asked this device to slow down");
     const offline = { ...backoff(tailnetRefusalError("blocked")), network: "offline" as const };
@@ -269,6 +276,10 @@ describe("Tailscale facts in the diagnosis", () => {
     expect(running([])?.headline).toBe("Mac mini is not on this device's tailnet");
     // Online is only a hint, so the headline stays the generic one.
     expect(running([peer])?.headline).toBe("Mac mini did not answer over Tailscale");
+    // A direct path needs a handshake, so Tailscale reached the host.
+    expect(running([{ ...peer, curAddr: "203.0.113.4:41641" }])?.headline).toBe(
+      "T3 Code on Mac mini did not answer",
+    );
   });
 
   it("names the path to a peer only while it is active", () => {

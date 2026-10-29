@@ -65,8 +65,10 @@ const TRANSIENT_REFUSALS: ReadonlySet<TailnetSignInRefusedReason> = new Set([
 ]);
 
 export function tailnetRefusalError(reason: TailnetSignInRefusedReason, traceId?: string) {
+  // Forms show the detail as is, before the machine has a label.
+  const { headline, steps } = tailnetRefusalVerdict("that machine", reason);
   const fields = {
-    detail: `The environment refused Tailscale sign-in (${reason}).`,
+    detail: `${headline.charAt(0).toUpperCase()}${headline.slice(1)}. ${steps.join(" ")}`,
     hop: "server" as const,
     via: "direct" as const,
     tailnetRefusal: reason,
@@ -140,4 +142,90 @@ export function machinesToAdd<
     if (action._tag === "Conflict") conflicts.push({ machine, label: action.label });
   }
   return { add, conflicts };
+}
+
+const PAIR_INSTEAD = "Or pair this device with a code instead.";
+
+/** Why a host refused this device's Tailscale sign-in, and the fix. */
+export function tailnetRefusalVerdict(
+  host: string,
+  reason: TailnetSignInRefusedReason,
+): { readonly headline: string; readonly steps: ReadonlyArray<string> } {
+  const owner = `Only the Tailscale user who owns ${host} can sign in from their own devices.`;
+  switch (reason) {
+    case "disabled":
+      return {
+        headline: `Tailscale sign-in is off on ${host}`,
+        steps: [
+          `On ${host}, run \`npx t3 up\`, or turn on Tailscale sign-in in Settings.`,
+          PAIR_INSTEAD,
+        ],
+      };
+    case "browser_request":
+      return {
+        headline: `${host} accepts Tailscale sign-in only from the desktop and mobile apps`,
+        steps: ["Pair this browser with a code."],
+      };
+    case "not_direct_tailnet":
+      return {
+        headline: `${host} did not see this device on its Tailscale address`,
+        steps: [
+          "Turn on Tailscale on this device. T3 Code retries on its own.",
+          `Add ${host} by its Tailscale name or 100.x address, not a LAN or HTTPS address.`,
+        ],
+      };
+    case "tailscale_unavailable":
+      return {
+        headline: `${host} could not ask Tailscale who this device is`,
+        steps: [`On ${host}, check that Tailscale runs, or run \`t3 tailscale status\`.`],
+      };
+    case "tailscale_outdated":
+      return {
+        headline: `${host} runs a Tailscale too old for sign-in`,
+        steps: [`Update Tailscale on ${host}.`],
+      };
+    case "owner_unknown":
+      return {
+        headline: `${host} does not know who owns it`,
+        steps: [`On ${host}, run \`npx t3 up --owner <your login>\`.`],
+      };
+    case "tagged_device":
+      return {
+        headline: "This device is tagged, so it cannot sign in",
+        steps: ["Tagged devices never sign in. Use an untagged device.", PAIR_INSTEAD],
+      };
+    case "shared_device":
+      return {
+        headline: `This device is shared in from another tailnet`,
+        steps: [owner, PAIR_INSTEAD],
+      };
+    case "other_user":
+      return {
+        headline: `This device belongs to another Tailscale user`,
+        steps: [owner, PAIR_INSTEAD],
+      };
+    case "own_node":
+      return {
+        headline: `This device is ${host}`,
+        steps: ["Use this device's own T3 Code instead."],
+      };
+    case "routes_for_others":
+      return {
+        headline: "This device is a subnet router, so it cannot sign in",
+        steps: ["Stop advertising routes on this device.", PAIR_INSTEAD],
+      };
+    case "blocked":
+      return {
+        headline: `${host} blocked this device`,
+        steps: [
+          `On another device connected to ${host}, open Settings > Environments and unblock this device.`,
+          `Or run \`t3 pair\` on ${host}, pair this device with the code, then unblock it.`,
+        ],
+      };
+    case "rate_limited":
+      return {
+        headline: `${host} asked this device to slow down`,
+        steps: ["Wait a minute. T3 Code retries on its own."],
+      };
+  }
 }

@@ -7,7 +7,6 @@ import {
   t3ConnectTroubleshootingUrl,
   type T3ConnectTroubleshootingSection,
   tailscaleIssueHeadline,
-  type TailnetSignInRefusedReason,
   type TailscaleState,
 } from "@t3tools/contracts";
 import type { RelayEnvironmentStatusResponse } from "@t3tools/contracts/relay";
@@ -21,6 +20,7 @@ import {
   routeDidNotAnswer,
   type SupervisorConnectionState,
 } from "./model.ts";
+import { tailnetRefusalVerdict } from "./tailnet.ts";
 
 export type ConnectionHopResult = "ok" | "failed" | "unchecked";
 
@@ -483,90 +483,12 @@ function tailnetVerdict(
       steps: [`Make sure ${host} is awake and Tailscale is on.`],
     };
   }
+  // A direct or peer-relay path means a handshake worked, so Tailscale reaches the host.
+  const reached = peer.active && (peer.curAddr !== null || peer.peerRelay !== null);
   return {
-    headline: generic,
+    headline: reached ? `T3 Code on ${host} did not answer` : generic,
     steps: [awake, `Check that no firewall on ${host} blocks its port.`],
   };
-}
-
-const PAIR_INSTEAD = "Or pair this device with a code instead.";
-
-/** Why a host refused this device's Tailscale sign-in, and the fix. */
-function tailnetRefusalVerdict(host: string, reason: TailnetSignInRefusedReason): TailnetVerdict {
-  const owner = `Only the Tailscale user who owns ${host} can sign in from their own devices.`;
-  switch (reason) {
-    case "disabled":
-      return {
-        headline: `Tailscale sign-in is off on ${host}`,
-        steps: [
-          `On ${host}, run \`npx t3 up\`, or turn on Tailscale sign-in in Settings.`,
-          PAIR_INSTEAD,
-        ],
-      };
-    case "browser_request":
-      return {
-        headline: `${host} accepts Tailscale sign-in only from the desktop and mobile apps`,
-        steps: ["Pair this browser with a code."],
-      };
-    case "not_direct_tailnet":
-      return {
-        headline: `${host} did not see this device on its Tailscale address`,
-        steps: [
-          "Turn on Tailscale on this device. T3 Code retries on its own.",
-          `Add ${host} by its Tailscale name or 100.x address, not a LAN or HTTPS address.`,
-        ],
-      };
-    case "tailscale_unavailable":
-      return {
-        headline: `${host} could not ask Tailscale who this device is`,
-        steps: [`On ${host}, check that Tailscale runs, or run \`t3 tailscale status\`.`],
-      };
-    case "tailscale_outdated":
-      return {
-        headline: `${host} runs a Tailscale too old for sign-in`,
-        steps: [`Update Tailscale on ${host}.`],
-      };
-    case "owner_unknown":
-      return {
-        headline: `${host} does not know who owns it`,
-        steps: [`On ${host}, run \`npx t3 up --owner <your login>\`.`],
-      };
-    case "tagged_device":
-      return {
-        headline: "This device is tagged, so it cannot sign in",
-        steps: ["Tagged devices never sign in. Use an untagged device.", PAIR_INSTEAD],
-      };
-    case "shared_device":
-      return {
-        headline: `This device is shared in from another tailnet`,
-        steps: [owner, PAIR_INSTEAD],
-      };
-    case "other_user":
-      return {
-        headline: `This device belongs to another Tailscale user`,
-        steps: [owner, PAIR_INSTEAD],
-      };
-    case "own_node":
-      return {
-        headline: `This device is ${host}`,
-        steps: ["Use this device's own T3 Code instead."],
-      };
-    case "routes_for_others":
-      return {
-        headline: "This device is a subnet router or exit node, so it cannot sign in",
-        steps: ["Stop advertising routes on this device.", PAIR_INSTEAD],
-      };
-    case "blocked":
-      return {
-        headline: `${host} blocked this device`,
-        steps: [`On ${host}, open Settings > Sharing & access and unblock this device.`],
-      };
-    case "rate_limited":
-      return {
-        headline: `${host} asked this device to slow down`,
-        steps: ["Wait a minute. T3 Code retries on its own."],
-      };
-  }
 }
 
 /**
@@ -637,7 +559,7 @@ export function presentConnectionDiagnosis(
   if (input.via !== "relay") add("T3 Connect", input.relayStatus?.status);
   add("App version", input.clientVersion);
   add("Host version", input.serverVersion);
-  add("Error", failure?.detail);
+  add("Error", refusal === undefined ? failure?.detail : undefined);
   add("Trace ID", failure?.traceId);
 
   const verdict =
