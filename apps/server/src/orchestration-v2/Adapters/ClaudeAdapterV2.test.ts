@@ -595,17 +595,11 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
       mcpServers: overrides.mcpServers ?? {},
       environment: {},
     });
-    assert.isObject(options.systemPrompt);
-    const systemPrompt = options.systemPrompt as {
-      readonly type: string;
-      readonly preset: string;
-      readonly append?: string;
-    };
-    assert.equal(systemPrompt.type, "preset");
-    assert.equal(systemPrompt.preset, "claude_code");
-    assert.include(systemPrompt.append ?? "", "Use `delegate_task`");
-    assert.include(systemPrompt.append ?? "", "call `t3_background_wait`");
-    assert.notInclude(systemPrompt.append ?? "", "## T3 Code devices");
+    assert.deepEqual(options.systemPrompt, { type: "preset", preset: "claude_code" });
+    const append = options.extraArgs?.["append-system-prompt"] ?? "";
+    assert.include(append, "Use `delegate_task`");
+    assert.include(append, "call `t3_background_wait`");
+    assert.notInclude(append, "## T3 Code devices");
     const logged = ClaudeAdapterV2.loggedClaudeQueryOptions(options);
     assert.equal(logged.hasMcpServers, true);
     assert.notInclude(JSON.stringify(logged), "secret-claude-token");
@@ -642,7 +636,7 @@ describe("ClaudeAdapterV2 device instructions", () => {
       environment: {},
     });
   const append = (input: { readonly mcp: boolean; readonly deviceToolsAvailable: boolean }) =>
-    (options(input).systemPrompt as { readonly append?: string }).append ?? "";
+    options(input).extraArgs?.["append-system-prompt"] ?? "";
 
   it("gives a session with device access the device block and the ToolSearch line to load it", () => {
     const text = append({ mcp: true, deviceToolsAvailable: true });
@@ -1027,10 +1021,9 @@ describe("ClaudeAdapterV2 append-system-prompt-file launch argument", () => {
         assert.isTrue(Exit.isSuccess(exit));
         assert.lengthOf(opened, 1);
         assert.equal(
-          appendSystemPrompt(opened[0]),
-          `${appendSystemPrompt(plain.opened[0])}\n\nFile sentinel\n\nInline sentinel`,
+          opened[0]!.extraArgs?.["append-system-prompt"],
+          `${plain.opened[0]!.extraArgs?.["append-system-prompt"]}\n\nFile sentinel\n\nInline sentinel`,
         );
-        assert.isUndefined(opened[0]!.extraArgs?.["append-system-prompt"]);
         assert.isUndefined(opened[0]!.extraArgs?.["append-system-prompt-file"]);
         assert.equal(opened[0]!.extraArgs?.["system-prompt"], "Replacement");
       }).pipe(
