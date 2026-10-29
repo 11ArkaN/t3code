@@ -290,8 +290,14 @@ function makeLocalCommandHarness(input: {
     readonly interruptFailure?: boolean;
     readonly interruptCurrentRun?: boolean;
   };
-  /** A side chat whose context targets this run, or an earlier run that failed before the provider. */
-  readonly sideChat?: { readonly contextRun: "current" | "failed" };
+  /**
+   * A side chat whose context targets this run, an earlier run that failed before the provider,
+   * or an earlier run that delivered it. `nativeForkFrom` plans a native fork of the parent.
+   */
+  readonly sideChat?: {
+    readonly contextRun: "current" | "failed" | "delivered";
+    readonly nativeForkFrom?: "idle" | "busy";
+  };
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -465,9 +471,52 @@ function makeLocalCommandHarness(input: {
     checkpoints: [],
     updatedAt: now,
   };
+  const parentThreadId = ThreadId.make("side-chat-parent");
+  const parentRunId = RunId.make("side-chat-parent-run");
+  const parentProviderThread = {
+    ...providerThread,
+    id: ProviderThreadId.make("side-chat-parent-provider-thread"),
+    appThreadId: parentThreadId,
+    nativeThreadRef: {
+      driver: providerThread.driver,
+      nativeId: "side-chat-parent-native",
+      strength: "strong" as const,
+    },
+  };
+  const parentRecords = {
+    ...projection,
+    thread: { ...projection.thread, id: parentThreadId },
+    runs: [
+      {
+        ...run,
+        id: parentRunId,
+        threadId: parentThreadId,
+        ordinal: 1,
+        providerThreadId: parentProviderThread.id,
+        activeAttemptId: null,
+        status: "completed" as const,
+        completedAt: now,
+      },
+      ...(input.sideChat?.nativeForkFrom === "busy"
+        ? [
+            {
+              ...run,
+              id: RunId.make("side-chat-parent-busy-run"),
+              threadId: parentThreadId,
+              ordinal: 2,
+              providerThreadId: parentProviderThread.id,
+              status: "running" as const,
+            },
+          ]
+        : []),
+    ],
+    providerThreads: [parentProviderThread],
+    attempts: [],
+    providerTurns: [],
+    turnItems: [],
+  };
   if (input.sideChat !== undefined) {
-    const parentThreadId = ThreadId.make("side-chat-parent");
-    const failedRunId = RunId.make("side-chat-failed-run");
+    const earlierRunId = RunId.make("side-chat-earlier-run");
     projection = {
       ...projection,
       thread: {
@@ -481,26 +530,49 @@ function makeLocalCommandHarness(input: {
         },
       },
       runs:
-        input.sideChat.contextRun === "failed"
-          ? [
+        input.sideChat.contextRun === "current"
+          ? projection.runs
+          : [
               {
                 ...run,
-                id: failedRunId,
+                id: earlierRunId,
                 ordinal: 1,
-                userMessageId: MessageId.make("side-chat-failed-message"),
-                activeAttemptId: RunAttemptId.make("side-chat-failed-attempt"),
-                status: "failed",
+                userMessageId: MessageId.make("side-chat-earlier-message"),
+                activeAttemptId: RunAttemptId.make("side-chat-earlier-attempt"),
+                status: input.sideChat.contextRun === "failed" ? "failed" : "completed",
                 completedAt: now,
               },
               run,
-            ]
-          : projection.runs,
+            ],
+      contextTransfers:
+        input.sideChat.nativeForkFrom === undefined
+          ? []
+          : [
+              {
+                id: ContextTransferId.make("side-chat-fork"),
+                type: "fork",
+                sourceThreadId: parentThreadId,
+                targetThreadId: threadId,
+                sourcePoint: { threadId: parentThreadId, runId: parentRunId },
+                basePoint: null,
+                sourceProviderInstanceId: newInstanceId,
+                targetProviderInstanceId: newInstanceId,
+                targetRunId: runId,
+                status: "pending",
+                resolution: null,
+                createdBy: "user",
+                error: null,
+                createdAt: now,
+                updatedAt: now,
+                consumedAt: null,
+              },
+            ],
       contextHandoffs: [
         {
           id: ContextHandoffId.make("side-chat-context"),
           transferId: ContextTransferId.make("side-chat-fork"),
           threadId,
-          targetRunId: input.sideChat.contextRun === "failed" ? failedRunId : runId,
+          targetRunId: input.sideChat.contextRun === "current" ? runId : earlierRunId,
           fromProviderThreadIds: [],
           toProviderThreadId: providerThreadId,
           coveredRunOrdinals: { from: 1, to: 1 },
@@ -511,6 +583,15 @@ function makeLocalCommandHarness(input: {
           createdByProviderInstanceId: null,
           createdAt: now,
           updatedAt: now,
+          ...(input.sideChat.contextRun === "delivered"
+            ? {
+                delivery: {
+                  nativeThreadId: "side-chat-native",
+                  status: "inline" as const,
+                  itemIds: [],
+                },
+              }
+            : {}),
         },
       ],
     };
@@ -647,18 +728,21 @@ function makeLocalCommandHarness(input: {
     lastError: null,
   };
   const startTurn = vi.fn((_turn: ProviderAdapter.ProviderAdapterV2TurnInput) => Effect.void);
+  const sideChatThread = {
+    ...providerThread,
+    nativeThreadRef: {
+      driver: providerThread.driver,
+      nativeId: "side-chat-native",
+      strength: "strong" as const,
+    },
+  };
+  const forkThread = vi.fn(() => Effect.succeed(sideChatThread));
   const sideChatSession = {
     driver: providerThread.driver,
     providerSession,
-    ensureThread: () =>
-      Effect.succeed({
-        ...providerThread,
-        nativeThreadRef: {
-          driver: providerThread.driver,
-          nativeId: "side-chat-native",
-          strength: "strong" as const,
-        },
-      }),
+    ensureThread: () => Effect.succeed(sideChatThread),
+    resumeThread: () => Effect.succeed(sideChatThread),
+    forkThread,
     startTurn,
   };
   const open = vi.fn(() =>
@@ -757,8 +841,8 @@ function makeLocalCommandHarness(input: {
   const createWorktree = vi.fn<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]>(() =>
     Effect.succeed({} as never),
   );
-  const getThreadRecords = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getThreadRecords"]>(() =>
-    Effect.succeed(projection),
+  const getThreadRecords = vi.fn<ProjectionStore.ProjectionStoreV2Shape["getThreadRecords"]>((id) =>
+    Effect.succeed(id === parentThreadId ? parentRecords : projection),
   );
   const getTurnStartContext = vi.fn(() =>
     Effect.succeed({
@@ -774,7 +858,18 @@ function makeLocalCommandHarness(input: {
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
-          prepareProviderHandoff: () => Effect.die("history read must fail first"),
+          prepareProviderHandoff: (handoff) =>
+            input.sideChat?.nativeForkFrom === undefined
+              ? Effect.die("history read must fail first")
+              : Effect.succeed({
+                  ...handoff,
+                  id: ContextHandoffId.make("side-chat-fork-context"),
+                  createdByProviderInstanceId: handoff.toProviderInstanceId,
+                  status: "ready",
+                  summaryMessageId: null,
+                  summaryText: "PARENT_HISTORY",
+                  updatedAt: handoff.createdAt,
+                }),
         }),
         Layer.mock(EventSink.EventSinkV2)({
           writeIfRunCurrent,
@@ -860,6 +955,7 @@ function makeLocalCommandHarness(input: {
     writeIfRunCurrent,
     startRootRun,
     startTurn,
+    forkThread,
     interruptTurn,
     tryHandlePromptCommand,
     events,
@@ -1064,11 +1160,12 @@ effectIt.effect("recovers an abandoned failed turn before continuing its native 
 );
 
 effectIt.effect.each([
-  { contextRun: "current", runtimeMode: "approval-required" },
-  { contextRun: "failed", runtimeMode: "full-access" },
+  { contextRun: "current", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
+  { contextRun: "failed", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
+  { contextRun: "delivered", runtimeMode: "full-access", context: "" },
 ] as const)(
   "sends side chat context inline once, for the $contextRun run's turn",
-  ({ contextRun, runtimeMode }) =>
+  ({ contextRun, runtimeMode, context }) =>
     Effect.gen(function* () {
       const harness = makeLocalCommandHarness({
         text: "What is the main thread doing?",
@@ -1077,12 +1174,12 @@ effectIt.effect.each([
 
       yield* harness.start;
 
-      // Only the first turn is clamped; a later one follows the thread's mode.
+      // The turn that delivers the context is clamped; a later one follows the thread's mode.
       expect(harness.open).toHaveBeenCalledWith(
         expect.objectContaining({ runtimePolicy: expect.objectContaining({ runtimeMode }) }),
       );
       expect(harness.startTurn.mock.calls.map(([turn]) => turn.message.text)).toEqual([
-        withInlineContext("SIDE_CHAT_CONTEXT", "What is the main thread doing?"),
+        withInlineContext(context, "What is the main thread doing?"),
       ]);
       expect(harness.projection().contextHandoffs).toMatchObject([
         {
@@ -1090,6 +1187,30 @@ effectIt.effect.each([
           delivery: { nativeThreadId: "side-chat-native", status: "inline" },
         },
       ]);
+    }),
+);
+
+effectIt.effect.each([
+  { nativeForkFrom: "idle", forks: true, transferStatus: "consumed" },
+  { nativeForkFrom: "busy", forks: false, transferStatus: "resolved_portable" },
+] as const)(
+  "runs a planned native side chat fork when the parent is $nativeForkFrom",
+  ({ nativeForkFrom, forks, transferStatus }) =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "What is the main thread doing?",
+        sideChat: { contextRun: "current", nativeForkFrom },
+      });
+
+      yield* harness.start;
+
+      expect(harness.forkThread).toHaveBeenCalledTimes(forks ? 1 : 0);
+      expect(harness.projection().contextTransfers).toMatchObject([
+        { id: "side-chat-fork", status: transferStatus },
+      ]);
+      expect(harness.startTurn.mock.calls[0]?.[0].message.text.includes("PARENT_HISTORY")).toBe(
+        !forks,
+      );
     }),
 );
 

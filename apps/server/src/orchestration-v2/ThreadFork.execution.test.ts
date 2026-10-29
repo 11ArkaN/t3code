@@ -890,6 +890,18 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       Effect.flip,
     );
     assert.equal(ontoExisting._tag, "OrchestratorThreadAlreadyExistsError");
+    const plainOntoExisting = yield* orchestrator
+      .dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("side-chat-busy-plain-onto-existing"),
+        sourceThreadId: parentId,
+        targetThreadId: sideChatId,
+        sourcePoint: { type: "latest_stable" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(Effect.flip);
+    assert.equal(plainOntoExisting._tag, "OrchestratorThreadAlreadyExistsError");
     const busyMergeBack = yield* orchestrator
       .dispatch({
         type: "thread.merge_back",

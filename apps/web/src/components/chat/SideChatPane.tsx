@@ -3,6 +3,7 @@ import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import { resolveLatestMergeBackRun } from "@t3tools/client-runtime/state/thread-workflows";
 import {
   isAtomCommandInterrupted,
+  settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -10,12 +11,14 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { XIcon } from "lucide-react";
+import { Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ComposerHandleContext } from "../../composerHandleContext";
+import { useClientSettings } from "../../hooks/useSettings";
 import type { SideChatParentPanel } from "../../lib/sideChatPane";
-import { hostRightPanel } from "../../rightPanelStore";
+import { readLocalApi } from "../../localApi";
+import { hostRightPanel, useRightPanelStore } from "../../rightPanelStore";
 import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentShellHasSnapshot } from "../../state/shell";
@@ -27,7 +30,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { BackgroundThreadContext } from "./backgroundThread";
 
-/** A side chat tab: its title, Bring back and Close, over the side chat's own chat. */
+/** A side chat tab: its title, Bring back, Delete and Close, over the side chat's own chat. */
 export default function SideChatPane(props: {
   readonly parentRef: ScopedThreadRef;
   readonly threadId: ThreadId;
@@ -47,7 +50,10 @@ export default function SideChatPane(props: {
   const projection = useQuietThreadProjection(shell === null ? null : threadRef)?.projection;
   const canOperate = useEnvironmentScope(parentRef.environmentId, AuthOrchestrationOperateScope);
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack, { reportFailure: false });
+  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
   const [bringingBack, setBringingBack] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const mergeRun = projection ? resolveLatestMergeBackRun(projection) : null;
   // A pending merge-back would fail the main thread's queued message, so the server refuses it.
   const bringBackBlockedReason = !canOperate
@@ -82,6 +88,40 @@ export default function SideChatPane(props: {
     }
   };
 
+  const deleteSideChat = async () => {
+    if (!canOperate || shell === null || deleting) return;
+    if (confirmThreadDelete) {
+      const api = readLocalApi();
+      if (!api) return;
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(
+          [
+            `Delete side chat "${shell.title}"?`,
+            "This permanently clears its conversation history.",
+          ].join("\n"),
+          { variant: "destructive" },
+        ),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+    }
+    setDeleting(true);
+    const result = await deleteThread({
+      environmentId: parentRef.environmentId,
+      input: { threadId },
+    });
+    setDeleting(false);
+    if (result._tag === "Success") {
+      useRightPanelStore.getState().closeSurface(parentRef, `side-chat:${threadId}`);
+    } else if (!isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Could not delete the side chat",
+        ...(error instanceof Error ? { description: error.message } : {}),
+      });
+    }
+  };
+
   return (
     <div data-side-chat-pane className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pr-1 pl-3">
@@ -105,6 +145,15 @@ export default function SideChatPane(props: {
             {bringBackBlockedReason ?? "Adds this side chat to the main thread's next message."}
           </TooltipPopup>
         </Tooltip>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Delete side chat"
+          disabled={!canOperate || shell === null || deleting}
+          onClick={() => void deleteSideChat()}
+        >
+          <Trash2Icon />
+        </Button>
         <Button variant="ghost" size="icon-xs" aria-label="Close side chat" onClick={props.onClose}>
           <XIcon />
         </Button>

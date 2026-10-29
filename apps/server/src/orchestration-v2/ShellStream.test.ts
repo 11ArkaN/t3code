@@ -235,9 +235,24 @@ describe("omitOlderSettledShells", () => {
     omitOlderSettledShells({ threads, snapshotSequence: 7, now });
 
   it("keeps the 25 newest settled threads and counts the rest per project", () => {
-    const result = omit([...newest, row("old", 30), row("b-old", 40), row("unsettled", null)]);
+    const sideChat = row("side-chat", 0, {
+      lineage: {
+        parentThreadId: ThreadId.make("new-0"),
+        relationshipToParent: "fork",
+        rootThreadId: ThreadId.make("new-0"),
+        sideChat: true,
+      },
+    });
+    const result = omit([
+      ...newest,
+      sideChat,
+      row("old", 30),
+      row("b-old", 40),
+      row("unsettled", null),
+    ]);
     expect(result.threads.map((thread) => thread.id)).toEqual([
       ...newest.map((thread) => thread.id),
+      "side-chat",
       "unsettled",
     ]);
     expect(result.olderSettled).toEqual({

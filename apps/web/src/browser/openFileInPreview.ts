@@ -61,13 +61,14 @@ export async function openUrlInPreview<E>(input: {
   readonly profileId?: PreviewOpenInput["profileId"];
   readonly background?: boolean;
 }): Promise<AtomCommandResult<void, E | BrowserSettingsReadError>> {
+  // Read before any await: a side chat pane that unmounts meanwhile drops its host mapping.
+  const threadRef = rightPanelHostRef(input.threadRef);
   const defaults = await resolveBrowserDefaults().catch(
     (cause: unknown) => new BrowserSettingsReadError({ cause }),
   );
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const threadRef = rightPanelHostRef(input.threadRef);
   const runtime = previewRuntimeFor(threadRef.environmentId);
   const previousActiveTabId = readThreadPreviewState(threadRef).activeTabId;
   // The server changes the active tab, not panel selection; selection changes come from the user.
@@ -129,6 +130,7 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
       ),
     );
   }
+  const hostRef = rightPanelHostRef(input.threadRef);
   const insideWorkspace =
     mediaFileReference(input.filePath, input.workspaceRoot).relativePath !== undefined;
   const assetResult = await input.createAssetUrl({
@@ -151,7 +153,7 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
     );
   }
   return openUrlInPreview({
-    threadRef: input.threadRef,
+    threadRef: hostRef,
     url: assetUrl,
     openPreview: input.openPreview,
   });

@@ -4151,7 +4151,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.sourceThreadId} was deleted.`,
       });
     }
-    if (command.sideChat === true && (yield* findThread(command.targetThreadId)) !== null) {
+    if ((yield* findThread(command.targetThreadId)) !== null) {
       return yield* new OrchestratorThreadAlreadyExistsError({
         commandId: command.commandId,
         threadId: command.targetThreadId,

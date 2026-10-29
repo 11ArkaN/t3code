@@ -12,6 +12,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import {
+  isListedThreadLineage,
   isLiveSubagentShell,
   isOlderSettledThreadShell,
   OrchestrationProjectShell as ProjectShellSchema,
@@ -131,7 +132,7 @@ export function omitOlderSettledShells(input: {
   const nowMs = DateTime.toEpochMillis(input.now);
   const settledTimes = input.threads
     .flatMap((thread) =>
-      thread.lineage.relationshipToParent !== "subagent" &&
+      isListedThreadLineage(thread.lineage) &&
       thread.settledOverride === "settled" &&
       thread.settledAt !== null
         ? [DateTime.toEpochMillis(thread.settledAt)]

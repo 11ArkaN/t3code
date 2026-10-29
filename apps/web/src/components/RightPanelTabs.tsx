@@ -696,7 +696,11 @@ function SideChatTabIcon(props: { environmentId: EnvironmentId | null; threadId:
   const shell = useQuietThreadShell(
     props.environmentId === null ? null : scopeThreadRef(props.environmentId, props.threadId),
   );
-  const needsYou = shell !== null && (shell.hasPendingApprovals || shell.hasPendingUserInput);
+  const needsYou =
+    shell !== null &&
+    (shell.hasPendingApprovals ||
+      shell.hasPendingUserInput ||
+      Boolean(shell.pendingSubagentRequest));
   const running = shell !== null && threadRuntimeIsActive(shell.runtime);
   return (
     <>

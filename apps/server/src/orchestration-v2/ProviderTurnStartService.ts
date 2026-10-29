@@ -648,11 +648,12 @@ export const layer: Layer.Layer<
       });
       const { isCurrentAttemptInStatus } = runControls;
 
-      // A side chat shares its parent's worktree; its first turn always asks before acting.
+      // A side chat shares its parent's worktree; the turn that gets its context asks before acting.
       const resolvedRuntimePolicy = yield* runtimePolicy.resolve({
         thread:
           projection.thread.lineage.sideChat === true &&
-          !projection.runs.some((previous) => previous.ordinal < run.ordinal)
+          (sideChatHandoff !== undefined ||
+            !projection.runs.some((previous) => previous.ordinal < run.ordinal))
             ? { ...projection.thread, runtimeMode: "approval-required" }
             : projection.thread,
         modelSelection: run.modelSelection,
@@ -1045,6 +1046,7 @@ export const layer: Layer.Layer<
       };
       let resumedRetryHandoff: ReadonlyArray<OrchestrationV2ContextHandoff> | undefined;
       let resumedHandoffContext: ReturnType<typeof handoffContextForThread> | undefined;
+      let forkFellBackToPortable = false;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadRecords(
@@ -1071,18 +1073,100 @@ export const layer: Layer.Layer<
               cause: `Native fork transfer ${nativeForkTransfer.id} has no source provider execution.`,
             });
           }
-          return yield* loadFromProvider(
-            session.forkThread({
-              sourceProviderThread,
-              sourceProviderTurns: sourceProjection.providerTurns,
-              targetThreadId: projection.thread.id,
+          // Providers refuse to fork a busy thread, so a source that started a turn after
+          // dispatch planned this fork gets the portable context dispatch gives a busy source.
+          const sourceBusy = sourceProjection.runs.some(
+            (candidate) =>
+              candidate.ordinal > sourceRun.ordinal &&
+              (candidate.status === "preparing" ||
+                candidate.status === "starting" ||
+                candidate.status === "running" ||
+                candidate.status === "waiting"),
+          );
+          if (!sourceBusy) {
+            return yield* loadFromProvider(
+              session.forkThread({
+                sourceProviderThread,
+                sourceProviderTurns: sourceProjection.providerTurns,
+                targetThreadId: projection.thread.id,
+                modelSelection: run.modelSelection,
+                runtimePolicy: resolvedRuntimePolicy,
+                ...(sourceProviderTurn === undefined
+                  ? {}
+                  : { providerTurnId: sourceProviderTurn.id }),
+              }),
+            );
+          }
+          const { turnItems: sourceItems } = yield* projectionStore.getThreadRecords(
+            sourceProjection.thread.id,
+            ["turnItems"],
+            {
+              turnItemRunIds: [
+                ...sourceProjection.runs
+                  .filter((candidate) => candidate.ordinal <= sourceRun.ordinal)
+                  .map((candidate) => candidate.id),
+                ...(sourceProjection.thread.historyOrigin === "v1_import" ? [null] : []),
+              ],
+            },
+          );
+          const createdAt = yield* DateTime.now;
+          const handoff = yield* contextHandoffService.prepareProviderHandoff({
+            threadId: projection.thread.id,
+            targetRunId: run.id,
+            transferId: nativeForkTransfer.id,
+            fromProviderThreadIds: [sourceProviderThread.id],
+            toProviderThreadId: providerThread.id,
+            fromProviderInstanceId: sourceRun.providerInstanceId,
+            toProviderInstanceId: run.providerInstanceId,
+            coveredRunOrdinals: { from: 1, to: sourceRun.ordinal },
+            strategy: "full_thread_summary",
+            items: sourceItems,
+            runs: sourceProjection.runs,
+            createdAt,
+          });
+          const loaded = yield* loadFromProvider(
+            session.ensureThread({
+              threadId: projection.thread.id,
+              title: projection.thread.title,
               modelSelection: run.modelSelection,
               runtimePolicy: resolvedRuntimePolicy,
-              ...(sourceProviderTurn === undefined
-                ? {}
-                : { providerTurnId: sourceProviderTurn.id }),
+              providerSessionId,
+              existingProviderThread: { ...providerThread, forkedFrom: null },
             }),
           );
+          if (loaded === undefined) return undefined;
+          forkFellBackToPortable = true;
+          effectiveHandoffs = [handoff, ...effectiveHandoffs];
+          yield* eventSink.write({
+            events: [
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-handoff.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: handoff,
+              },
+              {
+                id: yield* idAllocator.allocate.event({ threadId: projection.thread.id }),
+                type: "context-transfer.updated",
+                threadId: projection.thread.id,
+                runId: run.id,
+                providerInstanceId: run.providerInstanceId,
+                occurredAt: createdAt,
+                payload: {
+                  ...nativeForkTransfer,
+                  targetProviderInstanceId: run.providerInstanceId,
+                  status: "resolved_portable",
+                  resolution: { strategy: "portable_context", contextHandoffId: handoff.id },
+                  error: null,
+                  updatedAt: createdAt,
+                },
+              },
+            ],
+          });
+          return loaded;
         }
         if (providerThread.nativeThreadRef === null) {
           // Pass the stored provider row for adoption; adapter-minted duplicates make activeProviderThreadId flap.
@@ -1273,7 +1357,7 @@ export const layer: Layer.Layer<
         firstRunOrdinal: providerThread.firstRunOrdinal ?? run.ordinal,
         lastRunOrdinal: run.ordinal,
         handoffIds: providerThread.handoffIds,
-        forkedFrom: providerThread.forkedFrom,
+        forkedFrom: forkFellBackToPortable ? null : providerThread.forkedFrom,
         status: "active",
         createdAt: providerThread.createdAt,
         updatedAt: now,
@@ -1318,7 +1402,9 @@ export const layer: Layer.Layer<
           occurredAt: now,
           payload: runningProviderThread,
         },
-        ...(nativeForkTransfer === undefined || runningProviderThread.nativeThreadRef === null
+        ...(nativeForkTransfer === undefined ||
+        forkFellBackToPortable ||
+        runningProviderThread.nativeThreadRef === null
           ? []
           : [
               {

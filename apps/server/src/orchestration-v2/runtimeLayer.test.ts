@@ -711,6 +711,104 @@ it.layer(layerProjectDeletionTest)("project deletion during thread commands", (i
         );
       }),
   );
+
+  // A fork from a side chat onto its parent used to lock the side chat, then the parent: the
+  // reverse of the parent delete's order.
+  it.effect("a parent delete and a fork from its side chat onto the parent do not deadlock", () =>
+    Effect.gen(function* () {
+      const projects = yield* ProjectService.ProjectService;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+      const projectId = ProjectId.make("runtime-side-chat-lock-order");
+      const parentId = ThreadId.make("runtime-side-chat-lock-order-parent");
+      const sideChatId = ThreadId.make("runtime-side-chat-lock-order-child");
+      yield* projects.create({
+        commandId: CommandId.make("runtime-side-chat-lock-order-project"),
+        projectId,
+        title: "Side chat lock order",
+        workspaceRoot: "/work/side-chat-lock-order",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("runtime-side-chat-lock-order-create"),
+        createdBy: "user",
+        creationSource: "web",
+        threadId: parentId,
+        projectId,
+        title: "Parent",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("runtime-side-chat-lock-order-fork"),
+        sourceThreadId: parentId,
+        targetThreadId: sideChatId,
+        sourcePoint: { type: "latest_stable" },
+        sideChat: true,
+        createdBy: "user",
+        creationSource: "web",
+      });
+
+      const deleteHoldsParent = yield* Deferred.make<void>();
+      const releaseDelete = yield* Deferred.make<void>();
+      const forkWaitsForParent = yield* Deferred.make<void>();
+      const withLock = executor.withLock;
+      let parentLockRequests = 0;
+      const observeLock: ThreadCommandExecutor.ThreadCommandExecutor["Service"]["withLock"] = (
+        key,
+        effect,
+      ) => {
+        if (key !== parentId) return withLock(key, effect);
+        // Dispatch builds locks it may not run, so count when one runs.
+        return Effect.suspend(() =>
+          ++parentLockRequests === 1
+            ? withLock(
+                key,
+                Deferred.succeed(deleteHoldsParent, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDelete)),
+                  Effect.andThen(effect),
+                ),
+              )
+            : Deferred.succeed(forkWaitsForParent, undefined).pipe(
+                Effect.andThen(withLock(key, effect)),
+              ),
+        );
+      };
+      const lockSpy = vi.spyOn(executor, "withLock").mockImplementation(observeLock);
+      yield* Effect.gen(function* () {
+        const deleteFiber = yield* orchestrator
+          .dispatch({
+            type: "thread.delete",
+            commandId: CommandId.make("runtime-side-chat-lock-order-delete"),
+            threadId: parentId,
+          })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.await(deleteHoldsParent);
+        const forkFiber = yield* orchestrator
+          .dispatch({
+            type: "thread.fork",
+            commandId: CommandId.make("runtime-side-chat-lock-order-fork-back"),
+            sourceThreadId: sideChatId,
+            targetThreadId: parentId,
+            sourcePoint: { type: "latest_stable" },
+            sideChat: true,
+            createdBy: "user",
+            creationSource: "web",
+          })
+          .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.await(forkWaitsForParent);
+        yield* Deferred.succeed(releaseDelete, undefined);
+        yield* Fiber.join(deleteFiber);
+        yield* Fiber.join(forkFiber);
+        assert.isNotNull((yield* orchestrator.getThreadProjection(parentId)).thread.deletedAt);
+        assert.isNotNull((yield* orchestrator.getThreadProjection(sideChatId)).thread.deletedAt);
+      }).pipe(Effect.ensuring(Effect.sync(() => lockSpy.mockRestore())));
+    }),
+  );
 });
 
 const layerSharedApplicationDataPlaneTest = Layer.mergeAll(
