@@ -367,11 +367,6 @@ describe("ssh tunnel scripts", () => {
   );
 });
 
-// On macOS, Node can bind 127.0.0.1:<port> while another process (such as the
-// desktop app with network access on) listens on *:<port>. Linux refuses that
-// bind unless both sockets set SO_REUSEPORT, so on Linux the preload adds it to
-// the picker's probe and the holder sets it too.
-
 // On Linux a thread ID passes kill -0 like a PID, and kill <tid> signals its
 // whole process, but ps knows only thread-group leaders. A stale pid file can
 // name such a thread after the host restarts.
@@ -444,7 +439,7 @@ server.listen(Number(flag("--port") ?? 0), "127.0.0.1", () => {
       return { fs, home, fakeServer, holder, holderPort, tid, sshAsLocalShell };
     });
 
-    it.effect("launches a fresh server instead of trusting a thread ID left in the pid file", () =>
+    it.live("launches a fresh server instead of trusting a thread ID left in the pid file", () =>
       Effect.gen(function* () {
         const { fs, home, fakeServer, holderPort, tid, sshAsLocalShell } = yield* prepare;
         const runner = { nodeScriptPath: fakeServer };
@@ -492,7 +487,7 @@ server.listen(Number(flag("--port") ?? 0), "127.0.0.1", () => {
       }).pipe(Effect.provide(NodeServices.layer)),
     );
 
-    it.effect("stop does not signal the process that owns a thread ID left in the pid file", () =>
+    it.live("stop does not signal the process that owns a thread ID left in the pid file", () =>
       Effect.gen(function* () {
         const { fs, home, holder, tid } = yield* prepare;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -517,3 +512,8 @@ server.listen(Number(flag("--port") ?? 0), "127.0.0.1", () => {
     );
   },
 );
+
+// On macOS, Node can bind 127.0.0.1:<port> while another process (such as the
+// desktop app with network access on) listens on *:<port>. Linux refuses that
+// bind unless both sockets set SO_REUSEPORT, so on Linux the preload adds it to
+// the picker's probe and the holder sets it too.
