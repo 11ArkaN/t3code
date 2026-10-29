@@ -1,4 +1,4 @@
-import { themeAccentWithContrast } from "./colorContrast.ts";
+import { contrastRatio, rgbChannels, themeAccentWithContrast } from "./colorContrast.ts";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -172,6 +172,18 @@ const FIXED_COLORS = {
   },
 } as const;
 
+function readableForeground(foreground: string, background: string): string {
+  const backgroundChannels = rgbChannels(background)!;
+  const foregroundChannels = rgbChannels(foreground);
+  if (foregroundChannels && contrastRatio(foregroundChannels, backgroundChannels) >= 4.5) {
+    return foreground;
+  }
+  return contrastRatio([255, 255, 255], backgroundChannels) >=
+    contrastRatio([0, 0, 0], backgroundChannels)
+    ? "#ffffff"
+    : "#000000";
+}
+
 /** Uses app tokens, except --accent is the brand color rather than a neutral hover surface. */
 export function htmlRenderTheme(
   colors: ThemeColors,
@@ -181,6 +193,10 @@ export function htmlRenderTheme(
   const fixed = FIXED_COLORS[appearance];
   // Charts draw lines and markers in the accent; WCAG 1.4.11 asks 3:1 for them on the canvas.
   const accent = themeAccentWithContrast(colors.accent, [colors.canvas], 3);
+  const accentForeground =
+    accent === colors.accent
+      ? colors.accentForeground
+      : readableForeground(colors.accentForeground, accent);
   return {
     appearance,
     variables: {
@@ -200,7 +216,7 @@ export function htmlRenderTheme(
       "--primary": colors.messageAction,
       "--primary-foreground": colors.messageActionForeground,
       "--accent": accent,
-      "--accent-foreground": colors.accentForeground,
+      "--accent-foreground": accentForeground,
       "--accent-surface": colors.accentSurface,
       "--accent-surface-foreground": colors.accentSurfaceForeground,
       "--destructive": colors.error,

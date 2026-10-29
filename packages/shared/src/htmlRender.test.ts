@@ -110,6 +110,22 @@ describe("htmlRenderTheme", () => {
     ).toBeLessThanOrEqual(2);
   });
 
+  it("keeps --accent-foreground readable on a lifted accent", () => {
+    const { variables } = htmlRenderTheme(
+      {
+        ...T3_CODE_LIGHT_THEME_COLORS,
+        canvas: "#808080",
+        accent: "#808080",
+        accentForeground: "#000000",
+      },
+      "light",
+    );
+    expect(
+      contrastRatio(variables["--accent-foreground"]!, variables["--accent"]!),
+      `${variables["--accent-foreground"]} on ${variables["--accent"]}`,
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("passes the default themes' accent through unchanged", () => {
     for (const [colors, appearance] of [
       [T3_CODE_DARK_THEME_COLORS, "dark"],
