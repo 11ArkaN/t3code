@@ -3257,6 +3257,7 @@ it.effect(
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const pendingWork = yield* Ref.make<Effect.Effect<boolean>>(Effect.succeed(false));
+      const beforeUnload = yield* Ref.make<Effect.Effect<void>>(Effect.void);
       const settings = yield* makeTestSettings;
       yield* Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
@@ -3303,11 +3304,11 @@ it.effect(
           modelSelection,
           runtimePolicy,
         });
-        const resume = (threadId: ThreadId) =>
+        const resume = (threadId: ThreadId, selection = modelSelection) =>
           runtime.resumeThread({
             providerThread: providerThreads[threadId]!,
             threadId,
-            modelSelection,
+            modelSelection: selection,
             runtimePolicy,
           });
         const observed = Ref.get(state).pipe(
@@ -3323,17 +3324,18 @@ it.effect(
         yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
         // Background work, or a probe that cannot tell, keeps the stale thread loaded.
         yield* Ref.set(pendingWork, Effect.succeed(true));
+        yield* resume(threadA, { ...modelSelection, model: "gpt-5.4-mini" });
         yield* resume(threadA);
         yield* Ref.set(pendingWork, Effect.die("probe failed"));
         yield* resume(threadA);
-        assert.deepEqual(yield* observed, { resumeCount: 2, unloaded: [] });
+        assert.deepEqual(yield* observed, { resumeCount: 4, unloaded: [] });
 
         yield* Ref.set(pendingWork, Effect.succeed(false));
         const reloaded = yield* resume(threadA);
         assert.deepEqual(reloaded.nativeThreadRef, providerThreads[threadA]!.nativeThreadRef);
-        assert.deepEqual(yield* observed, { resumeCount: 3, unloaded: ["native-links-a"] });
+        assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
         yield* resume(threadA);
-        assert.deepEqual(yield* observed, { resumeCount: 3, unloaded: ["native-links-a"] });
+        assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
 
         // A thread with a live turn keeps its process until that turn ends.
         const runId = idAllocator.derive.run({ threadId: threadB, ordinal: 1 });
@@ -3357,13 +3359,26 @@ it.effect(
           runtimePolicy,
         });
         yield* resume(threadB);
-        assert.deepEqual(yield* observed, { resumeCount: 3, unloaded: ["native-links-a"] });
+        assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
 
         yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
         yield* resume(threadA);
         assert.deepEqual(yield* observed, {
-          resumeCount: 4,
+          resumeCount: 6,
           unloaded: ["native-links-a", "native-links-a"],
+        });
+        yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        yield* Ref.set(beforeUnload, Effect.die("unload failed"));
+        yield* resume(threadA);
+        assert.deepEqual(yield* observed, {
+          resumeCount: 6,
+          unloaded: ["native-links-a", "native-links-a"],
+        });
+        yield* Ref.set(beforeUnload, Effect.void);
+        yield* resume(threadA);
+        assert.deepEqual(yield* observed, {
+          resumeCount: 7,
+          unloaded: ["native-links-a", "native-links-a", "native-links-a"],
         });
         const final = yield* Ref.get(state);
         assert.equal(final.openCount, 1);
@@ -3373,6 +3388,7 @@ it.effect(
           layerTest({
             state,
             idleTimeoutMs: 1000,
+            beforeUnload: Effect.flatten(Ref.get(beforeUnload)),
             hasPendingBackgroundWorkForThread: Effect.flatten(Ref.get(pendingWork)),
             serverSettingsLayer: Layer.succeed(ServerSettings.ServerSettingsService, settings),
           }),
