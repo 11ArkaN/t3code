@@ -425,9 +425,10 @@ export default function DiffPanel({
     : selectedTurn
       ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
       : selectedGitScopeLabel;
+  const headerCommitSha = selectedRunId === null ? selectedCommitSha : null;
   const selectedCommitUrl =
-    selectedRunId === null && selectedCommitSha !== null
-      ? projectCommitUrl(activeProject?.repositoryIdentity, selectedCommitSha)
+    headerCommitSha !== null
+      ? projectCommitUrl(activeProject?.repositoryIdentity, headerCommitSha)
       : null;
   const openLink = useOpenLink(routeThreadRef);
   // A SHA link goes to the code host; it must not route back into this pane's commit selection.
@@ -784,17 +785,14 @@ export default function DiffPanel({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={<Button size="xs" variant="secondary" />}
-            className={cn(
-              "max-w-full",
-              selectedRunId === null && selectedCommitSha !== null && "min-w-0 shrink",
-            )}
+            className={cn("max-w-full", headerCommitSha !== null && "min-w-0 shrink")}
             aria-label={`Diff scope: ${selectedScopeLabel}`}
             data-workspace-focus-default
           >
             <span className="truncate">{selectedScopeLabel}</span>
             <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
           </DropdownMenuTrigger>
-          {selectedRunId === null && selectedCommitSha !== null ? (
+          {headerCommitSha !== null ? (
             selectedCommitUrl ? (
               <Tooltip>
                 <TooltipTrigger
@@ -808,13 +806,13 @@ export default function DiffPanel({
                     />
                   }
                 >
-                  {selectedCommitSha.slice(0, 7)}
+                  {headerCommitSha.slice(0, 7)}
                 </TooltipTrigger>
                 <TooltipPopup side="top">{selectedCommitUrl}</TooltipPopup>
               </Tooltip>
             ) : (
               <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                {selectedCommitSha.slice(0, 7)}
+                {headerCommitSha.slice(0, 7)}
               </span>
             )
           ) : null}
@@ -1095,7 +1093,7 @@ export default function DiffPanel({
       <div
         className={cn(
           "flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]",
-          selectedRunId === null && selectedCommitSha !== null && "gap-0",
+          headerCommitSha !== null && "gap-0",
         )}
       >
         {codeViewFiles.length > 0 || (isGitSelection && selectedGitSource?.files?.length) ? (

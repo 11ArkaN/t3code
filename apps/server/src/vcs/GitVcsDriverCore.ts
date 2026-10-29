@@ -3103,7 +3103,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const reviewCommitError = (cwd: string, detail: string) =>
     new GitCommandError({
       operation: "GitVcsDriver.reviewCommit",
-      command: "git show",
+      command: "git cat-file",
       cwd,
       detail,
     });
@@ -3124,19 +3124,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (reachable.exitCode !== 0) {
       return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
     }
-    const metadata = yield* executeGit(
-      "GitVcsDriver.reviewCommit.parents",
-      cwd,
-      ["show", "--no-patch", "--no-notes", "--no-show-signature", "--format=raw", sha],
-      { appendTruncationMarker: true, env: { GIT_NO_LAZY_FETCH: "1" } },
-    );
-    const headerEnd = metadata.stdout.indexOf("\n\n");
-    const headers = metadata.stdout.slice(0, headerEnd).split("\n");
-    const resolvedSha = headers[0]?.split(" ")[1];
-    if (headerEnd < 0 || resolvedSha?.toLowerCase() !== sha.toLowerCase()) {
-      return yield* reviewCommitError(cwd, "Selected commit is invalid or no longer available.");
-    }
-    const firstParent = headers.find((line) => line.startsWith("parent "))?.slice(7);
+    // The raw object keeps the parents a shallow clone grafts away, so a boundary is not a root.
+    const object = yield* runGitStdout("GitVcsDriver.reviewCommit.parents", cwd, [
+      "cat-file",
+      "commit",
+      sha,
+    ]);
+    const secondLine = object.split("\n", 2)[1];
+    const firstParent = secondLine?.startsWith("parent ") ? secondLine.slice(7) : undefined;
     if (firstParent !== undefined) {
       const parent = yield* executeGit(
         "GitVcsDriver.reviewCommit.parent",
@@ -3148,7 +3143,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         return yield* reviewCommitError(cwd, "Selected commit's parent is not available locally.");
       }
     }
-    return { sha: resolvedSha, parent: firstParent ?? (yield* readEmptyTreeHash(cwd)) };
+    return { sha: sha.toLowerCase(), parent: firstParent ?? (yield* readEmptyTreeHash(cwd)) };
   });
 
   const readReviewCommitMessage = Effect.fn("GitVcsDriver.readReviewCommitMessage")(function* (

@@ -40,6 +40,12 @@ import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 
 type PendingDescription = Deferred.Deferred<string, TextGenerationError | GitCommandError>;
 const encodeModelSelection = Schema.encodeSync(Schema.fromJsonString(ModelSelection));
+const WORKSPACE_BOUND_SUBJECTS = {
+  "ReviewService.getBranchCommits": "commit list",
+  "ReviewService.generateCommitDescriptions": "commit description",
+  "ReviewService.getDiffPreview": "diff preview",
+  "ReviewService.getDiffFileContents": "diff file contents",
+} as const;
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -94,11 +100,7 @@ export const make = Effect.gen(function* () {
   };
 
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
-    operation:
-      | "ReviewService.getBranchCommits"
-      | "ReviewService.generateCommitDescriptions"
-      | "ReviewService.getDiffPreview"
-      | "ReviewService.getDiffFileContents",
+    operation: keyof typeof WORKSPACE_BOUND_SUBJECTS,
     cwd: string,
   ) {
     const [candidate, workspaceRoot] = yield* Effect.all([
@@ -115,14 +117,7 @@ export const make = Effect.gen(function* () {
     return yield* new VcsRepositoryDetectionError({
       operation,
       cwd,
-      detail:
-        operation === "ReviewService.getDiffPreview"
-          ? "Review diff preview cwd must stay within the configured workspace root."
-          : operation === "ReviewService.getBranchCommits"
-            ? "Review commit list cwd must stay within the configured workspace root."
-            : operation === "ReviewService.generateCommitDescriptions"
-              ? "Review commit description cwd must stay within the configured workspace root."
-              : "Review diff file contents cwd must stay within the configured workspace root.",
+      detail: `Review ${WORKSPACE_BOUND_SUBJECTS[operation]} cwd must stay within the configured workspace root.`,
     });
   });
 
