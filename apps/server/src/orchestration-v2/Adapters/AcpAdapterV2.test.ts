@@ -1190,11 +1190,11 @@ describe("AcpAdapterV2", () => {
 
   // regression: #26852 ACP v1 agents may ask for permission while applying a model switch
   it.live.each([
-    { runtimeMode: "full-access", optionId: "allow-once" },
-    { runtimeMode: "approval-required", optionId: "reject-once" },
+    { runtimeMode: "full-access", optionId: "allow-once", switched: true },
+    { runtimeMode: "approval-required", optionId: "reject-once", switched: false },
   ] as const)(
     "answers a permission request during a model switch from the runtime policy ($runtimeMode)",
-    ({ runtimeMode, optionId }) =>
+    ({ runtimeMode, optionId, switched }) =>
       Effect.gen(function* () {
         const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const path = yield* Path.Path;
@@ -1256,7 +1256,12 @@ describe("AcpAdapterV2", () => {
           [{ outcome: "selected", optionId }],
           "a permission request before the turn is active must be answered from the runtime policy",
         );
-        assert.isTrue(Exit.isSuccess(started), "the turn on the switched model must start");
+        if (switched) {
+          assert.isTrue(Exit.isSuccess(started), "the turn on the switched model must start");
+        } else {
+          if (Exit.isSuccess(started)) assert.fail("the agent refused the switch");
+          assert.include(Cause.pretty(started.cause), "model_switch_cancelled");
+        }
       }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
@@ -1288,12 +1293,12 @@ describe("AcpAdapterV2", () => {
           selfInvocation: yield* resolveSelfInvocation(),
         });
         const openedPolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: "full-access",
+          runtimeMode: "approval-required",
           interactionMode: "default",
           cwd: process.cwd(),
         });
         const resumedPolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: "approval-required",
+          runtimeMode: "full-access",
           interactionMode: "default",
           cwd: process.cwd(),
         });
@@ -1327,7 +1332,7 @@ describe("AcpAdapterV2", () => {
         );
         assert.deepEqual(
           rawProtocolOutgoingOutcomes(Array.from(yield* Queue.takeAll(protocolEvents))),
-          [{ outcome: "selected", optionId: "reject-once" }],
+          [{ outcome: "selected", optionId: "allow-once" }],
           "a permission request while resuming must be decided by the resumed policy",
         );
         assert.isTrue(Exit.isSuccess(resumed), "resuming on the switched model must succeed");

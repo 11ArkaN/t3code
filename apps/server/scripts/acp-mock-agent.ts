@@ -747,7 +747,7 @@ const program = Effect.gen(function* () {
       }
       if (request.configId === "model" && typeof request.value === "string") {
         if (request.value === requestPermissionOnSetModel) {
-          yield* agent.client.requestPermission({
+          const permission = yield* agent.client.requestPermission({
             sessionId: request.sessionId,
             title: `Switch model to ${request.value}`,
             subject: {
@@ -764,6 +764,13 @@ const program = Effect.gen(function* () {
               { optionId: permissionOptionIds.rejectOnce, name: "Reject", kind: "reject_once" },
             ],
           });
+          // Like Hermes, a declined switch keeps the model and fails the request.
+          if (
+            permission.outcome.outcome !== "selected" ||
+            permission.outcome.optionId !== permissionOptionIds.allowOnce
+          ) {
+            return yield* AcpError.AcpRequestError.internalError("model_switch_cancelled");
+          }
         }
         currentModelId = request.value;
       }
