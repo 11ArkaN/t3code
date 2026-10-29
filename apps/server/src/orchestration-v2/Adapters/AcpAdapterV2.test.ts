@@ -1169,83 +1169,89 @@ describe("AcpAdapterV2", () => {
   );
 
   // regression: #26852 ACP v1 agents may ask for permission while applying a model switch
-  it.live("answers a permission request during a model switch from the runtime policy", () =>
-    Effect.gen(function* () {
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const path = yield* Path.Path;
-      const mockAgentPath = yield* path.fromFileUrl(
-        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
-      );
-      const protocolEvents = yield* Queue.unbounded<EffectAcpProtocol.AcpProtocolLogEvent>();
-      const instanceId = ProviderInstanceId.make("acp-test-permission-during-model-switch");
-      const threadId = ThreadId.make("thread-acp-permission-during-model-switch");
-      const adapter = yield* makeAcpAdapterV2({
-        instanceId,
-        flavor: {
-          driver: ACP_TEST_DRIVER,
-          capabilities: AcpProviderCapabilitiesV2,
-          makeRuntime: makeMockRuntime({
-            childProcessSpawner,
-            mockAgentPath,
-            protocolEvents,
-            environment: { T3_ACP_REQUEST_PERMISSION_ON_SET_MODEL: "composer-2" },
-          }),
-        },
-        selfInvocation: yield* resolveSelfInvocation(),
-      });
-      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        cwd: process.cwd(),
-      });
-      const openedSelection = { instanceId, model: "default" } as const;
-      const switchedSelection = { instanceId, model: "composer-2" } as const;
-      const runtime = yield* adapter.openSession({
-        threadId,
-        providerSessionId: ProviderSessionId.make("provider-session-acp-permission-model-switch"),
-        modelSelection: openedSelection,
-        runtimePolicy,
-      });
-      const providerThread = yield* runtime.ensureThread({
-        threadId,
-        modelSelection: openedSelection,
-        runtimePolicy,
-      });
-      yield* Queue.clear(protocolEvents);
+  it.live.each([
+    { runtimeMode: "full-access", optionId: "allow-once" },
+    { runtimeMode: "approval-required", optionId: "reject-once" },
+  ] as const)(
+    "answers a permission request during a model switch from the runtime policy ($runtimeMode)",
+    ({ runtimeMode, optionId }) =>
+      Effect.gen(function* () {
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const path = yield* Path.Path;
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const protocolEvents = yield* Queue.unbounded<EffectAcpProtocol.AcpProtocolLogEvent>();
+        const instanceId = ProviderInstanceId.make("acp-test-permission-during-model-switch");
+        const threadId = ThreadId.make("thread-acp-permission-during-model-switch");
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            makeRuntime: makeMockRuntime({
+              childProcessSpawner,
+              mockAgentPath,
+              protocolEvents,
+              environment: { T3_ACP_REQUEST_PERMISSION_ON_SET_MODEL: "composer-2" },
+            }),
+          },
+          selfInvocation: yield* resolveSelfInvocation(),
+        });
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode,
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const openedSelection = { instanceId, model: "default" } as const;
+        const switchedSelection = { instanceId, model: "composer-2" } as const;
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-permission-model-switch"),
+          modelSelection: openedSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: openedSelection,
+          runtimePolicy,
+        });
+        yield* Queue.clear(protocolEvents);
 
-      const started = yield* Effect.exit(
-        runtime.startTurn(
-          makeTurnInput({
-            threadId,
-            providerThread,
-            instanceId,
-            runtimePolicy,
-            now: yield* DateTime.now,
-            ordinal: 1,
-            modelSelection: switchedSelection,
-          }),
-        ),
-      );
-      const permissionReplies: Array<unknown> = [];
-      for (const event of yield* Queue.takeAll(protocolEvents)) {
-        if (event.direction !== "outgoing" || typeof event.payload !== "string") continue;
-        for (const line of event.payload.split("\n")) {
-          const decoded = Option.getOrUndefined(decodeUnknownJson(line.trim()));
-          if (typeof decoded !== "object" || decoded === null || "method" in decoded) continue;
-          if ("error" in decoded) permissionReplies.push({ error: Reflect.get(decoded, "error") });
-          const result = Reflect.get(decoded, "result");
-          if (typeof result === "object" && result !== null && "outcome" in result) {
-            permissionReplies.push(Reflect.get(result, "outcome"));
+        const started = yield* Effect.exit(
+          runtime.startTurn(
+            makeTurnInput({
+              threadId,
+              providerThread,
+              instanceId,
+              runtimePolicy,
+              now: yield* DateTime.now,
+              ordinal: 1,
+              modelSelection: switchedSelection,
+            }),
+          ),
+        );
+        const permissionReplies: Array<unknown> = [];
+        for (const event of yield* Queue.takeAll(protocolEvents)) {
+          if (event.direction !== "outgoing" || typeof event.payload !== "string") continue;
+          for (const line of event.payload.split("\n")) {
+            const decoded = Option.getOrUndefined(decodeUnknownJson(line.trim()));
+            if (typeof decoded !== "object" || decoded === null || "method" in decoded) continue;
+            if ("error" in decoded)
+              permissionReplies.push({ error: Reflect.get(decoded, "error") });
+            const result = Reflect.get(decoded, "result");
+            if (typeof result === "object" && result !== null && "outcome" in result) {
+              permissionReplies.push(Reflect.get(result, "outcome"));
+            }
           }
         }
-      }
-      assert.deepEqual(
-        permissionReplies,
-        [{ outcome: "selected", optionId: "allow-once" }],
-        "full access must auto-approve a permission request that arrives before the turn is active",
-      );
-      assert.isTrue(Exit.isSuccess(started), "the turn on the switched model must start");
-    }).pipe(Effect.provide(layerTest), Effect.scoped),
+        assert.deepEqual(
+          permissionReplies,
+          [{ outcome: "selected", optionId }],
+          "a permission request before the turn is active must be answered from the runtime policy",
+        );
+        assert.isTrue(Exit.isSuccess(started), "the turn on the switched model must start");
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
   // regression: #21499 turns blocked only on T3 thread waits must show as waiting
