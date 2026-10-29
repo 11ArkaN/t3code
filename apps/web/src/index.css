@@ -2115,6 +2115,16 @@ code {
   font-weight: 600;
 }
 
+/* Trigger wrappers replace a chip's own data-slot, so its label marks it. */
+.chat-markdown [data-chip-word]:has([data-slot="context-chip-label"]) {
+  text-wrap-mode: nowrap;
+}
+
+/* A truncating chip leaves room for the punctuation glued to it. */
+.chat-markdown [data-chip-word] :has(> [data-slot="context-chip-label"]) {
+  max-width: calc(100% - 1em);
+}
+
 .chat-markdown :not(pre) > code {
   border: 1px solid transparent;
   border-radius: 0.25rem;
