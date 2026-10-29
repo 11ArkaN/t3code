@@ -287,6 +287,26 @@ function rawProtocolRequest(
   return undefined;
 }
 
+function rawProtocolOutgoingOutcomes(
+  events: ReadonlyArray<EffectAcpProtocol.AcpProtocolLogEvent>,
+): Array<unknown> {
+  const outcomes: Array<unknown> = [];
+  for (const event of events) {
+    if (event.stage !== "raw" || event.direction !== "outgoing") continue;
+    if (typeof event.payload !== "string") continue;
+    for (const line of event.payload.split("\n")) {
+      const decoded = Option.getOrUndefined(decodeUnknownJson(line.trim()));
+      if (typeof decoded !== "object" || decoded === null || "method" in decoded) continue;
+      if ("error" in decoded) outcomes.push({ error: Reflect.get(decoded, "error") });
+      const result = Reflect.get(decoded, "result");
+      if (typeof result === "object" && result !== null && "outcome" in result) {
+        outcomes.push(Reflect.get(result, "outcome"));
+      }
+    }
+  }
+  return outcomes;
+}
+
 function rawProtocolRequestParam(
   event: EffectAcpProtocol.AcpProtocolLogEvent,
   key: string,
@@ -1231,26 +1251,86 @@ describe("AcpAdapterV2", () => {
             }),
           ),
         );
-        const permissionReplies: Array<unknown> = [];
-        for (const event of yield* Queue.takeAll(protocolEvents)) {
-          if (event.direction !== "outgoing" || typeof event.payload !== "string") continue;
-          for (const line of event.payload.split("\n")) {
-            const decoded = Option.getOrUndefined(decodeUnknownJson(line.trim()));
-            if (typeof decoded !== "object" || decoded === null || "method" in decoded) continue;
-            if ("error" in decoded)
-              permissionReplies.push({ error: Reflect.get(decoded, "error") });
-            const result = Reflect.get(decoded, "result");
-            if (typeof result === "object" && result !== null && "outcome" in result) {
-              permissionReplies.push(Reflect.get(result, "outcome"));
-            }
-          }
-        }
         assert.deepEqual(
-          permissionReplies,
+          rawProtocolOutgoingOutcomes(Array.from(yield* Queue.takeAll(protocolEvents))),
           [{ outcome: "selected", optionId }],
           "a permission request before the turn is active must be answered from the runtime policy",
         );
         assert.isTrue(Exit.isSuccess(started), "the turn on the switched model must start");
+      }).pipe(Effect.provide(layerTest), Effect.scoped),
+  );
+
+  // regression: #26852 a resumed session decides permission requests with the resumed policy
+  it.live(
+    "answers a permission request during a resumed model switch from the resumed policy",
+    () =>
+      Effect.gen(function* () {
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const path = yield* Path.Path;
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const protocolEvents = yield* Queue.unbounded<EffectAcpProtocol.AcpProtocolLogEvent>();
+        const instanceId = ProviderInstanceId.make("acp-test-permission-during-resume");
+        const threadId = ThreadId.make("thread-acp-permission-during-resume");
+        const adapter = yield* makeAcpAdapterV2({
+          instanceId,
+          flavor: {
+            driver: ACP_TEST_DRIVER,
+            capabilities: AcpProviderCapabilitiesV2,
+            makeRuntime: makeMockRuntime({
+              childProcessSpawner,
+              mockAgentPath,
+              protocolEvents,
+              environment: { T3_ACP_REQUEST_PERMISSION_ON_SET_MODEL: "composer-2" },
+            }),
+          },
+          selfInvocation: yield* resolveSelfInvocation(),
+        });
+        const openedPolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const resumedPolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        });
+        const openedSelection = { instanceId, model: "default" } as const;
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-acp-permission-resume"),
+          modelSelection: openedSelection,
+          runtimePolicy: openedPolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: openedSelection,
+          runtimePolicy: openedPolicy,
+        });
+        yield* Queue.clear(protocolEvents);
+
+        const resumed = yield* Effect.exit(
+          runtime.resumeThread({
+            providerThread: {
+              ...providerThread,
+              nativeThreadRef: {
+                driver: ACP_TEST_DRIVER,
+                nativeId: "persisted-session",
+                strength: "strong",
+              },
+            },
+            modelSelection: { instanceId, model: "composer-2" },
+            runtimePolicy: resumedPolicy,
+          }),
+        );
+        assert.deepEqual(
+          rawProtocolOutgoingOutcomes(Array.from(yield* Queue.takeAll(protocolEvents))),
+          [{ outcome: "selected", optionId: "reject-once" }],
+          "a permission request while resuming must be decided by the resumed policy",
+        );
+        assert.isTrue(Exit.isSuccess(resumed), "resuming on the switched model must succeed");
       }).pipe(Effect.provide(layerTest), Effect.scoped),
   );
 
