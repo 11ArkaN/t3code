@@ -483,6 +483,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     headerDiffSummary,
     nativeReviewDiffData,
     parsedDiff,
+    allFiles,
     fileFilter,
     pendingReviewCommentCount,
     loadVisibleFile,
@@ -506,10 +507,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
   };
   const reviewFileNavigatorRef = useRef<ReviewFileNavigatorHandle>(null);
   const reviewFiles = parsedDiff.kind === "files" ? parsedDiff.files : [];
+  // Hidden files keep their viewed and expanded state for when they are shown again.
   const fileVisibility = useReviewFileVisibility({
     threadKey: reviewCache.threadKey,
     sectionId: selectedSection?.id ?? null,
-    files: reviewFiles,
+    files: allFiles,
     cachedExpandedFileIds: selectedSection?.id
       ? reviewCache.expandedFileIdsBySection[selectedSection.id]
       : undefined,
@@ -728,7 +730,10 @@ export function ReviewSheet(props: ReviewSheetProps) {
                 onRetry={handleRetryEnvironment}
               />
             </View>
-          ) : selectedSection && parsedDiff.kind === "files" && NativeReviewDiffView ? (
+          ) : selectedSection &&
+            parsedDiff.kind === "files" &&
+            NativeReviewDiffView &&
+            !allFilesHidden ? (
             <View
               className="flex-1"
               style={{
@@ -740,10 +745,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
                 style={listHeader ? { paddingTop: topContentInset } : undefined}
               >
                 {listHeader}
-                <View
-                  className={cn("min-w-0 flex-1", allFilesHidden && "hidden")}
-                  collapsable={false}
-                >
+                <View className="min-w-0 flex-1" collapsable={false}>
                   {/* oxlint-disable-next-line react/static-components -- The resolver returns a cached native component with stable identity. */}
                   <NativeReviewDiffView
                     collapsable={false}
@@ -866,7 +868,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
                     </Text>
                   </ScrollView>
                 </View>
-              ) : parsedDiff.kind === "files" ? (
+              ) : parsedDiff.kind === "files" && !allFilesHidden ? (
                 <View
                   className={cn(
                     "gap-3 bg-card px-4 py-4",

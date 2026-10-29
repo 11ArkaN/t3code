@@ -125,6 +125,8 @@ function formatHeaderDiffSummary(
   };
 }
 
+const EMPTY_REVIEW_FILES: ReadonlyArray<ReviewRenderableFile> = [];
+
 export function useReviewDiffData(input: {
   readonly threadKey: string | null;
   readonly environmentId: EnvironmentId | undefined;
@@ -288,6 +290,7 @@ export function useReviewDiffData(input: {
 
   return {
     parsedDiff: fileFilter.parsed,
+    allFiles: parsedDiff.kind === "files" ? parsedDiff.files : EMPTY_REVIEW_FILES,
     fileFilter,
     loadVisibleFile,
     isPending: patches.some((patch) => patch?._tag === "Initial" || patch?.waiting),
