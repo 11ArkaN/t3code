@@ -102,8 +102,11 @@ export function QuestionAttachments(props: {
           scope.active &&
           (appAtomRegistry.get(questionAttachmentPreparationAtom)[key] ?? 0) > 0
         ) {
-          if (append(key, result.attachments) > 0 || result.error)
-            Dialog.alert("Could not paste image", result.error ?? "Too many attachments.");
+          const problems = [
+            ...(result.error ? [result.error] : []),
+            ...(append(key, result.attachments) > 0 ? ["Too many attachments."] : []),
+          ];
+          if (problems.length) Dialog.alert("Could not paste image", problems.join("\n\n"));
         } else await releaseUnusedComposerAttachmentFiles(result.attachments);
       })
       .catch((error) =>
