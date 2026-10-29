@@ -178,16 +178,13 @@ const resolveHeadlessConnectionHost = (
     return normalizeHost(host);
   }
 
+  if (tailscaleOnly) {
+    const [tailnet] = tailscaleInterfaceIpv4Addresses(interfaces);
+    return tailnet ?? "localhost";
+  }
   const interfaceEntries = Object.entries(interfaces).flatMap(([name, entries]) =>
     privateNetworkOnly && VIRTUAL_INTERFACE.test(name) ? [] : (entries ?? []),
   );
-  if (tailscaleOnly) {
-    const tailnet = interfaceEntries.find(
-      (entry) =>
-        !entry.internal && isIpv4Family(entry.family) && isTailnetIpv4Address(entry.address),
-    );
-    return tailnet?.address ?? "localhost";
-  }
   const externalIpv4Entries = interfaceEntries.filter(
     (entry) =>
       !entry.internal &&

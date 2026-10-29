@@ -66,6 +66,18 @@ it("prefers a LAN address over a tailnet one for a private-network pairing URL",
   ).toBe("http://192.168.1.42:3773");
 });
 
+it("prints the Tailscale address for a Tailscale-only listener, not another VPN's", () => {
+  expect(
+    resolveHeadlessConnectionString("0.0.0.0", 3773, {
+      interfaces: {
+        CloudflareWARP: [ipv4("100.96.0.2")],
+        tailscale0: [ipv4("100.101.102.103")],
+      },
+      tailscaleOnly: true,
+    }),
+  ).toBe("http://100.101.102.103:3773");
+});
+
 describe("acceptsPrivateNetworkConnection", () => {
   const accepts = (localAddress: string | undefined, remoteAddress: string | undefined) =>
     acceptsPrivateNetworkConnection({ localAddress, remoteAddress });
