@@ -188,12 +188,17 @@ const TAGGING_TIP = [
 export const upPortCheck = (input: {
   readonly configuredPort: string | undefined;
   readonly defaultPortFree: boolean;
-  readonly defaultPortHeldByThisHome: boolean;
-}): "ok" | "taken" | "custom" => {
+  /** The live server this T3 home already runs, if any. */
+  readonly running: { readonly port: number; readonly serviceManaged: boolean } | null;
+}): "ok" | "taken" | "custom" | "manual" => {
+  // The service cannot take this home over from a server started by hand.
+  if (input.running !== null && !input.running.serviceManaged) return "manual";
   if (input.configuredPort !== undefined) {
     return Number(input.configuredPort) === ServerConfig.DEFAULT_PORT ? "ok" : "custom";
   }
-  return input.defaultPortFree || input.defaultPortHeldByThisHome ? "ok" : "taken";
+  return input.defaultPortFree || input.running?.port === ServerConfig.DEFAULT_PORT
+    ? "ok"
+    : "taken";
 };
 
 const runUp = Effect.fn("cli.up")(function* (flags: {
@@ -224,16 +229,22 @@ const runUp = Effect.fn("cli.up")(function* (flags: {
     const configuredPort = serviceEnv.T3CODE_PORT;
     const net = yield* NetService.NetService;
     const runtime = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    const running = Option.filter(runtime, (state) => isProcessAlive(state.pid));
     const portCheck = upPortCheck({
       configuredPort,
       defaultPortFree:
         configuredPort === undefined &&
         (yield* net.canListenOnHost(ServerConfig.DEFAULT_PORT, "0.0.0.0")),
-      defaultPortHeldByThisHome:
-        Option.isSome(runtime) &&
-        runtime.value.port === ServerConfig.DEFAULT_PORT &&
-        isProcessAlive(runtime.value.pid),
+      running: Option.match(running, {
+        onNone: () => null,
+        onSome: (state) => ({ port: state.port, serviceManaged: state.serviceManaged === true }),
+      }),
     });
+    if (portCheck === "manual") {
+      return yield* new TailscaleUpError({
+        reason: `A T3 Code server you started by hand is running for ${config.baseDir}. Stop it, then run t3 up again.`,
+      });
+    }
     if (portCheck === "taken") {
       return yield* new TailscaleUpError({
         reason: `Port ${ServerConfig.DEFAULT_PORT} is in use by another program. Free it, or set T3CODE_PORT in ${serviceEnvPath} and add this box by name and port.`,

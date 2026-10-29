@@ -31,17 +31,20 @@ it("rewrites only the service.env keys t3 up owns and keeps the user's lines", (
   );
 });
 
+const SERVICE = { port: 3773, serviceManaged: true };
+const MANUAL = { port: 3773, serviceManaged: false };
+
 it.each([
-  { configuredPort: undefined, free: true, ours: false, expected: "ok" },
-  { configuredPort: undefined, free: false, ours: true, expected: "ok" },
-  { configuredPort: undefined, free: false, ours: false, expected: "taken" },
-  { configuredPort: "3773", free: false, ours: false, expected: "ok" },
-  { configuredPort: "4000", free: true, ours: false, expected: "custom" },
+  { configuredPort: undefined, free: true, running: null, expected: "ok" },
+  { configuredPort: undefined, free: false, running: SERVICE, expected: "ok" },
+  { configuredPort: undefined, free: false, running: null, expected: "taken" },
+  { configuredPort: undefined, free: false, running: MANUAL, expected: "manual" },
+  { configuredPort: "3773", free: false, running: null, expected: "ok" },
+  { configuredPort: "4000", free: true, running: null, expected: "custom" },
+  { configuredPort: "4000", free: true, running: { ...MANUAL, port: 4000 }, expected: "manual" },
 ] as const)(
-  "port check with T3CODE_PORT=$configuredPort, free=$free, ours=$ours is $expected",
-  ({ configuredPort, free, ours, expected }) => {
-    expect(
-      upPortCheck({ configuredPort, defaultPortFree: free, defaultPortHeldByThisHome: ours }),
-    ).toBe(expected);
+  "port check with T3CODE_PORT=$configuredPort, free=$free, running=$running is $expected",
+  ({ configuredPort, free, running, expected }) => {
+    expect(upPortCheck({ configuredPort, defaultPortFree: free, running })).toBe(expected);
   },
 );
