@@ -3570,6 +3570,9 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
+      const pendingWork = yield* Ref.make(false);
+      const settingsUnavailable = yield* Ref.make(false);
+      const settings = yield* makeTestSettings(settingsUnavailable);
       const effect = Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -3680,9 +3683,37 @@ it.effect(
             },
           },
         );
+
+        yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
+        yield* Ref.set(pendingWork, true);
+        yield* publish({
+          type: "provider_thread.updated",
+          driver: CODEX_DRIVER,
+          providerThread: { ...failed.providerThread, status: "error" },
+        });
+        assert.equal(yield* countRawResumes(failed), 1);
+        yield* settings.updateSettings({ linkedEnvironmentsEnabled: false });
+        yield* Ref.set(pendingWork, false);
+        assert.equal(yield* countRawResumes(failed), 1);
+        assert.equal(yield* countRawResumes(failed), 0);
+        assert.equal(yield* countRawResumes(sibling), 0);
+        assert.equal(yield* countRawResumes(healthy), 0);
+        assert.deepEqual((yield* Ref.get(state)).unloadedNativeThreadIds, [
+          "idle-failed-runtime",
+          "idle-failed-runtime",
+        ]);
       });
 
-      yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1000 })));
+      yield* effect.pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 1000,
+            hasPendingBackgroundWorkForThread: Ref.get(pendingWork),
+            serverSettingsLayer: Layer.succeed(ServerSettings.ServerSettingsService, settings),
+          }),
+        ),
+      );
     }),
 );
 

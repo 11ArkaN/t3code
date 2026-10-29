@@ -190,7 +190,7 @@ export class ProviderSessionManagerV2 extends Context.Service<
 interface LiveSessionEntry {
   readonly attachedThreadIds: ReadonlySet<ThreadId>;
   readonly loadedProviderThreadKeyByThread: ReadonlyMap<ThreadId, string>;
-  /** null retains a failed settings read; undefined means MCP refresh is not configured. */
+  /** null marks an unknown catalog; undefined means MCP refresh is not configured. */
   readonly openedWithLinkedEnvironments: boolean | null | undefined;
   readonly linkedEnvironmentsByThread: ReadonlyMap<ThreadId, boolean | null>;
   /** Scope revocation to recorded credential ids so superseded sessions cannot revoke replacements opened before detach. */
@@ -2098,9 +2098,14 @@ export const layerWithOptions = (
                         latest.loadedProviderThreadKeyByThread,
                       );
                       loadedProviderThreadKeyByThread.delete(threadId);
+                      const linkedEnvironmentsByThread = new Map(latest.linkedEnvironmentsByThread);
+                      if (linkedEnvironmentsByThread.has(threadId)) {
+                        linkedEnvironmentsByThread.set(threadId, null);
+                      }
                       return new Map(sessions).set(key, {
                         ...latest,
                         loadedProviderThreadKeyByThread,
+                        linkedEnvironmentsByThread,
                       });
                     });
                   }
