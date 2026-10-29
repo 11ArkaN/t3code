@@ -109,7 +109,7 @@ describe("native pasted image cleanup", () => {
       "file:///private/var/mobile/Containers/Data/Application/app/tmp/t3-composer-paste/id.png";
     files.set(uri, { base64: "aGVsbG8=", deleted: false });
 
-    const attachments = await convertPastedImagesToAttachments({
+    const { attachments } = await convertPastedImagesToAttachments({
       uris: [uri],
       existingCount: 0,
     });
@@ -154,13 +154,22 @@ describe("native pasted image cleanup", () => {
     files.set(uri, { base64: png.toString("base64"), deleted: false });
     manipulator.state.sourceSize = { width: 2000, height: 2000 };
 
-    const attachments = await convertPastedImagesToAttachments({
+    const { attachments } = await convertPastedImagesToAttachments({
       uris: [uri],
       existingCount: 0,
     });
 
     expect(attachments).toHaveLength(1);
     expect(attachments[0]?.sizeBytes).toBeLessThanOrEqual(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+  });
+
+  it("reports a paste it cannot read instead of dropping it silently", async () => {
+    const uri =
+      "file:///private/var/mobile/Containers/Data/Application/app/tmp/t3-composer-paste/gone.png";
+
+    const result = await convertPastedImagesToAttachments({ uris: [uri], existingCount: 0 });
+
+    expect(result).toEqual({ attachments: [], error: "Could not read a pasted image." });
   });
 });
 

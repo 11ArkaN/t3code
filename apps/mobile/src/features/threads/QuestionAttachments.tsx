@@ -97,14 +97,14 @@ export function QuestionAttachments(props: {
       uris,
       existingCount: appAtomRegistry.get(composerDraftsAtom)[key]?.attachments.length ?? 0,
     })
-      .then(async (images) => {
+      .then(async (result) => {
         if (
           scope.active &&
           (appAtomRegistry.get(questionAttachmentPreparationAtom)[key] ?? 0) > 0
         ) {
-          if (append(key, images) > 0)
-            Dialog.alert("Could not paste image", "Too many attachments.");
-        } else await releaseUnusedComposerAttachmentFiles(images);
+          if (append(key, result.attachments) > 0 || result.error)
+            Dialog.alert("Could not paste image", result.error ?? "Too many attachments.");
+        } else await releaseUnusedComposerAttachmentFiles(result.attachments);
       })
       .catch((error) =>
         Dialog.alert(
