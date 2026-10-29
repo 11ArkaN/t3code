@@ -127,7 +127,7 @@ import {
   subscribeOrchestrationV2Shell,
   subscribeOrchestrationV2Thread,
   WS_RPC_SERVER_OPTIONS,
-  withLateEditorConfig,
+  withLateConfig,
 } from "./ws.ts";
 
 const TAILSCALE_RUNNING = {
@@ -150,7 +150,7 @@ const settingsUpdated = (settings: object): ServerConfigStreamEvent => ({
 it.effect("resends late editors without rolling back updates already sent", () =>
   Effect.gen(function* () {
     const settingsSent = yield* Deferred.make<void>();
-    const events = yield* withLateEditorConfig(
+    const events = yield* withLateConfig(
       snapshotConfig({ settings: { enableProviderUpdateChecks: true } as never }),
       Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
       {
@@ -179,7 +179,7 @@ it.effect("resends late editors without rolling back updates already sent", () =
 
 it.effect("resends a file manager reveal kind that missed the snapshot", () =>
   Effect.gen(function* () {
-    const events = yield* withLateEditorConfig(
+    const events = yield* withLateConfig(
       snapshotConfig({ availableEditors: ["file-manager"] }),
       Stream.empty,
       {
@@ -194,6 +194,30 @@ it.effect("resends a file manager reveal kind that missed the snapshot", () =>
     if (late?.type === "snapshot") {
       assert.equal(late.config.shellRevealInFileManagerKind, "file-explorer");
     }
+  }),
+);
+
+it.effect("resends the host's Tailscale health only when its facts change", () =>
+  Effect.gen(function* () {
+    const stopped = { ...TAILSCALE_RUNNING, state: "stopped" as const };
+    const events = yield* withLateConfig(
+      snapshotConfig({ tailscale: TAILSCALE_RUNNING }),
+      Stream.empty,
+      {
+        resolveAvailableEditors: () => Effect.succeed([]),
+        resolveFileManagerRevealKind: () => Effect.undefined,
+      },
+      Stream.make(
+        { ...TAILSCALE_RUNNING, checkedAt: "2026-10-28T00:01:00.000Z" },
+        stopped,
+        stopped,
+      ),
+    ).pipe(Stream.runCollect);
+
+    assert.deepEqual(
+      Array.from(events, (event) => (event.type === "snapshot" ? event.config.tailscale : event)),
+      [stopped],
+    );
   }),
 );
 
@@ -603,7 +627,10 @@ it.effect(
           resolveTargets: () => Effect.succeed([]),
         }),
         Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
-        Layer.mock(TailscaleHealth.TailscaleHealth)({ check: Effect.succeed(TAILSCALE_RUNNING) }),
+        Layer.mock(TailscaleHealth.TailscaleHealth)({
+          check: Effect.succeed(TAILSCALE_RUNNING),
+          reads: Stream.empty,
+        }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           scratchRoot: Effect.succeedNone,
           namedProjectsRoot: process.cwd(),
@@ -781,7 +808,10 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
         resolveTargets: () => Effect.succeed([]),
       }),
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
-      Layer.mock(TailscaleHealth.TailscaleHealth)({ check: Effect.succeed(TAILSCALE_RUNNING) }),
+      Layer.mock(TailscaleHealth.TailscaleHealth)({
+        check: Effect.succeed(TAILSCALE_RUNNING),
+        reads: Stream.empty,
+      }),
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
         scratchRoot: Effect.succeedNone,
         namedProjectsRoot: process.cwd(),

@@ -19,9 +19,11 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
+import * as Stream from "effect/Stream";
 import * as TailscaleHost from "../tailscale/TailscaleHost.ts";
 
 const CACHE_TTL = Duration.seconds(30);
+const REFRESH_INTERVAL = Duration.minutes(1);
 const KEY_EXPIRY_WARNING_MS = Duration.toMillis(Duration.days(7));
 const ADMIN_MACHINES_URL = "https://login.tailscale.com/admin/machines";
 const ADMIN_DNS_URL = "https://login.tailscale.com/admin/dns";
@@ -171,6 +173,8 @@ export class TailscaleHealth extends Context.Service<
      * read, while this machine shows no sign of using Tailscale.
      */
     readonly check: Effect.Effect<ServerTailscaleStatus | undefined>;
+    /** `check` now and once a minute, for a client that stays connected. */
+    readonly reads: Stream.Stream<ServerTailscaleStatus | undefined>;
   }
 >()("t3/environment/TailscaleHealth") {}
 
@@ -178,7 +182,8 @@ const make = Effect.gen(function* () {
   const host = yield* TailscaleHost.TailscaleHost;
   const read = yield* Effect.cachedWithTTL(readTailscaleHealthWith(host.status), CACHE_TTL);
   const check = host.inUse.pipe(Effect.flatMap((inUse) => (inUse ? read : Effect.undefined)));
-  return TailscaleHealth.of({ check });
+  const reads = Stream.tick(REFRESH_INTERVAL).pipe(Stream.mapEffect(() => check));
+  return TailscaleHealth.of({ check, reads });
 });
 
 export const layer = Layer.effect(TailscaleHealth, make);

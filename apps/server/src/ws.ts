@@ -316,10 +316,15 @@ const resolveEditorConfig = Effect.fn("ws.resolveEditorConfig")(function* <E, R>
   };
 });
 
-export const withLateEditorConfig = <E, R>(
+// `checkedAt` changes on every read, so it alone is not worth a snapshot.
+const tailscaleFacts = (status: ServerTailscaleStatus | undefined) =>
+  status === undefined ? "" : JSON.stringify({ ...status, checkedAt: null });
+
+export const withLateConfig = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
+  tailscaleReads: Stream.Stream<ServerTailscaleStatus | undefined> = Stream.empty,
 ) => {
   const lateEditorConfig = Stream.fromEffect(launcher.resolveAvailableEditors()).pipe(
     Stream.filter(
@@ -339,7 +344,11 @@ export const withLateEditorConfig = <E, R>(
     Stream.map((editorConfig) => ({ type: "editorsResolved" as const, editorConfig })),
   );
 
-  return Stream.merge(liveUpdates, lateEditorConfig).pipe(
+  const lateTailscale = tailscaleReads.pipe(
+    Stream.map((tailscale) => ({ type: "tailscaleRead" as const, tailscale })),
+  );
+
+  return Stream.merge(liveUpdates, Stream.merge(lateEditorConfig, lateTailscale)).pipe(
     Stream.mapAccum(
       (): ClientServerConfig => config,
       (current, event): readonly [ClientServerConfig, ReadonlyArray<ServerConfigStreamEvent>] => {
@@ -352,6 +361,15 @@ export const withLateEditorConfig = <E, R>(
               ...rest
             } = current;
             const next = { ...rest, ...event.editorConfig };
+            return [next, [{ version: 1, type: "snapshot", config: next }]];
+          }
+          case "tailscaleRead": {
+            if (tailscaleFacts(event.tailscale) === tailscaleFacts(current.tailscale)) {
+              return [current, []];
+            }
+            const { tailscale: _previous, ...rest } = current;
+            const next =
+              event.tailscale === undefined ? rest : { ...rest, tailscale: event.tailscale };
             return [next, [{ version: 1, type: "snapshot", config: next }]];
           }
           case "keybindingsUpdated":
@@ -3206,7 +3224,7 @@ export const layerWsRpc = (
 
               return Stream.concat(
                 rpcInitialItems([{ version: 1 as const, type: "snapshot" as const, config }]),
-                withLateEditorConfig(config, liveUpdates, externalLauncher),
+                withLateConfig(config, liveUpdates, externalLauncher, tailscaleHealth.reads),
               );
             }),
           ),
