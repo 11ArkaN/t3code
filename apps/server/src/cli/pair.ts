@@ -147,6 +147,7 @@ const resolveDirectPairingBaseUrl = (state: PersistedServerRuntimeState): string
   state.devUrl ??
   resolveHeadlessConnectionString(state.host, state.port, {
     privateNetworkOnly: state.privateNetworkOnly,
+    tailscaleOnly: state.tailscaleOnly,
   });
 
 export class DevServerNotProxiableError extends Schema.TaggedError<DevServerNotProxiableError>()(
@@ -514,6 +515,8 @@ export const pairCommand = Command.make("pair", {
           notes.push(
             "This URL is only reachable from this machine. Re-run with --tailscale, or restart the server with a reachable --host.",
           );
+        } else if (target.state.tailscaleOnly) {
+          notes.push("This URL works only from your tailnet.");
         } else if (target.state.privateNetworkOnly) {
           notes.push(
             "This URL works only from this machine's local network. From elsewhere, re-run with --tailscale or use T3 Connect.",
