@@ -215,18 +215,36 @@ it.effect.each(forkCases)(
       const attemptId = RunAttemptId.make("interrupted-source-attempt");
       const providerTurnId = ProviderTurnId.make("interrupted-source-turn");
       const rootNodeId = NodeId.make("interrupted-source-root");
+      const grandparentThreadId = ThreadId.make("fork-boundary-grandparent");
+      const grandparentRunId = RunId.make("fork-boundary-grandparent-run");
 
       yield* orchestrator.dispatch({
         type: "thread.create",
-        commandId: CommandId.make("create-source"),
-        threadId: sourceThreadId,
+        commandId: CommandId.make("create-grandparent"),
+        threadId: grandparentThreadId,
         projectId: ProjectId.make("fork-boundary-project"),
-        title: "Fork boundary source",
+        title: "Fork boundary grandparent",
         modelSelection,
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* writeParentRun({
+        threadId: grandparentThreadId,
+        runId: grandparentRunId,
+        ordinal: 1,
+        status: "completed",
+        text: "GRANDPARENT_MARKER",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.fork",
+        commandId: CommandId.make("fork-grandparent"),
+        sourceThreadId: grandparentThreadId,
+        targetThreadId: sourceThreadId,
+        sourcePoint: { type: "run", runId: grandparentRunId },
         createdBy: "user",
         creationSource: "web",
       });
@@ -389,6 +407,7 @@ it.effect.each(forkCases)(
       assert.lengthOf(target.contextHandoffs, 1);
       const handoff = target.contextHandoffs[0]!;
       const history = handoff.history?.messages.map((message) => message.text).join("\n") ?? "";
+      assert.include(`${handoff.summaryText}\n${history}`, "GRANDPARENT_MARKER");
       assert.include(`${handoff.summaryText}\n${history}`, "INCLUDED_SOURCE_MARKER");
       assert.notInclude(`${handoff.summaryText}\n${history}`, "EXCLUDED_LATER_MARKER");
       assert.isNull(target.providerThreads[0]?.forkedFrom);
@@ -919,9 +938,28 @@ it.effect("closing a side chat deletes it only while unused; a deleted parent ta
 it.effect("a side chat opened during the parent's first turn starts from a digest", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const grandparentId = ThreadId.make("side-chat-busy-grandparent");
+    const grandparentRunId = RunId.make("side-chat-busy-grandparent-run");
     const parentId = ThreadId.make("side-chat-busy-parent");
     const sideChatId = ThreadId.make("side-chat-busy-child");
-    yield* createParent(parentId);
+    yield* createParent(grandparentId);
+    yield* writeParentRun({
+      threadId: grandparentId,
+      runId: grandparentRunId,
+      ordinal: 1,
+      status: "completed",
+      text: "GRANDPARENT_MARKER",
+      stable: true,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("side-chat-busy-parent-fork"),
+      sourceThreadId: grandparentId,
+      targetThreadId: parentId,
+      sourcePoint: { type: "run", runId: grandparentRunId },
+      createdBy: "user",
+      creationSource: "web",
+    });
     yield* writeImportedHistory(parentId, "PARENT_IMPORTED_MARKER");
     yield* writeParentRun({
       threadId: parentId,
@@ -1008,6 +1046,12 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       contextHandoffId: handoff!.id,
     });
     assert.include(handoff!.summaryText, "You are in a side chat beside the main thread.");
+    // Inherited rows come first, so the cap truncates them first.
+    assert.isAbove(
+      handoff!.summaryText.indexOf("- User: PARENT_IMPORTED_MARKER"),
+      handoff!.summaryText.indexOf("- User: GRANDPARENT_MARKER"),
+    );
+    assert.include(handoff!.summaryText, "- User: GRANDPARENT_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_IMPORTED_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_RUNNING_MARKER");
     assert.include(handoff!.summaryText, `t3_thread_read on thread ${parentId}`);

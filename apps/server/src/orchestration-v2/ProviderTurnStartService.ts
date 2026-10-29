@@ -1100,7 +1100,7 @@ export const layer: Layer.Layer<
               }),
             );
           }
-          const { turnItems: sourceItems } = yield* projectionStore.getThreadRecords(
+          const { turnItems: ownItems } = yield* projectionStore.getThreadRecords(
             sourceProjection.thread.id,
             ["turnItems"],
             {
@@ -1112,6 +1112,13 @@ export const layer: Layer.Layer<
               ],
             },
           );
+          const sourceItems = [
+            ...(yield* ContextHandoffService.readInheritedHandoffItems(
+              projectionStore,
+              sourceProjection.thread,
+            )),
+            ...ownItems,
+          ];
           const createdAt = yield* DateTime.now;
           const handoff = yield* contextHandoffService.prepareProviderHandoff({
             threadId: projection.thread.id,

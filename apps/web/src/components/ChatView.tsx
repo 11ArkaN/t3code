@@ -2774,13 +2774,15 @@ export default function ChatView(props: ChatViewProps) {
       ? "Side chats cannot start side chats."
       : activeThread?.lineage.relationshipToParent === "subagent"
         ? "Subagent threads cannot start side chats."
-        : sideChat.available &&
-            orchestrationV2WorktreePending(
-              activeThread?.worktreePath ?? null,
-              serverProjection?.runs ?? [],
-            )
-          ? "Available once the thread's worktree is ready."
-          : null;
+        : sideChatsOffered && !isServerThread
+          ? "Side chats start after the first message."
+          : sideChat.available &&
+              orchestrationV2WorktreePending(
+                activeThread?.worktreePath ?? null,
+                serverProjection?.runs ?? [],
+              )
+            ? "Available once the thread's worktree is ready."
+            : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
   const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
   const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =

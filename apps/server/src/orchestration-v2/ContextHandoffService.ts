@@ -1,4 +1,5 @@
 import {
+  type OrchestrationV2AppThread,
   OrchestrationV2ContextHandoff,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
@@ -22,6 +23,7 @@ import {
   selectHistory,
 } from "@t3tools/provider-core/server/handoffBudget";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import type { ProjectionStoreV2Shape } from "./ProjectionStore.ts";
 
 export class ContextHandoffPrepareError extends Schema.TaggedError<ContextHandoffPrepareError>()(
   "ContextHandoffPrepareError",
@@ -127,6 +129,38 @@ export function visibleDeltaRunOrdinals(
     to: Math.max(...ordinals),
   };
 }
+
+/** History `thread` shows from its fork ancestors, oldest first. Side chats inherit no rows. */
+export const readInheritedHandoffItems = Effect.fn(
+  "orchestrationV2.contextHandoff.readInheritedHandoffItems",
+)(function* (
+  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
+  thread: OrchestrationV2AppThread,
+) {
+  const segments: Array<ReadonlyArray<OrchestrationV2TurnItem>> = [];
+  const seen = new Set([thread.id]);
+  let current = thread;
+  while (
+    current.forkedFrom?.type === "run" &&
+    current.lineage.sideChat !== true &&
+    !seen.has(current.forkedFrom.threadId)
+  ) {
+    const { threadId, runId } = current.forkedFrom;
+    seen.add(threadId);
+    const source = yield* projectionStore.getThreadRecords(threadId, ["runs"]);
+    const forkRun = source.runs.find((run) => run.id === runId);
+    if (forkRun === undefined) break;
+    const { turnItems } = yield* projectionStore.getThreadRecords(threadId, ["turnItems"], {
+      turnItemRunIds: [
+        ...source.runs.filter((run) => run.ordinal <= forkRun.ordinal).map((run) => run.id),
+        ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
+      ],
+    });
+    segments.unshift(turnItems);
+    current = source.thread;
+  }
+  return segments.flat();
+});
 
 export function summarizeDeltaItem(item: OrchestrationV2TurnItem): string | null {
   switch (item.type) {

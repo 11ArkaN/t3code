@@ -104,7 +104,11 @@ import {
   resolveMessageDispatchIntent,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
-import { ContextHandoffServiceV2, visibleDeltaRunOrdinals } from "./ContextHandoffService.ts";
+import {
+  ContextHandoffServiceV2,
+  readInheritedHandoffItems,
+  visibleDeltaRunOrdinals,
+} from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import {
   cancelledBeforeStart,
@@ -1136,6 +1140,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         Effect.map((records) => records.turnItems),
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       );
+
+  const readInheritedItems = (thread: OrchestrationV2AppThread) =>
+    readInheritedHandoffItems(projectionStore, thread).pipe(
+      Effect.mapError((cause) => new OrchestratorProjectionError({ threadId: thread.id, cause })),
+    );
 
   /** Includes tombstones, which still reserve their id. */
   const findThread = (threadId: ThreadId) =>
@@ -6500,12 +6509,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const portableForkItems =
       !requiresPortableFork || sourceProjection === null || sourceRun === null
         ? []
-        : yield* readHandoffItems(sourceProjection.thread.id, [
-            ...sourceProjection.runs
-              .filter((run) => run.ordinal <= sourceRun.ordinal)
-              .map((run) => run.id),
-            ...(sourceProjection.thread.historyOrigin === "v1_import" ? [null] : []),
-          ]);
+        : [
+            ...(yield* readInheritedItems(sourceProjection.thread)),
+            ...(yield* readHandoffItems(sourceProjection.thread.id, [
+              ...sourceProjection.runs
+                .filter((run) => run.ordinal <= sourceRun.ordinal)
+                .map((run) => run.id),
+              ...(sourceProjection.thread.historyOrigin === "v1_import" ? [null] : []),
+            ])),
+          ];
     const portableForkHandoff =
       !requiresPortableFork ||
       pendingForkTransfer === undefined ||
@@ -6538,7 +6550,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   }),
               ),
             );
-    // Without a source run the digest covers the parent's whole history, imported items included.
+    // Without a source run the digest covers the parent's whole history: inherited fork rows
+    // first, so the cap truncates them first, then imported and run items.
     const sideChatParentRunIds = [
       ...sourceRunsAfterFork.map((run) => run.id),
       ...(sourceRun === null && sourceProjection?.thread.historyOrigin === "v1_import"
@@ -6546,9 +6559,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : []),
     ];
     const sideChatParentItems =
-      !sideChatFork || sideChatParentRunIds.length === 0 || sourceProjection === null
+      !sideChatFork || sourceProjection === null
         ? []
-        : yield* readHandoffItems(sourceProjection.thread.id, sideChatParentRunIds);
+        : [
+            ...(sideChatWithoutSource ? yield* readInheritedItems(sourceProjection.thread) : []),
+            ...(sideChatParentRunIds.length === 0
+              ? []
+              : yield* readHandoffItems(sourceProjection.thread.id, sideChatParentRunIds)),
+          ];
     // The framing note goes in even when the parent has no activity after the fork point.
     const sideChatContextHandoff =
       !sideChatFork || pendingForkTransfer === undefined || sourceProjection === null
