@@ -72,6 +72,11 @@ import {
   useEnvironmentsWithScope,
 } from "../../state/session";
 import { terminalEnvironment } from "../../state/terminal";
+import {
+  desktopCliCommandStateAtom,
+  getDesktopCliCommandBridge,
+} from "../../state/desktopCliCommand";
+import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { connectPairing } from "../../connection/onboarding";
 import { getProviderSummary } from "../settings/providerStatus";
@@ -87,6 +92,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { T3Wordmark } from "../T3Wordmark";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
+import { CommandBlock } from "../CommandBlock";
 import { InstallT3Commands } from "../InstallT3Commands";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -690,6 +696,7 @@ function AgentsStep({
           ))}
         </div>
       </ScrollArea>
+      <CliPathSetup />
       <div className="mt-6 flex justify-end">
         <Button autoFocus onClick={onContinue}>
           Continue
@@ -1753,6 +1760,22 @@ function ImportRowMeta({
       <span className="text-right">{threadCount}</span>
       <span className="text-right whitespace-nowrap">{age}</span>
     </span>
+  );
+}
+
+/** The desktop app links `t3` on first launch; this shows how to put its folder on PATH. */
+function CliPathSetup() {
+  const bridge = getDesktopCliCommandBridge();
+  const pathCommand = useEnvironmentQuery(bridge ? desktopCliCommandStateAtom : null).data
+    ?.pathCommand;
+  if (!pathCommand) return null;
+  return (
+    <div className="mt-5">
+      <p className="text-sm text-muted-foreground">
+        Run this once to use <code className="font-mono">t3</code> in new terminals.
+      </p>
+      <CommandBlock command={pathCommand} className="mt-2" />
+    </div>
   );
 }
 
