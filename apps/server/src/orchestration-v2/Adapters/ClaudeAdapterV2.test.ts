@@ -69,6 +69,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/ai";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeCompaction";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
@@ -1038,6 +1039,35 @@ describe("ClaudeAdapterV2 append-system-prompt-file launch argument", () => {
         ),
       ),
     ),
+  );
+
+  // regression: #26973 the initialize appendSystemPrompt replaced a wrapper binary's append flags
+  it.effect(
+    "append flags added by a wrapper executable are not overwritten by T3's instructions",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const cwd = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-append-cwd-",
+          });
+          const { exit, opened } = yield* startTurnWithLaunchArgs("", cwd);
+          assert.isTrue(Exit.isSuccess(exit));
+          assert.lengthOf(opened, 1);
+          assert.isUndefined(
+            appendSystemPrompt(opened[0]),
+            "systemPrompt.append becomes the initialize appendSystemPrompt, which replaces the executable's own --append-system-prompt(-file)",
+          );
+          assert.include(
+            opened[0]!.extraArgs?.["append-system-prompt"] ?? "",
+            buildRuntimeInstructions({ harness: "Claude Code" }),
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
   );
 
   // regression: #15073 the SDK replaced the --settings launch argument with T3's settings
