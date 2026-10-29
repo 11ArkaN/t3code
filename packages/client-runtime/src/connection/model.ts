@@ -185,12 +185,19 @@ export type ConnectionRouteOutcome = {
   | { readonly result: "failed"; readonly error: ConnectionAttemptError }
 );
 
+const UNANSWERED_REASONS: ReadonlySet<ConnectionTransientReason> = new Set([
+  "network",
+  "timeout",
+  "transport",
+]);
+
 /** A route that gave no sign the host is there, as opposed to one that answered and refused. */
 export function routeDidNotAnswer(outcome: ConnectionRouteOutcome): boolean {
   return (
     outcome.result === "silent" ||
     (outcome.result === "failed" &&
       outcome.error._tag === "ConnectionTransientError" &&
+      UNANSWERED_REASONS.has(outcome.error.reason) &&
       outcome.error.tailnetRefusal === undefined)
   );
 }

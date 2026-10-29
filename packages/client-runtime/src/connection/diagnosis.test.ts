@@ -217,6 +217,8 @@ describe("presentConnectionDiagnosis", () => {
     expect(refused("blocked")?.facts).toContainEqual(["Cause", "blocked"]);
     // A transient refusal answered, so it is not an unreachable tailnet.
     expect(refused("rate_limited")?.headline).toBe("Mac mini asked this device to slow down");
+    const offline = { ...backoff(tailnetRefusalError("blocked")), network: "offline" as const };
+    expect(diagnose(offline, "direct")?.headline).toBe("This device is offline");
   });
 });
 
@@ -312,6 +314,12 @@ describe("offTailnetHint", () => {
     // A host that is off fails every route while this device is online.
     expect(offTailnetHint({ ...offline, network: "online" })).toBeNull();
     expect(offTailnetHint({ ...connected, routes: [RELAY_ANSWERED] })).toBeNull();
+    // The host answered on Tailscale and failed for its own reason.
+    const hostFailed: ConnectionRouteOutcome = {
+      ...TAILNET_FAILED,
+      error: new ConnectionTransientError({ reason: "remote-unavailable", detail: "500" }),
+    };
+    expect(offTailnetHint({ ...connected, routes: [hostFailed, RELAY_ANSWERED] })).toBeNull();
   });
 
   it("keeps the relay health status out of a failure that has its own cause", () => {

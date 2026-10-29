@@ -581,7 +581,8 @@ export function presentConnectionDiagnosis(
   const host = input.hostLabel;
   const failure = input.state.lastFailure;
   // A direct route that did not answer, where every Tailscale route also failed.
-  const refusal = failure?.tailnetRefusal;
+  // A refusal from an earlier attempt says nothing once this device is offline.
+  const refusal = located.hop === "server" ? failure?.tailnetRefusal : undefined;
   const tailnetRoutes =
     located.hop === "server" &&
     located.cause === null &&
