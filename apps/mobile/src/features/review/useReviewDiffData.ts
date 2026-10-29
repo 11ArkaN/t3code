@@ -21,6 +21,7 @@ import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Atom from "effect/reactivity/Atom";
 import { reviewEnvironment } from "../../state/review";
+import { usePullRequestFileFilter } from "../pull-requests/usePullRequestFileFilter";
 
 const EMPTY_INLINE_REVIEW_COMMENTS = Object.freeze([]);
 type ParsedFilePatch = AsyncResult.AsyncResult<
@@ -237,8 +238,9 @@ export function useReviewDiffData(input: {
     }
     return inlineReviewComments.filter((comment) => comment.sectionId === selectedSectionId);
   }, [inlineReviewComments, selectedSectionId]);
+  const fileFilter = usePullRequestFileFilter(parsedDiff);
   const nativeReviewDiffData = getCachedNativeReviewDiffData({
-    parsedDiff,
+    parsedDiff: fileFilter.parsed,
     comments: selectedSectionInlineComments,
   });
   const pendingReviewCommentCount = countReviewCommentContexts(draftMessage);
@@ -257,7 +259,8 @@ export function useReviewDiffData(input: {
   }, [parsedDiff, selectedSection?.id]);
 
   return {
-    parsedDiff,
+    parsedDiff: fileFilter.parsed,
+    fileFilter,
     loadVisibleFile,
     isPending: patches.some((patch) => patch?._tag === "Initial" || patch?.waiting),
     headerDiffSummary,

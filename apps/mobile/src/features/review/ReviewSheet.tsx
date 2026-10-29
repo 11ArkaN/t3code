@@ -26,6 +26,8 @@ import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics
 import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
+import { EmptyState } from "../../components/ui/EmptyState";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { ScreenContent } from "../../components/ui/ScreenContent";
@@ -62,6 +64,7 @@ import { resolveSelectedReviewFileId } from "./reviewPaneSelection";
 import { buildReviewSectionMenu } from "./review-section-menu";
 import { reportShowcaseSceneRendered } from "../showcase/showcaseRenderSignal";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
+import type { usePullRequestFileFilter } from "../pull-requests/usePullRequestFileFilter";
 
 function ReviewHeader(
   props: Parameters<typeof useReviewHeaderPresentation>[0] & {
@@ -69,6 +72,7 @@ function ReviewHeader(
     readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
     readonly showSectionToolbar: boolean;
     readonly showChangedFilesToggle: boolean;
+    readonly fileFilter: ReturnType<typeof usePullRequestFileFilter>;
     readonly onSelectSection: (sectionId: string) => void;
     readonly onReturnToThread: () => void;
   },
@@ -121,6 +125,19 @@ function ReviewHeader(
                       sectionAction(props.sectionMenu.branchChanges, "Changes"),
                       sectionAction(props.sectionMenu.workingTree, "Uncommitted"),
                       sectionAction(props.sectionMenu.latestTurn, "Latest turn"),
+                    ],
+                  },
+                  {
+                    id: "files",
+                    inline: true,
+                    items: [
+                      {
+                        id: "hide-tests",
+                        title: "Hide test files",
+                        icon: "line.3.horizontal.decrease",
+                        selected: props.fileFilter.hideTestFiles,
+                        onPress: props.fileFilter.toggle,
+                      },
                     ],
                   },
                   ...(props.sectionMenu.turns.length > 0
@@ -466,6 +483,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
     headerDiffSummary,
     nativeReviewDiffData,
     parsedDiff,
+    fileFilter,
     pendingReviewCommentCount,
     loadVisibleFile,
     isPending: areFilePatchesPending,
@@ -621,6 +639,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   useRegisterWorkspaceInspector(showChangedFilesPane ? renderInspector : undefined);
   const showChangedFilesToggle = panes.supportsAuxiliaryPane && showChangedFilesPane;
 
+  const allFilesHidden = reviewFiles.length === 0 && fileFilter.hiddenCount > 0;
   const listHeader = (() => {
     const children: ReactElement[] = [];
 
@@ -641,6 +660,18 @@ export function ReviewSheet(props: ReviewSheetProps) {
 
     if (parsedDiffNotice) {
       children.push(<ReviewNotice key="review-notice" notice={parsedDiffNotice} />);
+    }
+
+    if (allFilesHidden) {
+      children.push(
+        <EmptyState
+          key="review-tests-hidden"
+          title="Only test files changed"
+          detail="Test files are hidden from this review."
+          action={<Button label="Show test files" tone="contrast" onPress={fileFilter.showAll} />}
+          variant="plain"
+        />,
+      );
     }
 
     if (children.length === 0) {
@@ -674,6 +705,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
         selectedSection={selectedSection}
         showSectionToolbar={showSectionToolbar}
         showChangedFilesToggle={showChangedFilesToggle}
+        fileFilter={fileFilter}
         onRefresh={handlePullToRefresh}
         onSelectSection={selectSection}
         onReturnToThread={handleReturnToThread}
@@ -708,7 +740,10 @@ export function ReviewSheet(props: ReviewSheetProps) {
                 style={listHeader ? { paddingTop: topContentInset } : undefined}
               >
                 {listHeader}
-                <View className="min-w-0 flex-1" collapsable={false}>
+                <View
+                  className={cn("min-w-0 flex-1", allFilesHidden && "hidden")}
+                  collapsable={false}
+                >
                   {/* oxlint-disable-next-line react/static-components -- The resolver returns a cached native component with stable identity. */}
                   <NativeReviewDiffView
                     collapsable={false}
