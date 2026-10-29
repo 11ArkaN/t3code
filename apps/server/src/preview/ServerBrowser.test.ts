@@ -55,7 +55,7 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
       return makeEncoderPage() as unknown as Page;
     }
     async connectDesktopPage(endpoint: string) {
-      const context = makeContext();
+      const context = makeContext(undefined, DESKTOP_LAYOUT);
       desktopConnections.push({ endpoint, context });
       return { browser: { close: async () => {} }, page: context.page as unknown as Page };
     }
@@ -83,7 +83,10 @@ const PNG_HEADER = (() => {
   return header.toString("base64");
 })();
 
-function makeSession(frame?: ReturnType<typeof makeFrame>) {
+// The desktop's webview, sized by its panel rather than by viewport emulation.
+const DESKTOP_LAYOUT = { width: 1024, height: 640 };
+
+function makeSession(frame?: ReturnType<typeof makeFrame>, layout?: typeof DESKTOP_LAYOUT) {
   const events = new NodeEvents.EventEmitter();
   return {
     on: vi.fn((name: string, listener: () => void) => events.on(name, listener)),
@@ -91,7 +94,14 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
     detach: vi.fn(async () => {}),
     send: vi.fn(async (method: string, input?: unknown): Promise<Record<string, unknown>> => {
       if (method === "Page.getNavigationHistory") return { currentIndex: 0, entries: [{}] };
-      if (method === "Page.getLayoutMetrics") return { cssVisualViewport: { pageX: 0, pageY: 0 } };
+      if (method === "Page.getLayoutMetrics") {
+        if (!layout) return { cssVisualViewport: { pageX: 0, pageY: 0 } };
+        const client = { clientWidth: layout.width, clientHeight: layout.height };
+        return {
+          cssLayoutViewport: { pageX: 0, pageY: 0, ...client },
+          cssVisualViewport: { pageX: 0, pageY: 0, zoom: 1, ...client },
+        };
+      }
       if (method === "Page.captureScreenshot") {
         // A snapshot sizes its screenshot from the PNG header; viewers get JPEG frames as-is.
         return { data: (input as { format: string }).format === "png" ? PNG_HEADER : "ZnJhbWU=" };
@@ -123,7 +133,10 @@ function makeSession(frame?: ReturnType<typeof makeFrame>) {
   };
 }
 
-function makeContext(onClose?: (context: BrowserContext) => void) {
+function makeContext(
+  onClose?: (context: BrowserContext) => void,
+  desktopLayout?: typeof DESKTOP_LAYOUT,
+) {
   const events = new NodeEvents.EventEmitter();
   const nativeFileChooser = vi.fn();
   const setChooserFiles = vi.fn(async (_files: unknown) => {});
@@ -159,7 +172,8 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     frames: () => [page],
     url: () => url,
     title: vi.fn(async () => "test page"),
-    viewportSize: () => viewport,
+    // A page reached through `connectOverCDP` has no emulated viewport.
+    viewportSize: () => (desktopLayout ? null : viewport),
     setViewportSize: vi.fn(async (size: typeof viewport) => {
       viewport = size;
     }),
@@ -202,6 +216,7 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
     newCDPSession: async (target: unknown) => {
       const session = makeSession(
         target === page ? undefined : (target as ReturnType<typeof makeFrame>),
+        target === page ? desktopLayout : undefined,
       );
       sessions.push(session);
       return session;
@@ -490,6 +505,22 @@ it.effect("a tab the desktop does not draw is marked headless, so the desktop st
 
       expect(headlessOf(tabId)).toBe(true);
       expect(headlessOf(desktopTab.tabId)).toBeUndefined();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a viewer of a tab the desktop draws learns the page's CSS size", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      desktopRendersNext = true;
+      const { browser, tabId } = yield* ready;
+      expect(desktopConnections).toHaveLength(1);
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      // Without it the client cannot map a pointer onto the page, so it drops all input.
+      expect(yield* Queue.takeAll(viewer.output)).toContainEqual({
+        _tag: "viewport",
+        ...DESKTOP_LAYOUT,
+      });
     }),
   ).pipe(Effect.provide(layer)),
 );
