@@ -1519,7 +1519,8 @@ describe("CursorAdapterV2", () => {
         }),
       );
       const backend = yield* fakeCursorBackend;
-      yield* scopedProcessEnv({ HOME: home });
+      // CURSOR_CONFIG_DIR outranks an ambient XDG_CONFIG_HOME; HOME keeps the real ~/.cursor out.
+      yield* scopedProcessEnv({ HOME: home, CURSOR_CONFIG_DIR: path.join(home, ".cursor") });
       const agent = yield* Effect.acquireRelease(
         Effect.promise(() =>
           Agent.create(
