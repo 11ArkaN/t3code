@@ -3,6 +3,7 @@ import {
   CommandId,
   RuntimeRequestId,
   EnvironmentId,
+  MessageId,
   RunId,
   ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
@@ -101,6 +102,7 @@ const SNAPSHOT: OrchestrationV2ShellSnapshot = {
 let randomCalls = 0;
 
 const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (options?: {
+  readonly loadEarlier?: () => Effect.Effect<ThreadHistoryController.ThreadHistoryLoadEarlierResult>;
   readonly reconcilePendingWork?: (threadId: ThreadId) => Effect.Effect<void>;
   readonly connected?: boolean;
   readonly storage?: {
@@ -181,7 +183,7 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
         ThreadHistoryController.ThreadHistoryController.of({
           register: () => Effect.die("unused"),
           unregister: () => Effect.void,
-          loadEarlier: () => Effect.die("unused"),
+          loadEarlier: () => options?.loadEarlier?.() ?? Effect.die("unused"),
           reconcilePendingWork: (_environmentId, threadId) =>
             options?.reconcilePendingWork?.(threadId) ?? Queue.offer(reconciled, threadId),
         }),
@@ -238,6 +240,59 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
     reconnect,
     disconnect,
   };
+});
+
+describe("history loading", () => {
+  it.effect("sends a message on the thread while earlier history is loading", () =>
+    Effect.gen(function* () {
+      const historyStarted = yield* Deferred.make<void>();
+      const historyReply =
+        yield* Deferred.make<ThreadHistoryController.ThreadHistoryLoadEarlierResult>();
+      const h = yield* makeHarness({
+        loadEarlier: () =>
+          Deferred.succeed(historyStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(historyReply)),
+          ),
+      });
+      yield* Effect.addFinalizer(() => Deferred.succeed(historyReply, { _tag: "loaded" }));
+      const history = h.commands.loadEarlierHistory.run(h.registry, {
+        environmentId: ENVIRONMENT_ID,
+        input: { threadId: THREAD_ID },
+      });
+      yield* Deferred.await(historyStarted);
+      const send = h.commands.startTurn.run(h.registry, {
+        environmentId: ENVIRONMENT_ID,
+        input: {
+          threadId: THREAD_ID,
+          message: {
+            messageId: MessageId.make("message"),
+            role: "user",
+            text: "Send while history loads",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          dispatchMode: "start",
+        },
+      });
+      // Dispatched after Send on another thread, so it arrives first only if Send is queued.
+      const controlThreadId = ThreadId.make("control-thread");
+      const control = h.commands.interruptTurn.run(h.registry, {
+        environmentId: ENVIRONMENT_ID,
+        input: { threadId: controlThreadId, runId: RunId.make("control-run") },
+      });
+      const first = yield* Queue.take(h.requests);
+      yield* Deferred.succeed(first.reply, { sequence: 1 });
+      yield* Deferred.succeed(historyReply, { _tag: "loaded" });
+      const second = yield* Queue.take(h.requests);
+      yield* Deferred.succeed(second.reply, { sequence: 2 });
+      const results = yield* Effect.promise(() => Promise.all([history, send, control]));
+
+      expect(first.command).toMatchObject({ type: "message.dispatch", threadId: THREAD_ID });
+      expect(second.command).toMatchObject({ type: "run.interrupt", threadId: controlThreadId });
+      expect(results.map((value) => value._tag)).toEqual(["Success", "Success", "Success"]);
+    }),
+  );
 });
 
 describe("interrupt turn", () => {

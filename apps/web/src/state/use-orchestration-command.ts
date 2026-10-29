@@ -14,8 +14,7 @@ import { AsyncResult } from "effect/reactivity";
 import { readEnvironmentScope } from "./session";
 import { useAtomCommand } from "./use-atom-command";
 
-export const ORCHESTRATION_OPERATE_DENIED_MESSAGE =
-  "This connection cannot change threads or projects.";
+const ORCHESTRATION_OPERATE_DENIED_MESSAGE = "This connection cannot change threads or projects.";
 
 // Module scope: React Compiler cannot reorder an inline arrow used as a parameter default.
 function hasLiveOperateGrant(environmentId: EnvironmentId): boolean {
