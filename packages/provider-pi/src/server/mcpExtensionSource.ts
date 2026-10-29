@@ -349,6 +349,7 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // bridge as the credential owner: mcp.json overrides native registrations.
   const supportsExposure = "registerMcpServer" in pi && typeof pi.registerMcpServer === "function";
   const directTools = new Set(["orchestrator_capabilities", "delegate_task", "task_status"]);
+  const ALIAS_PREFIX = "mcp__t3_code__";
   let deferOptionalTools = supportsExposure;
   let catalog: ReadonlyArray<McpTool> = [];
 
@@ -356,23 +357,26 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   let started: Promise<void> | undefined;
 
   const registerTools = () => {
-    // Preserve public names for saved loadouts and tool selectors. Hidden
-    // canonical names reserve ownership against Pi's configured MCP servers.
-    const prefixes = supportsExposure ? ["mcp__t3-code__", "mcp__t3_code__"] : ["mcp__t3-code__"];
+    // Preserve public names for saved loadouts and tool selectors. The alias,
+    // Pi's own MCP name for T3, reserves it against Pi's configured MCP servers
+    // and stays active and callable without a second declaration.
+    const prefixes = supportsExposure ? ["mcp__t3-code__", ALIAS_PREFIX] : ["mcp__t3-code__"];
     readOnlyMcpTools.clear();
     for (const tool of catalog) {
       const name = tool.name;
       for (const prefix of prefixes) {
-        if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(\`\${prefix}\${name}\`);
-        const exposure = prefix === "mcp__t3_code__" ? "hidden" :
-          deferOptionalTools && !directTools.has(name) ? "deferred" : "direct";
+        const toolName = \`\${prefix}\${name}\`;
+        if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(toolName);
+        const isAlias = prefix === ALIAS_PREFIX;
+        const exposure = !isAlias && deferOptionalTools && !directTools.has(name) ? "deferred" : "direct";
         pi.registerTool({
-          name: \`\${prefix}\${name}\`,
+          name: toolName,
           label: name,
           description: tool.description ?? name,
           parameters: jsonSchemaToTypebox(tool.inputSchema),
           ...(supportsExposure ? { outputSchema: mcpOutputSchema(tool) } : {}),
           ...(supportsExposure ? { exposure } : {}),
+          ...(isAlias ? { prepareLoadout: () => ({ hiddenDeclarations: [toolName] }) } : {}),
           async execute(_toolCallId, params, signal) {
             const result = await client.callTool(
               name,
@@ -422,7 +426,14 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     const exposureChanged = deferOptionalTools !== hasToolSearch;
     deferOptionalTools = hasToolSearch;
     if (exposureChanged) registerTools();
-    const active = pi.getActiveTools();
+    // Aliases are callable only while active. Keep one active exactly while
+    // --exclude-tools left its public tool, including after older tree restores.
+    const registered = new Set(pi.getAllTools().map((tool) => tool.name));
+    const aliases = new Set(catalog
+      .filter((tool) => registered.has("mcp__t3-code__" + tool.name))
+      .map((tool) => ALIAS_PREFIX + tool.name));
+    const current = pi.getActiveTools();
+    const active = current.filter((name) => !name.startsWith(ALIAS_PREFIX) || aliases.has(name));
     // Completion gateways can silently drop calls to undeclared tools named
     // in history or guidance. Eagerly load T3 schemas, including after tree
     // restores, while retaining deferred exposure for Pi's allowlist rules.
@@ -430,9 +441,10 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     const required = [
       ...(hasToolSearch ? ["tool_search"] : []),
       ...(ctx.model?.api === "openai-completions" ? catalog.map((tool) => "mcp__t3-code__" + tool.name) : []),
+      ...aliases,
     ];
     const missing = required.filter((name) => !active.includes(name));
-    if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+    if (missing.length > 0 || active.length !== current.length) pi.setActiveTools([...active, ...missing]);
   };
 
   // Tree navigation restores its saved loadout after session_start.

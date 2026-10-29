@@ -145,10 +145,17 @@ describe("Pi MCP tool exposure", () => {
     assert.include(prompt?.systemPrompt ?? "", "orchestrator_capabilities");
     assert.equal(bridge.servers.length, 0);
     assert.equal(bridge.tools.length, 8);
-    assert.deepEqual(bridge.getActiveTools(), ["read", "tool_search"]);
+    const aliases = [
+      "mcp__t3_code__orchestrator_capabilities",
+      "mcp__t3_code__delegate_task",
+      "mcp__t3_code__task_status",
+      "mcp__t3_code__preview_snapshot",
+    ];
+    assert.deepEqual(bridge.getActiveTools(), ["read", "tool_search", ...aliases]);
+    assert.deepEqual(bridge.declaredTools(), []);
     assert.deepEqual(
       bridge.tools
-        .filter((tool) => tool.exposure !== "hidden")
+        .filter((tool) => tool.name.startsWith("mcp__t3-code__"))
         .map((tool) => [tool.name, tool.exposure]),
       [
         ["mcp__t3-code__orchestrator_capabilities", "direct"],
@@ -158,13 +165,10 @@ describe("Pi MCP tool exposure", () => {
       ],
     );
     assert.deepEqual(
-      bridge.tools.filter((tool) => tool.exposure === "hidden").map((tool) => tool.name),
-      [
-        "mcp__t3_code__orchestrator_capabilities",
-        "mcp__t3_code__delegate_task",
-        "mcp__t3_code__task_status",
-        "mcp__t3_code__preview_snapshot",
-      ],
+      bridge.tools
+        .filter((tool) => tool.name.startsWith("mcp__t3_code__"))
+        .map((tool) => [tool.name, tool.exposure]),
+      aliases.map((name) => [name, "direct"]),
     );
     const result = await bridge.tools
       .find((tool) => tool.name === "mcp__t3-code__preview_snapshot")!
@@ -190,6 +194,14 @@ describe("Pi MCP tool exposure", () => {
       "mcp__t3-code__task_status",
       "tool_search",
       "mcp__t3-code__orchestrator_capabilities",
+      "mcp__t3-code__preview_snapshot",
+      "mcp__t3_code__orchestrator_capabilities",
+      "mcp__t3_code__task_status",
+      "mcp__t3_code__preview_snapshot",
+    ]);
+    assert.deepEqual(bridge.declaredTools(), [
+      "mcp__t3-code__orchestrator_capabilities",
+      "mcp__t3-code__task_status",
       "mcp__t3-code__preview_snapshot",
     ]);
     await bridge.handlers.get("model_select")!(event, discoveryContext);
@@ -255,12 +267,18 @@ describe("Pi MCP tool exposure", () => {
         const start = bridge.handlers.get("session_start");
         await start!({ systemPrompt: "Pi system prompt" }, discoveryContext);
       }
-      assert.equal(bridge.tools.filter((tool) => tool.exposure !== "hidden").length, 4);
+      const publicTools = bridge.tools.filter((tool) => tool.name.startsWith("mcp__t3-code__"));
+      assert.equal(publicTools.length, 4);
       assert.isTrue(
-        bridge.tools
-          .filter((tool) => tool.exposure !== "hidden")
-          .every((tool) => tool.exposure === undefined || tool.exposure === "direct"),
+        publicTools.every((tool) => tool.exposure === undefined || tool.exposure === "direct"),
       );
+      assert.deepEqual(
+        bridge.tools
+          .filter((tool) => tool.name.startsWith("mcp__t3_code__"))
+          .map((tool) => tool.exposure),
+        mode === "legacy Pi" ? [] : ["direct", "direct", "direct", "direct"],
+      );
+      assert.isFalse(bridge.declaredTools().some((name) => name.startsWith("mcp__t3_code__")));
       const tool = bridge.tools.find((tool) => tool.name === "mcp__t3-code__preview_snapshot");
       assert.isDefined(tool);
       const controller = new AbortController();
