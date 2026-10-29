@@ -115,7 +115,7 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
       : []),
     ...(producedBy.length > 0
       ? [
-          "- you only write this description; you did not make the change. Wherever the body names the model or harness behind the change, use the ones listed under 'Change produced by', never yourself",
+          "- you only write this description; you did not make the change. Name a model or harness only where the repository's instructions or template ask for one, and then use the ones listed under 'Change produced by', never yourself",
         ]
       : []),
     ...policyInstruction(input.policy?.changeRequestInstructions),
