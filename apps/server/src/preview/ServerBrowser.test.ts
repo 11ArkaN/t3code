@@ -55,8 +55,9 @@ vi.mock("./ServerBrowserContexts.ts", () => ({
       return makeEncoderPage() as unknown as Page;
     }
     async connectDesktopPage(endpoint: string) {
-      const context = makeContext(undefined, DESKTOP_LAYOUT);
-      desktopConnections.push({ endpoint, context });
+      const layout = { ...DESKTOP_LAYOUT };
+      const context = makeContext(undefined, layout);
+      desktopConnections.push({ endpoint, context, layout });
       return { browser: { close: async () => {} }, page: context.page as unknown as Page };
     }
     async close() {
@@ -110,12 +111,22 @@ function makeSession(frame?: ReturnType<typeof makeFrame>, layout?: typeof DESKT
       if (method === "Runtime.callFunctionOn") return { result: { value: PNG_HEADER } };
       if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main" } } };
       if (method === "Page.createIsolatedWorld") {
+        const { worldName } = input as { worldName?: string };
         return {
-          executionContextId: (input as { worldName?: string }).worldName === "t3-preview" ? 1 : 7,
+          executionContextId:
+            worldName === "t3-preview" ? 1 : layout && worldName === "t3-preview-metrics" ? 9 : 7,
         };
       }
       if (method === "Runtime.evaluate" && (input as { contextId?: number }).contextId === 1) {
         return { result: { value: [] } };
+      }
+      // `innerWidth` and `innerHeight`; without scrollbars they equal the client size.
+      if (
+        layout &&
+        method === "Runtime.evaluate" &&
+        (input as { contextId?: number }).contextId === 9
+      ) {
+        return { result: { value: { ratio: 1, ...layout } } };
       }
       if (method === "Page.addScriptToEvaluateOnNewDocument") frame?.recording.resolve();
       if (method === "Input.dispatchKeyEvent" && (input as { commands?: unknown }).commands) {
@@ -294,7 +305,11 @@ const desktopRenders = (tabId: string) => {
 };
 const releasedDesktopTabs: Array<string> = [];
 const desktopTurns = new NodeEvents.EventEmitter();
-const desktopConnections: Array<{ endpoint: string; context: ReturnType<typeof makeContext> }> = [];
+const desktopConnections: Array<{
+  endpoint: string;
+  context: ReturnType<typeof makeContext>;
+  layout: typeof DESKTOP_LAYOUT;
+}> = [];
 const testThread = {
   threadId: ThreadId.make("browser-test-thread"),
   providerSessionId: "agent-a",
@@ -520,6 +535,25 @@ it.live("a viewer of a tab the desktop draws learns the page's CSS size", () =>
       expect(yield* Queue.takeAll(viewer.output)).toContainEqual({
         _tag: "viewport",
         ...DESKTOP_LAYOUT,
+      });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("a viewer of a tab the desktop draws learns its new size when the host resizes it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      desktopRendersNext = true;
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* Queue.takeAll(viewer.output);
+      const { context, layout } = desktopConnections[0]!;
+      Object.assign(layout, { width: 800, height: 600 });
+      context.sessions.at(-1)!.emit("Page.frameResized");
+      expect(yield* Queue.take(viewer.output)).toEqual({
+        _tag: "viewport",
+        width: 800,
+        height: 600,
       });
     }),
   ).pipe(Effect.provide(layer)),

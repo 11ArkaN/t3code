@@ -2396,7 +2396,22 @@ const make = Effect.gen(function* () {
         ),
       });
     });
-    broadcastViewport(tab);
+    if (tab.desktop) {
+      // A page reached over CDP has no emulated viewport. Input lands in its zoomed CSS
+      // pixels, which change when the host resizes its panel or zooms.
+      let measurement = 0;
+      const pushPageSize = async () => {
+        const current = ++measurement;
+        const metrics = await ServerBrowserPage.readPageMetrics(session).catch(() => null);
+        if (metrics && current === measurement)
+          viewer.push({ _tag: "viewport", width: metrics.width, height: metrics.height });
+      };
+      session.on("Page.frameResized", () => void pushPageSize());
+      yield* Effect.promise(() => session.send("Page.enable").catch(constVoid));
+      // Page script cannot answer until an open dialog closes.
+      const measured = pushPageSize();
+      if (!tab.dialog) yield* Effect.promise(() => measured);
+    } else broadcastViewport(tab);
     yield* Effect.promise(() => startScreencast(1));
     // An idle page does not repaint for a new screencast, so the viewer
     // starts from a still unless a live frame beat it.
