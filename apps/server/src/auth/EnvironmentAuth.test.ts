@@ -114,23 +114,28 @@ const makeDpopKey = () => {
   };
 };
 
+const ownT3Home = (config: ServerConfig.ServerConfig["Service"]) =>
+  Effect.gen(function* () {
+    yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ProcessRunner.layer,
+          // An empty home, so no boot service unit installed on this machine is read.
+          Layer.effect(
+            HostProcess.HomeDirectory,
+            (yield* FileSystem.FileSystem).makeTempDirectoryScoped(),
+          ),
+          Layer.succeed(HostProcess.Environment, {}),
+        ),
+      ),
+    );
+  });
+
 it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
   it.effect("does not migrate a T3 home behind the server that owns it", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;
-      yield* ServerOwnership.acquireServerOwnership(config.serverRuntimeStatePath).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ProcessRunner.layer,
-            // An empty home, so no boot service unit installed on this machine is read.
-            Layer.effect(
-              HostProcess.HomeDirectory,
-              (yield* FileSystem.FileSystem).makeTempDirectoryScoped(),
-            ),
-            Layer.succeed(HostProcess.Environment, {}),
-          ),
-        ),
-      );
+      yield* ownT3Home(config);
       const recordedMigrationId = Math.max(...migrationManifest.map(([id]) => id)) - 1;
       const latestRecordedMigrationId = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -155,6 +160,25 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
       if (cliStorage._tag === "Failure") {
         expect(cliStorage.failure.message).toMatch(/server .*owns/i);
       }
+    }).pipe(Effect.provide(layerServerConfig())),
+  );
+
+  it.effect("opens a current T3 home while the server that owns it runs", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      yield* runMigrations().pipe(
+        Effect.provide(NodeSqliteClient.layer({ filename: config.dbPath })),
+      );
+      yield* ownT3Home(config);
+
+      const issued = yield* EnvironmentAuth.EnvironmentAuth.pipe(
+        Effect.flatMap((auth) => auth.issueSession()),
+        Effect.provide(
+          EnvironmentAuth.layerRuntime.pipe(Layer.provide(ServerConfig.layer(config))),
+        ),
+      );
+
+      expect(issued.token.length).toBeGreaterThan(0);
     }).pipe(Effect.provide(layerServerConfig())),
   );
 
