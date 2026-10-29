@@ -281,7 +281,7 @@ describe("DesktopServerExposure", () => {
     "listens on the tailnet only while Tailscale sign-in is on and Network access is off",
     () =>
       withHarness(
-        lanNetworkInterfaces,
+        { ...tailnetNetworkInterfaces, ...lanNetworkInterfaces },
         Effect.gen(function* () {
           const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
           yield* (yield* DesktopAppSettings.DesktopAppSettings).load;
@@ -296,6 +296,10 @@ describe("DesktopServerExposure", () => {
             tailscaleSignInEnabled: true,
             tailscaleOnly: true,
           });
+          assert.deepEqual(
+            (yield* serverExposure.getAdvertisedEndpoints).map((endpoint) => endpoint.httpBaseUrl),
+            ["http://127.0.0.1:3773/", "http://100.90.1.2:3773/"],
+          );
 
           yield* serverExposure.setMode("network-accessible");
           assert.deepInclude(yield* serverExposure.backendConfig, {
