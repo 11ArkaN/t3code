@@ -14,6 +14,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ServerSettingsError,
   type ProviderSessionId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -3246,9 +3247,29 @@ it.effect(
     }),
 );
 
-const makeTestSettings = Effect.service(ServerSettings.ServerSettingsService).pipe(
-  Effect.provide(ServerSettings.layerTest()),
-);
+const makeTestSettings = Effect.fn("ProviderSessionManagerTest.makeSettings")(function* (
+  unavailable: Ref.Ref<boolean>,
+) {
+  const settings = yield* Effect.service(ServerSettings.ServerSettingsService).pipe(
+    Effect.provide(ServerSettings.layerTest()),
+  );
+  return {
+    ...settings,
+    getSettings: Ref.get(unavailable).pipe(
+      Effect.flatMap((failed) =>
+        failed
+          ? Effect.fail(
+              new ServerSettingsError({
+                settingsPath: "test settings",
+                operation: "read-file",
+                cause: "Settings temporarily unavailable",
+              }),
+            )
+          : settings.getSettings,
+      ),
+    ),
+  };
+});
 
 // regression: #26722 live agents kept a stale tool list after Linked environments changed
 it.effect(
@@ -3258,7 +3279,8 @@ it.effect(
       const state = yield* Ref.make(emptyState);
       const pendingWork = yield* Ref.make<Effect.Effect<boolean>>(Effect.succeed(false));
       const beforeUnload = yield* Ref.make<Effect.Effect<void>>(Effect.void);
-      const settings = yield* makeTestSettings;
+      const settingsUnavailable = yield* Ref.make(false);
+      const settings = yield* makeTestSettings(settingsUnavailable);
       yield* Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -3317,7 +3339,11 @@ it.effect(
             unloaded: unloadedNativeThreadIds,
           })),
         );
+        yield* Ref.set(settingsUnavailable, true);
         yield* resume(threadA);
+        yield* resume(threadA);
+        assert.deepEqual(yield* observed, { resumeCount: 1, unloaded: [] });
+        yield* Ref.set(settingsUnavailable, false);
         yield* resume(threadB);
         assert.deepEqual(yield* observed, { resumeCount: 2, unloaded: [] });
 
@@ -3334,6 +3360,10 @@ it.effect(
         const reloaded = yield* resume(threadA);
         assert.deepEqual(reloaded.nativeThreadRef, providerThreads[threadA]!.nativeThreadRef);
         assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
+        yield* Ref.set(settingsUnavailable, true);
+        yield* resume(threadA);
+        assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
+        yield* Ref.set(settingsUnavailable, false);
         yield* resume(threadA);
         assert.deepEqual(yield* observed, { resumeCount: 5, unloaded: ["native-links-a"] });
 
@@ -3404,7 +3434,8 @@ it.effect(
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const pendingWork = yield* Ref.make<Effect.Effect<boolean>>(Effect.succeed(false));
-      const settings = yield* makeTestSettings;
+      const settingsUnavailable = yield* Ref.make(false);
+      const settings = yield* makeTestSettings(settingsUnavailable);
       yield* Effect.gen(function* () {
         const eventSink = yield* EventSink.EventSinkV2;
         const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -3431,9 +3462,11 @@ it.effect(
           Effect.map(({ openCount, closeCount }) => ({ openCount, closeCount })),
         );
 
+        yield* Ref.set(settingsUnavailable, true);
         const first = yield* open;
         yield* first.resumeThread({ providerThread, threadId, modelSelection, runtimePolicy });
         assert.strictEqual(yield* open, first);
+        yield* Ref.set(settingsUnavailable, false);
 
         yield* settings.updateSettings({ linkedEnvironmentsEnabled: true });
         yield* Ref.set(pendingWork, Effect.succeed(true));

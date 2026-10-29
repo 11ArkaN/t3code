@@ -190,9 +190,9 @@ export class ProviderSessionManagerV2 extends Context.Service<
 interface LiveSessionEntry {
   readonly attachedThreadIds: ReadonlySet<ThreadId>;
   readonly loadedProviderThreadKeyByThread: ReadonlyMap<ThreadId, string>;
-  /** MCP clients list tools once, so a changed Linked environments setting needs a reload. */
-  readonly openedWithLinkedEnvironments: boolean | undefined;
-  readonly linkedEnvironmentsByThread: ReadonlyMap<ThreadId, boolean>;
+  /** null retains a failed settings read; undefined means MCP refresh is not configured. */
+  readonly openedWithLinkedEnvironments: boolean | null | undefined;
+  readonly linkedEnvironmentsByThread: ReadonlyMap<ThreadId, boolean | null>;
   /** Scope revocation to recorded credential ids so superseded sessions cannot revoke replacements opened before detach. */
   readonly mcpCredentialIdByThread: ReadonlyMap<ThreadId, string>;
   readonly supportsMultipleProviderThreads: boolean;
@@ -363,7 +363,7 @@ export const layerWithOptions = (
         if (options.configureMcp === false || Option.isNone(serverSettings)) return undefined;
         return yield* serverSettings.value.getSettings.pipe(
           Effect.map((settings) => settings.linkedEnvironmentsEnabled),
-          Effect.orElseSucceed(() => undefined),
+          Effect.orElseSucceed(() => null),
         );
       });
       const layerScope = yield* Effect.scope;
@@ -1290,7 +1290,7 @@ export const layerWithOptions = (
         readonly providerSessionId: ProviderSessionId;
         readonly threadId: ThreadId;
         readonly providerThreadKey: string;
-        readonly linkedEnvironments: boolean | undefined;
+        readonly linkedEnvironments: boolean | null | undefined;
       }) =>
         Ref.update(sessions, (current) => {
           const key = sessionKey(input.providerSessionId);
@@ -1649,7 +1649,7 @@ export const layerWithOptions = (
           return;
         }
         const linkedEnvironments = yield* readLinkedEnvironments;
-        if (linkedEnvironments === undefined || linkedEnvironments === loadedWith) return;
+        if (typeof linkedEnvironments !== "boolean" || linkedEnvironments === loadedWith) return;
         yield* threadAttachment.withLock(
           threadAttachmentKey(input),
           Effect.gen(function* () {
@@ -1716,7 +1716,7 @@ export const layerWithOptions = (
         }
         const linkedEnvironments = yield* readLinkedEnvironments;
         if (
-          linkedEnvironments === undefined ||
+          typeof linkedEnvironments !== "boolean" ||
           linkedEnvironments === entry.openedWithLinkedEnvironments
         ) {
           return;
