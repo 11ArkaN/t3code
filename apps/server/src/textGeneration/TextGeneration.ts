@@ -86,12 +86,11 @@ export const make = Effect.gen(function* () {
       ),
     );
     const now = DateTime.toEpochMillis(yield* DateTime.now);
-    const limited = exhaustedUsageWindow(
-      snapshots.find((provider) => provider.instanceId === selection.instanceId),
-      now,
-      selection.model,
-    );
-    if (limited) {
+    const selected = snapshots.find((provider) => provider.instanceId === selection.instanceId);
+    // A pending snapshot is also not installed, but only a failed probe reports an error.
+    const missing =
+      selected?.enabled === true && !selected.installed && selected.status === "error";
+    if (missing || exhaustedUsageWindow(selected, now, selection.model)) {
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError(
           (cause) =>

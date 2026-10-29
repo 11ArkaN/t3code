@@ -444,7 +444,7 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   );
 });
 
-const PREFLIGHT_PRIMARY_STATES = ["ready", "exhausted", "not installed"] as const;
+const PREFLIGHT_PRIMARY_STATES = ["ready", "pending", "exhausted", "not installed"] as const;
 
 it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (primaryState) =>
   Effect.gen(function* () {
@@ -470,6 +470,9 @@ it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (prima
         models: [],
         slashCommands: [],
         skills: [],
+        ...(primaryState === "pending" && instanceId === primary
+          ? { installed: false, status: "warning", auth: { status: "unknown" } }
+          : {}),
         ...(primaryState === "not installed" && instanceId === primary
           ? { installed: false, status: "error", auth: { status: "unknown" } }
           : {}),
@@ -531,7 +534,7 @@ it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (prima
       }),
     ).toEqual({ title: "Generated title" });
     expect(calls).toEqual([
-      primaryState !== "ready"
+      primaryState === "exhausted" || primaryState === "not installed"
         ? {
             instanceId: fallback,
             model:
