@@ -182,9 +182,11 @@ describe("Pi MCP tool exposure", () => {
       modern: true,
       toolSearchAvailable: true,
       allowsTool: (name) => name !== "mcp__t3-code__delegate_task",
+      activatesOnRegistration: true,
     });
     const event = { systemPrompt: "" };
     await bridge.handlers.get("session_start")!(event, discoveryContext);
+    assert.notInclude(bridge.getActiveTools(), "mcp__t3_code__delegate_task");
     const gatewayContext = { model: { api: "openai-completions" }, ui: { notify: assert.fail } };
     await bridge.handlers.get("model_select")!(event, gatewayContext);
     bridge.restoreActiveTools(["read", "mcp__t3-code__task_status"]);
