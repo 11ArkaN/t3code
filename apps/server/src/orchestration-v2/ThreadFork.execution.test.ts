@@ -272,8 +272,8 @@ it.effect.each(forkCases)(
               nativeThreadRef: { driver, nativeId: "native-source", strength: "strong" },
               nativeConversationHeadRef: null,
               status: "idle",
-              firstRunOrdinal: 1,
-              lastRunOrdinal: 2,
+              firstRunOrdinal: 2,
+              lastRunOrdinal: 3,
               handoffIds: [],
               forkedFrom: null,
               createdAt: now,
@@ -325,8 +325,15 @@ it.effect.each(forkCases)(
           ],
         });
       }
-      for (const ordinal of [1, 2]) {
-        const runId = ordinal === 1 ? sourceRunId : RunId.make("later-run");
+      yield* writeParentRun({
+        threadId: sourceThreadId,
+        runId: RunId.make("fork-boundary-source-rolled-back-run"),
+        ordinal: 1,
+        status: "rolled_back",
+        text: "SOURCE_ROLLED_BACK_MARKER",
+      });
+      for (const ordinal of [2, 3]) {
+        const runId = ordinal === 2 ? sourceRunId : RunId.make("later-run");
         const messageId = MessageId.make(`source-message-${ordinal}`);
         yield* eventSink.write({
           events: [
@@ -345,8 +352,8 @@ it.effect.each(forkCases)(
                 providerThreadId,
                 userMessageId: messageId,
                 rootNodeId: null,
-                activeAttemptId: ordinal === 1 && status === "interrupted" ? attemptId : null,
-                status: ordinal === 1 ? status : "completed",
+                activeAttemptId: ordinal === 2 && status === "interrupted" ? attemptId : null,
+                status: ordinal === 2 ? status : "completed",
                 queuePosition: null,
                 requestedAt: now,
                 startedAt: now,
@@ -381,7 +388,7 @@ it.effect.each(forkCases)(
                 creationSource: "web",
                 inputIntent: "turn_start",
                 messageId,
-                text: ordinal === 1 ? "INCLUDED_SOURCE_MARKER" : "EXCLUDED_LATER_MARKER",
+                text: ordinal === 2 ? "INCLUDED_SOURCE_MARKER" : "EXCLUDED_LATER_MARKER",
                 attachments: [],
               },
             },
@@ -415,6 +422,7 @@ it.effect.each(forkCases)(
       const handoff = target.contextHandoffs[0]!;
       const history = handoff.history?.messages.map((message) => message.text).join("\n") ?? "";
       assert.include(`${handoff.summaryText}\n${history}`, "GRANDPARENT_MARKER");
+      assert.notInclude(`${handoff.summaryText}\n${history}`, "SOURCE_ROLLED_BACK_MARKER");
       assert.notInclude(`${handoff.summaryText}\n${history}`, "ROLLED_BACK_MARKER");
       assert.include(`${handoff.summaryText}\n${history}`, "INCLUDED_SOURCE_MARKER");
       assert.notInclude(`${handoff.summaryText}\n${history}`, "EXCLUDED_LATER_MARKER");

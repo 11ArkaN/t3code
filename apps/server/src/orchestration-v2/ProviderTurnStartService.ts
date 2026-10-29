@@ -34,6 +34,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
+import { isActiveRun } from "./CommandPolicy.ts";
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
   handoffTokenCapConfig,
@@ -1079,12 +1080,7 @@ export const layer: Layer.Layer<
           // Providers refuse to fork a busy thread, so a source that started a turn after
           // dispatch planned this fork gets the portable context dispatch gives a busy source.
           const sourceBusy = sourceProjection.runs.some(
-            (candidate) =>
-              candidate.ordinal > sourceRun.ordinal &&
-              (candidate.status === "preparing" ||
-                candidate.status === "starting" ||
-                candidate.status === "running" ||
-                candidate.status === "waiting"),
+            (candidate) => candidate.ordinal > sourceRun.ordinal && isActiveRun(candidate),
           );
           if (!sourceBusy) {
             return yield* loadFromProvider(
@@ -1100,25 +1096,11 @@ export const layer: Layer.Layer<
               }),
             );
           }
-          const { turnItems: ownItems } = yield* projectionStore.getThreadRecords(
-            sourceProjection.thread.id,
-            ["turnItems"],
-            {
-              turnItemRunIds: [
-                ...sourceProjection.runs
-                  .filter((candidate) => candidate.ordinal <= sourceRun.ordinal)
-                  .map((candidate) => candidate.id),
-                ...(sourceProjection.thread.historyOrigin === "v1_import" ? [null] : []),
-              ],
-            },
+          const sourceItems = yield* ContextHandoffService.readForkHistoryItems(
+            projectionStore,
+            sourceProjection,
+            sourceRun,
           );
-          const sourceItems = [
-            ...(yield* ContextHandoffService.readInheritedHandoffItems(
-              projectionStore,
-              sourceProjection.thread,
-            )),
-            ...ownItems,
-          ];
           const createdAt = yield* DateTime.now;
           const handoff = yield* contextHandoffService.prepareProviderHandoff({
             threadId: projection.thread.id,

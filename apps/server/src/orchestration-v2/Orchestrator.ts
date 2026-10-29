@@ -100,12 +100,14 @@ import { CheckpointServiceV2 } from "./CheckpointService.ts";
 import {
   CommandPolicyV2,
   goalCommandStopsActiveRun,
+  isActiveRun,
   isNativeMaintenanceCommand,
   resolveMessageDispatchIntent,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import {
   ContextHandoffServiceV2,
+  readForkHistoryItems,
   readInheritedHandoffItems,
   visibleConversationItems,
   visibleDeltaRunOrdinals,
@@ -632,15 +634,6 @@ function mayStartSubagentFollowup(
     return false;
   if (command.notification !== undefined) return command.notification.source.kind !== "monitor";
   return command.createdBy === "user" || command.creationSource === "mcp";
-}
-
-function isBlockingRun(run: OrchestrationV2Run): boolean {
-  return (
-    run.status === "preparing" ||
-    run.status === "starting" ||
-    run.status === "running" ||
-    run.status === "waiting"
-  );
 }
 
 /** Waiting runs only drain post-terminal output; their agent turn is over and still needs a wake. */
@@ -1510,7 +1503,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
-        projection.runs.some(isBlockingRun)
+        projection.runs.some(isActiveRun)
       ) {
         return;
       }
@@ -4285,7 +4278,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     // The next dispatch consumes merge-backs and queued dispatches cannot, so a busy target would reject it.
-    if (targetProjection.runs.some(isBlockingRun)) {
+    if (targetProjection.runs.some(isActiveRun)) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -5579,7 +5572,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const activeProviderThread = projection.providerThreads.find(
       (candidate) => candidate.id === projection.thread.activeProviderThreadId,
     );
-    const activeRun = projection.runs.find(isBlockingRun);
+    const activeRun = projection.runs.find(isActiveRun);
     // A message queued during worktree setup can arrive after that setup failed
     // without a worktree. It waits, held, like the messages queued before the
     // failure, instead of starting in the project checkout.
@@ -6453,7 +6446,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               hasStrongNativeSource: sourceProviderThread?.nativeThreadRef?.strength === "strong",
               sourceRunStatus: sourceRun.status,
               fromSpecificTurn: sourceRun !== null,
-              sourceBusy: sourceRunsAfterFork.some(isBlockingRun),
+              sourceBusy: sourceRunsAfterFork.some(isActiveRun),
             }),
           );
     const canResolveForkNatively = forkExecution === "native_fork";
@@ -6510,15 +6503,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const portableForkItems =
       !requiresPortableFork || sourceProjection === null || sourceRun === null
         ? []
-        : [
-            ...(yield* readInheritedItems(sourceProjection.thread)),
-            ...(yield* readHandoffItems(sourceProjection.thread.id, [
-              ...sourceProjection.runs
-                .filter((run) => run.ordinal <= sourceRun.ordinal)
-                .map((run) => run.id),
-              ...(sourceProjection.thread.historyOrigin === "v1_import" ? [null] : []),
-            ])),
-          ];
+        : yield* readForkHistoryItems(projectionStore, sourceProjection, sourceRun).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorProjectionError({ threadId: sourceProjection.thread.id, cause }),
+            ),
+          );
     const portableForkHandoff =
       !requiresPortableFork ||
       pendingForkTransfer === undefined ||
@@ -7351,7 +7341,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const parentRun = parentProjection.runs.find(
         (candidate) => candidate.id === command.parentRunId,
       );
-      if (parentRun === undefined || !isBlockingRun(parentRun)) {
+      if (parentRun === undefined || !isActiveRun(parentRun)) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
           commandType: command.type,
@@ -7653,7 +7643,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     );
     if (original === undefined || original.result === null) return;
     const owner =
-      parent.runs.filter(isBlockingRun).toSorted((a, b) => b.ordinal - a.ordinal)[0] ??
+      parent.runs.filter(isActiveRun).toSorted((a, b) => b.ordinal - a.ordinal)[0] ??
       latestExecutedRun(parent.runs);
     if (owner === null || owner.rootNodeId === null) return;
     const now = message.createdAt;
@@ -7786,7 +7776,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const parentRun = parentProjection.runs.find(
       (candidate) => candidate.id === command.parentRunId,
     );
-    if (parentRun === undefined || !isBlockingRun(parentRun) || parentRun.rootNodeId === null) {
+    if (parentRun === undefined || !isActiveRun(parentRun) || parentRun.rootNodeId === null) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -8493,7 +8483,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       }
       if (
         existing === undefined &&
-        (!isBlockingRun(run) || (yield* stopReachedRun(command, command.threadId, run.id)))
+        (!isActiveRun(run) || (yield* stopReachedRun(command, command.threadId, run.id)))
       ) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -9897,7 +9887,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Run ${command.runId} has no failed workspace preparation to retry.`,
       });
     }
-    if (projection.runs.some((run) => run.id !== state.run.id && isBlockingRun(run))) {
+    if (projection.runs.some((run) => run.id !== state.run.id && isActiveRun(run))) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -11305,7 +11295,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           continue;
         const idle =
           idleChildren.get(task.childThreadId) ??
-          (!child.runs.some((run) => run.status === "queued" || isBlockingRun(run)) &&
+          (!child.runs.some((run) => run.status === "queued" || isActiveRun(run)) &&
             !child.providerThreads.some(
               (thread) =>
                 thread.status === "active" || (thread.pendingBackgroundTasks?.length ?? 0) > 0,
@@ -12866,7 +12856,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             selectedMessage === undefined ||
             selectedMessage.delegatedCompletion !== undefined ||
             selectedMessage.notification !== undefined ||
-            projection.runs.some(isBlockingRun)
+            projection.runs.some(isActiveRun)
           ) {
             return yield* new OrchestratorDispatchError({
               commandId: command.commandId,

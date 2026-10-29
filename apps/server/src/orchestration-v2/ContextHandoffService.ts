@@ -132,7 +132,6 @@ export function visibleDeltaRunOrdinals(
   };
 }
 
-/** History `thread` shows from its fork ancestors, oldest first. Side chats inherit no rows. */
 /** Drops rolled-back runs and cancelled queued messages, which are not part of the conversation. */
 export function visibleConversationItems(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "attempts">,
@@ -146,6 +145,26 @@ export function visibleConversationItems(
   return items.filter(visible);
 }
 
+type ForkHistorySource = Pick<OrchestrationV2ThreadProjection, "thread" | "runs" | "attempts">;
+
+/** Visible rows of `source`'s own runs through `throughRun`, plus its v1 imported rows. */
+const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHistoryItems")(
+  function* (
+    projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
+    source: ForkHistorySource,
+    throughRun: Pick<OrchestrationV2Run, "ordinal">,
+  ) {
+    const { turnItems } = yield* projectionStore.getThreadRecords(source.thread.id, ["turnItems"], {
+      turnItemRunIds: [
+        ...source.runs.filter((run) => run.ordinal <= throughRun.ordinal).map((run) => run.id),
+        ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
+      ],
+    });
+    return visibleConversationItems(source, turnItems);
+  },
+);
+
+/** History `thread` shows from its fork ancestors, oldest first. Side chats inherit no rows. */
 export const readInheritedHandoffItems = Effect.fn(
   "orchestrationV2.contextHandoff.readInheritedHandoffItems",
 )(function* (
@@ -162,19 +181,29 @@ export const readInheritedHandoffItems = Effect.fn(
   ) {
     const { threadId, runId } = current.forkedFrom;
     seen.add(threadId);
-    const source = yield* projectionStore.getThreadRecords(threadId, ["runs", "attempts"]);
-    const forkRun = source.runs.find((run) => run.id === runId);
-    if (forkRun === undefined) break;
-    const { turnItems } = yield* projectionStore.getThreadRecords(threadId, ["turnItems"], {
-      turnItemRunIds: [
-        ...source.runs.filter((run) => run.ordinal <= forkRun.ordinal).map((run) => run.id),
-        ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
-      ],
-    });
-    segments.unshift(visibleConversationItems(source, turnItems));
+    const source = yield* projectionStore
+      .getThreadRecords(threadId, ["runs", "attempts"])
+      .pipe(Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }));
+    const forkRun = source?.runs.find((run) => run.id === runId);
+    if (source === null || forkRun === undefined) break;
+    segments.unshift(yield* readOwnHistoryItems(projectionStore, source, forkRun));
     current = source.thread;
   }
   return segments.flat();
+});
+
+/** What a portable fork from `throughRun` of `source` carries: inherited rows, then its own. */
+export const readForkHistoryItems = Effect.fn(
+  "orchestrationV2.contextHandoff.readForkHistoryItems",
+)(function* (
+  projectionStore: Pick<ProjectionStoreV2Shape, "getThreadRecords">,
+  source: ForkHistorySource,
+  throughRun: Pick<OrchestrationV2Run, "ordinal">,
+) {
+  return [
+    ...(yield* readInheritedHandoffItems(projectionStore, source.thread)),
+    ...(yield* readOwnHistoryItems(projectionStore, source, throughRun)),
+  ];
 });
 
 export function summarizeDeltaItem(item: OrchestrationV2TurnItem): string | null {

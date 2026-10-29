@@ -1,11 +1,13 @@
 import { assert, it } from "@effect/vitest";
 import {
   MessageId,
+  ProjectId,
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
   ThreadId,
   TurnItemId,
+  type OrchestrationV2AppThread,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -14,6 +16,7 @@ import * as Layer from "effect/Layer";
 
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { ProjectionStoreThreadNotFoundError } from "./ProjectionStore.ts";
 
 const layerTest = ContextHandoffService.layer.pipe(Layer.provide(IdAllocator.layer));
 
@@ -185,3 +188,47 @@ it("caps the side chat context block, keeping the newest parent items", () => {
   assert.isTrue(framingOnly.startsWith("You are in a side chat beside the main thread."));
   assert.notInclude(framingOnly, "Main thread activity");
 });
+
+it.effect("inherited history stops at a missing fork ancestor", () =>
+  Effect.gen(function* () {
+    const now = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+    const threadId = ThreadId.make("thread:fork-of-missing");
+    const thread: OrchestrationV2AppThread = {
+      createdBy: "user",
+      creationSource: "web",
+      id: threadId,
+      projectId: ProjectId.make("project:fork-of-missing"),
+      title: "Fork of a missing thread",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      activeProviderThreadId: null,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+      forkedFrom: {
+        type: "run",
+        threadId: ThreadId.make("thread:missing-ancestor"),
+        runId: RunId.make("run:missing-ancestor"),
+      },
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      lastVisitedAt: null,
+      snoozedUntil: null,
+      snoozedAt: null,
+      deletedAt: null,
+    };
+    const items = yield* ContextHandoffService.readInheritedHandoffItems(
+      {
+        getThreadRecords: (missing) =>
+          Effect.fail(new ProjectionStoreThreadNotFoundError({ threadId: missing })),
+      },
+      thread,
+    );
+    assert.deepEqual(items, []);
+  }),
+);

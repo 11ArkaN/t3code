@@ -115,7 +115,8 @@ export function resolveMessageDispatchIntent(
     : mode;
 }
 
-function isActiveRun(run: OrchestrationV2Run): boolean {
+/** A run that still owns the thread's provider turn. */
+export function isActiveRun(run: OrchestrationV2Run): boolean {
   return (
     run.status === "preparing" ||
     run.status === "starting" ||
