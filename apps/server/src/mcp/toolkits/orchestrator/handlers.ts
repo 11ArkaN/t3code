@@ -184,7 +184,7 @@ const handlers = {
       Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
         const remote = yield* RemoteDelegation.RemoteDelegation;
-        return yield* remote.followUp(scope, environmentId, input.message, sent);
+        return yield* remote.followUp(scope, environmentId, input, sent);
       }),
   ),
   t3_thread_wait: McpToolAccess.reads((input) =>

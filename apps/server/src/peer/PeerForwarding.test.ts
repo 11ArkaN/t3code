@@ -311,7 +311,7 @@ const makeLaptop = Effect.gen(function* () {
         ServerSettings.layerTest(),
         // No thread here delegated to the box, so a send there is no follow-up.
         Layer.mock(RemoteDelegation.RemoteDelegation)({
-          followUp: (_scope, _environmentId, _message, sent) => Effect.succeed(sent),
+          followUp: (_scope, _environmentId, _request, sent) => Effect.succeed(sent),
         }),
         Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
       ),

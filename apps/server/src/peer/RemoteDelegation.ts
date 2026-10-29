@@ -5,10 +5,10 @@ import {
   OrchestratorMcpFailure,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpTaskCancelResult,
+  type OrchestratorMcpThreadSendInput,
   type OrchestratorMcpThreadSendResult,
   type OrchestratorMcpThreadTimelineItem,
   type OrchestrationV2RemoteTaskChild,
-  type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type ProjectId,
   type ProviderInstanceId,
@@ -34,6 +34,7 @@ import {
   resolveRuntimeMode,
   taskPrompt,
 } from "../mcp/delegatedTaskModes.ts";
+import { followUpOwnerRun } from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -88,7 +89,7 @@ export class RemoteDelegation extends Context.Service<
     readonly followUp: (
       scope: McpInvocationContext.McpInvocationScope,
       environmentId: EnvironmentId,
-      message: string,
+      request: Pick<OrchestratorMcpThreadSendInput, "message" | "clientRequestId">,
       sent: OrchestratorMcpThreadSendResult,
     ) => Effect.Effect<OrchestratorMcpThreadSendResult, OrchestratorMcpFailure>;
     /**
@@ -209,8 +210,14 @@ const make = Effect.gen(function* () {
             }),
         ),
       );
-      const parentRun = owningRun(scope.thread, parent.runs);
-      if (parentRun === undefined) {
+      const parentRun = parent.runs
+        .filter(ThreadManagement.isActiveRun)
+        .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+      if (
+        parentRun === undefined ||
+        parentRun.rootNodeId === null ||
+        parentRun.providerInstanceId !== scope.thread.providerInstanceId
+      ) {
         return yield* new OrchestratorMcpFailure({
           code: "parent_not_active",
           message: "Delegated tasks require an active run owned by this MCP provider session.",
@@ -364,7 +371,7 @@ const make = Effect.gen(function* () {
   );
 
   const followUp: RemoteDelegation["Service"]["followUp"] = Effect.fn("RemoteDelegation.followUp")(
-    function* (scope, environmentId, message, sent) {
+    function* (scope, environmentId, request, sent) {
       // A steer joins a run that is already some task's, or no one's.
       if (scope.thread === undefined || (sent.delivery !== "started" && sent.delivery !== "queued"))
         return sent;
@@ -376,8 +383,14 @@ const make = Effect.gen(function* () {
         task.remoteChild?.environmentId === environmentId &&
         task.remoteChild.threadId === sent.threadId;
       const finished = parent?.subagents.find((task) => isThere(task) && task.result !== null);
-      const parentRun = parent === undefined ? undefined : owningRun(scope.thread, parent.runs);
-      if (finished?.remoteChild === undefined || finished.model === null || parentRun === undefined)
+      // Bound as a follow-up here is: a background caller's foreground run may have ended.
+      const parentRun = parent === undefined ? null : followUpOwnerRun(parent.runs);
+      if (
+        finished?.remoteChild === undefined ||
+        finished.model === null ||
+        parentRun === null ||
+        parentRun.rootNodeId === null
+      )
         return sent;
       // The message id there is the send's, so a retry that reached the same send records once.
       const commandId = CommandId.make(
@@ -390,7 +403,7 @@ const make = Effect.gen(function* () {
           parentThreadId,
           parentRunId: parentRun.id,
           parentNodeId: parentRun.rootNodeId,
-          task: message,
+          task: request.message,
           ...(finished.title === null ? {} : { title: finished.title }),
           driver: finished.driver,
           modelSelection: { instanceId: finished.providerInstanceId, model: finished.model },
@@ -414,7 +427,9 @@ const make = Effect.gen(function* () {
               new OrchestratorMcpFailure({
                 code: "orchestration_error",
                 message:
-                  "The message was sent, but its task was not recorded. Send it again with the same clientRequestId to record it.",
+                  request.clientRequestId === undefined
+                    ? "The message was sent, but its task was not recorded; read the thread for its answer instead of sending it again."
+                    : "The message was sent, but its task was not recorded; send it again with the same clientRequestId to record it.",
               }),
           ),
         );
@@ -710,10 +725,22 @@ const make = Effect.gen(function* () {
       return yield* settled(parentThreadId, taskId);
     }
     if (!isTerminal(waited.status)) return false;
-    const resultRun = waited.resultRun ?? {
-      runId: remote.runId ?? waited.runId,
-      status: waited.status,
-    };
+    // The thread's answer there may be a later run another task here owns, such as a
+    // follow-up queued behind this one; then this task's is its own run's.
+    const othersRun =
+      waited.resultRun !== undefined &&
+      waited.resultRun.runId !== remote.runId &&
+      (yield* threads.getThreadRecords(parentThreadId, ["subagents"])).subagents.some(
+        (other) =>
+          other.id !== taskId &&
+          other.remoteChild?.environmentId === remote.environmentId &&
+          other.remoteChild.threadId === remote.threadId &&
+          other.remoteChild.runId === waited.resultRun?.runId,
+      );
+    const resultRun =
+      waited.resultRun !== undefined && !othersRun
+        ? waited.resultRun
+        : { runId: remote.runId ?? waited.runId, status: waited.status };
     const result = yield* lastReply(scope, remote, resultRun.runId, resultRun.status === "failed");
     yield* complete(
       parentThreadId,
@@ -873,21 +900,6 @@ const make = Effect.gen(function* () {
 
   return RemoteDelegation.of({ delegate, followUp, cancel, start });
 });
-
-/** The caller's latest active run, if this provider session owns it, which its tasks bind to. */
-const owningRun = (
-  caller: { readonly providerInstanceId: ProviderInstanceId },
-  runs: ReadonlyArray<OrchestrationV2Run>,
-) => {
-  const run = runs
-    .filter(ThreadManagement.isActiveRun)
-    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-  return run === undefined ||
-    run.rootNodeId === null ||
-    run.providerInstanceId !== caller.providerInstanceId
-    ? undefined
-    : { ...run, rootNodeId: run.rootNodeId };
-};
 
 const isTerminal = (status: string) =>
   status === "completed" ||
