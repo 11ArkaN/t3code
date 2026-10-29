@@ -15,10 +15,10 @@ commit at a time. The list shows the newest 100 commits in the branch comparison
 descriptions written by your text generation model. A merge commit shows its changes against its
 first parent.
 
-A commit link from a supported code host opens in the Diff pane when the current thread's workspace
-has that commit. Otherwise a pull request commit link opens the pull request. Other unavailable
-commit links follow your **Open links in** setting and can open in T3 Code's preview. Command/Ctrl+Click
-always opens the link in your browser. Commit links follow the **Open pull requests in T3 Code**
+A commit link from a supported code host opens in the Diff pane when the commit is on the current
+thread's checked-out branch. Otherwise a pull request commit link opens the pull request. Other
+commit links follow your **Open links in** setting; on web, when that opens a new tab, T3 Code first
+shows an **Open link** button. Command/Ctrl+Click always opens the link in your browser. Commit links follow the **Open pull requests in T3 Code**
 setting in **Settings → Diffs**.
 
 ## Connect an account
