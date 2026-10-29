@@ -704,7 +704,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(ExternalLauncher.layer),
   Layer.provideMerge(
     Layer.mergeAll(RemoteOpenTargets.layer, DirectEndpoints.layer).pipe(
-      Layer.provide(TailscaleStatusReader.layer),
+      Layer.provideMerge(TailscaleStatusReader.layer),
     ),
   ),
   Layer.provideMerge(ServerLifecycleEvents.layer),

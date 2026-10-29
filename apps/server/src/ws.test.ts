@@ -17,15 +17,20 @@ import {
   type ServerConfigStreamEvent,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { Headers } from "effect/http";
+import * as NetService from "@t3tools/shared/Net";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { RpcGroup, RpcMessage, RpcServer } from "effect/rpc";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -73,6 +78,7 @@ import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
+import * as TailscaleStatusReader from "./environment/TailscaleStatusReader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as ReviewService from "./review/ReviewService.ts";
@@ -123,7 +129,7 @@ import {
   subscribeOrchestrationV2Shell,
   subscribeOrchestrationV2Thread,
   WS_RPC_SERVER_OPTIONS,
-  withLateEditorConfig,
+  withLateConfig,
 } from "./ws.ts";
 
 const snapshotConfig = (fields: Partial<ServerConfig>) =>
@@ -138,7 +144,7 @@ const settingsUpdated = (settings: object): ServerConfigStreamEvent => ({
 it.effect("resends late editors without rolling back updates already sent", () =>
   Effect.gen(function* () {
     const settingsSent = yield* Deferred.make<void>();
-    const events = yield* withLateEditorConfig(
+    const events = yield* withLateConfig(
       snapshotConfig({ settings: { enableProviderUpdateChecks: true } as never }),
       Stream.make(settingsUpdated({ enableProviderUpdateChecks: false })),
       {
@@ -146,6 +152,7 @@ it.effect("resends late editors without rolling back updates already sent", () =
         resolveFileManagerRevealKind: () =>
           Deferred.await(settingsSent).pipe(Effect.as("file-explorer" as const)),
       },
+      Stream.empty,
     ).pipe(
       Stream.tap((event) =>
         event.type === "settingsUpdated" ? Deferred.succeed(settingsSent, undefined) : Effect.void,
@@ -167,13 +174,14 @@ it.effect("resends late editors without rolling back updates already sent", () =
 
 it.effect("resends a file manager reveal kind that missed the snapshot", () =>
   Effect.gen(function* () {
-    const events = yield* withLateEditorConfig(
+    const events = yield* withLateConfig(
       snapshotConfig({ availableEditors: ["file-manager"] }),
       Stream.empty,
       {
         resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
         resolveFileManagerRevealKind: () => Effect.succeed("file-explorer"),
       },
+      Stream.empty,
     ).pipe(Stream.runCollect);
 
     const [late] = Array.from(events);
@@ -589,6 +597,9 @@ it.effect(
           resolveTargets: () => Effect.succeed([]),
         }),
         Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+        Layer.mock(TailscaleStatusReader.TailscaleStatusReader)({
+          subscribeChanges: Effect.succeed(Stream.empty),
+        }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           scratchRoot: Effect.succeedNone,
           namedProjectsRoot: process.cwd(),
@@ -765,6 +776,9 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
         resolveTargets: () => Effect.succeed([]),
       }),
       Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+      Layer.mock(TailscaleStatusReader.TailscaleStatusReader)({
+        subscribeChanges: Effect.succeed(Stream.empty),
+      }),
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
         scratchRoot: Effect.succeedNone,
         namedProjectsRoot: process.cwd(),
@@ -857,6 +871,147 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
       [[[snapshotFor("/b", "2026-10-25T00:00:00.000Z")], []]],
     );
     yield* server.write(0, { _tag: "Interrupt", requestId: configRequest, interruptors: [] });
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.fresh(layerConfigSources),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({}),
+        Layer.mock(ServerBrowser.ServerBrowser)({}),
+      ),
+    ),
+    Effect.scoped,
+  ),
+);
+
+// `tailscale status` exits non-zero while tailscaled is unavailable, and prints the node once it is up.
+const layerTailscaleRecovering = (isUp: () => boolean) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.sync(() => {
+        const up = isUp();
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(up ? 0 : 1)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: up
+            ? Stream.make(
+                new TextEncoder().encode(
+                  JSON.stringify({
+                    Self: { DNSName: "bb-1.tail1234.ts.net.", TailscaleIPs: ["100.64.1.2"] },
+                  }),
+                ),
+              )
+            : Stream.empty,
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        });
+      }),
+    ),
+  );
+
+it.effect("sends the recovered Tailscale target to a subscription opened on a stale failure", () =>
+  Effect.gen(function* () {
+    let tailscaleUp = false;
+    const tailscaleServices = yield* Layer.build(
+      RemoteOpenTargets.layer.pipe(
+        Layer.provideMerge(TailscaleStatusReader.layer),
+        Layer.provide(
+          Layer.mergeAll(
+            layerTailscaleRecovering(() => tailscaleUp),
+            Layer.mock(NetService.NetService)({ hasListenerOnHost: () => Effect.succeed(true) }),
+          ),
+        ),
+      ),
+    );
+    const reader = Context.get(tailscaleServices, TailscaleStatusReader.TailscaleStatusReader);
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(reader.read())), "startup read fails");
+    tailscaleUp = true;
+
+    const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
+    const configRpcServices = Layer.mergeAll(
+      layerUnusedConfigRpcServices,
+      Layer.succeedContext(tailscaleServices),
+      Layer.mock(ExternalLauncher.ExternalLauncher)({
+        resolveAvailableEditors: () => Effect.succeed([]),
+        // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
+        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+      }),
+      Layer.mock(ProviderRegistry.ProviderRegistry)({
+        getProviders: Effect.succeed([]),
+        streamChanges: Stream.never,
+      }),
+      Layer.mock(UsageLimitSources.UsageLimitSources)({ streamChanges: Stream.make([]) }),
+      Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+        scratchRoot: Effect.succeedNone,
+        namedProjectsRoot: process.cwd(),
+      }),
+      Layer.mock(ServerEnvironment.ServerEnvironment)({
+        getDescriptor: Effect.succeed({
+          environmentId: EnvironmentId.make("config-test"),
+          label: "Config test",
+          platform: { os: "linux", arch: "x64" },
+          serverVersion: "0.0.0",
+          capabilities: { repositoryIdentity: false },
+        }),
+      }),
+      Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+        getDescriptor: () =>
+          Effect.succeed({
+            policy: "loopback-browser",
+            bootstrapMethods: [],
+            sessionMethods: ["browser-session-cookie"],
+            sessionCookieName: "config-test-session",
+          }),
+      }),
+    );
+    const server = yield* RpcServer.makeNoSerialization(RpcGroup.make(WsSubscribeServerConfigRpc), {
+      ...WS_RPC_SERVER_OPTIONS,
+      onFromServer: (response) =>
+        response._tag === "Chunk"
+          ? Effect.forEach(response.values, (event) => Queue.offer(responses, event), {
+              discard: true,
+            })
+          : Effect.void,
+    }).pipe(
+      Effect.provide(
+        layerWsRpc(
+          {
+            sessionId: AuthSessionId.make("config-test"),
+            subject: "config-test",
+            method: "browser-session-cookie",
+            scopes: [],
+          },
+          {},
+          yield* ServerBrowser.ServerBrowser,
+        ).pipe(Layer.provide(configRpcServices)),
+      ),
+    );
+    const requestId = RpcMessage.RequestId("config");
+    yield* server.write(0, {
+      _tag: "Request",
+      id: requestId,
+      tag: WS_METHODS.subscribeServerConfig,
+      payload: {},
+      headers: Headers.empty,
+    });
+    const targetKinds = (event: ServerConfigStreamEvent) =>
+      event.type === "snapshot" ? event.config.remoteOpenTargets?.map((target) => target.kind) : [];
+
+    const first = yield* Queue.take(responses);
+    assert.equal(first.type, "snapshot");
+    assert.deepEqual(targetKinds(first), ["mdns"], "first snapshot answers from the stale failure");
+    yield* server.write(0, { _tag: "Ack", requestId });
+    const followUp = yield* Queue.take(responses);
+    assert.equal(followUp.type, "snapshot");
+    assert.deepEqual(targetKinds(followUp), ["tailscale", "mdns"]);
+    yield* server.write(0, { _tag: "Interrupt", requestId, interruptors: [] });
   }).pipe(
     Effect.provide(
       Layer.mergeAll(

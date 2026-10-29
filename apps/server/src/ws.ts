@@ -221,6 +221,7 @@ import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
+import * as TailscaleStatusReader from "./environment/TailscaleStatusReader.ts";
 import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -310,10 +311,17 @@ const resolveEditorConfig = Effect.fn("ws.resolveEditorConfig")(function* <E, R>
   };
 });
 
-export const withLateEditorConfig = <E, R>(
+type NetworkTargets = Pick<ClientServerConfig, "remoteOpenTargets" | "directEndpoints">;
+
+const sameNetworkTargets = (left: NetworkTargets, right: NetworkTargets) =>
+  JSON.stringify([left.remoteOpenTargets, left.directEndpoints]) ===
+  JSON.stringify([right.remoteOpenTargets, right.directEndpoints]);
+
+export const withLateConfig = <E, R, E2, R2>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
+  lateNetworkTargets: Stream.Stream<NetworkTargets, E2, R2>,
 ) => {
   const lateEditorConfig = Stream.fromEffect(launcher.resolveAvailableEditors()).pipe(
     Stream.filter(
@@ -333,7 +341,15 @@ export const withLateEditorConfig = <E, R>(
     Stream.map((editorConfig) => ({ type: "editorsResolved" as const, editorConfig })),
   );
 
-  return Stream.merge(liveUpdates, lateEditorConfig).pipe(
+  return Stream.merge(
+    liveUpdates,
+    Stream.merge(
+      lateEditorConfig,
+      lateNetworkTargets.pipe(
+        Stream.map((targets) => ({ type: "networkTargetsResolved" as const, targets })),
+      ),
+    ),
+  ).pipe(
     Stream.mapAccum(
       (): ClientServerConfig => config,
       (current, event): readonly [ClientServerConfig, ReadonlyArray<ServerConfigStreamEvent>] => {
@@ -346,6 +362,11 @@ export const withLateEditorConfig = <E, R>(
               ...rest
             } = current;
             const next = { ...rest, ...event.editorConfig };
+            return [next, [{ version: 1, type: "snapshot", config: next }]];
+          }
+          case "networkTargetsResolved": {
+            if (sameNetworkTargets(current, event.targets)) return [current, []];
+            const next = { ...current, ...event.targets };
             return [next, [{ version: 1, type: "snapshot", config: next }]];
           }
           case "keybindingsUpdated":
@@ -1309,6 +1330,7 @@ export const layerWsRpc = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
       const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
+      const tailscaleStatus = yield* TailscaleStatusReader.TailscaleStatusReader;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
@@ -1716,6 +1738,15 @@ export const layerWsRpc = (
           ),
         );
 
+      const resolveNetworkTargets = Effect.fn("ws.resolveNetworkTargets")(function* () {
+        return {
+          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
+            remoteOpenTargets.resolveTargets(),
+          ),
+          directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+        };
+      });
+
       const loadServerConfig = Effect.fn("ws.loadServerConfig")(function* (options: {
         readonly usageLimitsCommand: boolean;
         readonly workspaceSnapshotsOnDemand: boolean;
@@ -1749,10 +1780,7 @@ export const layerWsRpc = (
           issues: keybindingsConfig.issues,
           providers,
           ...editorConfig,
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
-          directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+          ...(yield* resolveNetworkTargets()),
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,
@@ -3076,6 +3104,8 @@ export const layerWsRpc = (
               // Buffer changes through discovery and the initial snapshot's RPC ACK wait.
               const keybindingsChanges = yield* keybindings.subscribeChanges;
               const settingsChanges = yield* serverSettings.subscribeChanges;
+              // Discovery can start the Tailscale refresh this snapshot misses.
+              const tailscaleChanges = yield* tailscaleStatus.subscribeChanges;
               const config = yield* loadServerConfig({
                 usageLimitsCommand,
                 workspaceSnapshotsOnDemand,
@@ -3167,7 +3197,12 @@ export const layerWsRpc = (
 
               return Stream.concat(
                 rpcInitialItems([{ version: 1 as const, type: "snapshot" as const, config }]),
-                withLateEditorConfig(config, liveUpdates, externalLauncher),
+                withLateConfig(
+                  config,
+                  liveUpdates,
+                  externalLauncher,
+                  tailscaleChanges.pipe(Stream.mapEffect(resolveNetworkTargets)),
+                ),
               );
             }),
           ),
