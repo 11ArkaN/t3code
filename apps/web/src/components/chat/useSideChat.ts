@@ -88,11 +88,9 @@ export function useSideChat(input: {
     const { threadRef } = input;
     if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    try {
-      return await start(threadRef, prompt);
-    } finally {
+    return start(threadRef, prompt).finally(() => {
       pendingRef.current = false;
-    }
+    });
   };
   return { available: input.threadRef !== null, open: useStableCallback(open) };
 }
