@@ -316,9 +316,18 @@ const resolveEditorConfig = Effect.fn("ws.resolveEditorConfig")(function* <E, R>
   };
 });
 
-// `checkedAt` changes on every read, so it alone is not worth a snapshot.
+// `checkedAt` changes on every read, so it alone is worth a snapshot only now and then.
 const tailscaleFacts = (status: ServerTailscaleStatus | undefined) =>
   status === undefined ? "" : JSON.stringify({ ...status, checkedAt: null });
+const TAILSCALE_CHECKED_AT_REFRESH_MS = 10 * 60_000;
+const tailscaleReadIsNews = (
+  previous: ServerTailscaleStatus | undefined,
+  next: ServerTailscaleStatus | undefined,
+) =>
+  tailscaleFacts(previous) !== tailscaleFacts(next) ||
+  (previous !== undefined &&
+    next !== undefined &&
+    Date.parse(next.checkedAt) - Date.parse(previous.checkedAt) >= TAILSCALE_CHECKED_AT_REFRESH_MS);
 
 export const withLateConfig = <E, R>(
   config: ClientServerConfig,
@@ -364,9 +373,7 @@ export const withLateConfig = <E, R>(
             return [next, [{ version: 1, type: "snapshot", config: next }]];
           }
           case "tailscaleRead": {
-            if (tailscaleFacts(event.tailscale) === tailscaleFacts(current.tailscale)) {
-              return [current, []];
-            }
+            if (!tailscaleReadIsNews(current.tailscale, event.tailscale)) return [current, []];
             const { tailscale: _previous, ...rest } = current;
             const next =
               event.tailscale === undefined ? rest : { ...rest, tailscale: event.tailscale };

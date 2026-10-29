@@ -197,9 +197,10 @@ it.effect("resends a file manager reveal kind that missed the snapshot", () =>
   }),
 );
 
-it.effect("resends the host's Tailscale health only when its facts change", () =>
+it.effect("resends the host's Tailscale health when its facts change or go stale", () =>
   Effect.gen(function* () {
     const stopped = { ...TAILSCALE_RUNNING, state: "stopped" as const };
+    const stoppedLater = { ...stopped, checkedAt: "2026-10-28T00:10:00.000Z" };
     const events = yield* withLateConfig(
       snapshotConfig({ tailscale: TAILSCALE_RUNNING }),
       Stream.empty,
@@ -211,12 +212,14 @@ it.effect("resends the host's Tailscale health only when its facts change", () =
         { ...TAILSCALE_RUNNING, checkedAt: "2026-10-28T00:01:00.000Z" },
         stopped,
         stopped,
+        stoppedLater,
       ),
     ).pipe(Stream.runCollect);
 
+    // A stale `checkedAt` would read as old news, so it is resent every 10 minutes.
     assert.deepEqual(
       Array.from(events, (event) => (event.type === "snapshot" ? event.config.tailscale : event)),
-      [stopped],
+      [stopped, stoppedLater],
     );
   }),
 );
