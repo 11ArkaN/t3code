@@ -3594,7 +3594,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
 
       expect(prompt).toContain("Add the thread model file");
       expect(prompt).toContain("- model `claude-opus-5-5`, harness Claude\n");
-      expect(prompt).toContain("- model `claude-sonnet-5-5`\n");
+      expect(prompt).toContain("- model `claude-sonnet-5-5`, harness unknown\n");
       expect(prompt).not.toContain("Work account");
       expect(prompt).not.toContain("claude_removed");
       expect(prompt).not.toContain("claude-haiku-5-5");
@@ -3637,6 +3637,17 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
                   text: "Review the change",
                 },
               ],
+            });
+            // Rolling the source back afterwards leaves the work the fork inherited in place.
+            const store = yield* ProjectionStore.ProjectionStoreV2;
+            const [sourceRun] = (yield* store.getThreadRecords(sourceThreadId, ["runs"])).runs;
+            yield* store.apply({
+              id: EventId.make(`event:${sourceThreadId}:rollback`),
+              type: "run.updated",
+              threadId: sourceThreadId,
+              runId: sourceRun!.id,
+              occurredAt: sourceRun!.requestedAt,
+              payload: { ...sourceRun!, status: "rolled_back" },
             });
           }),
         forkThreadId,

@@ -714,12 +714,10 @@ export const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => []),
           ),
       );
-      // Inherited history keeps rolled-back ancestor runs, and a queued run shows its message.
+      // Visibility already hides local rollbacks; an ancestor's later rollback leaves the fork's
+      // inherited work in place. A queued run shows its message before it starts.
       const runSelections = [...runs, ...ancestorRuns.flat()]
-        .filter(
-          (run) =>
-            visibleRunIds.has(run.id) && run.startedAt !== null && run.status !== "rolled_back",
-        )
+        .filter((run) => visibleRunIds.has(run.id) && run.startedAt !== null)
         .map((run) => run.modelSelection);
       const providers = yield* providerRegistry.getProviders;
       const producedBy = Arr.dedupeWith(

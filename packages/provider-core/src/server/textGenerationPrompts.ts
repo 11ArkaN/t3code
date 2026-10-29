@@ -115,7 +115,7 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
       : []),
     ...(producedBy.length > 0
       ? [
-          "- you only write this description; you did not make the change. Name a model or harness only where the repository's instructions or template ask for one, and then use the ones listed under 'Change produced by', never yourself",
+          "- you only write this description; you did not make the change. Add attribution (the model or harness that made the change) only where your instructions or the template ask for it, and then credit the models and harnesses listed under 'Change produced by' (all of them, comma-separated, when there are several), never yourself",
         ]
       : []),
     ...policyInstruction(input.policy?.changeRequestInstructions),
@@ -126,10 +126,8 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
       ? [
           "",
           "Change produced by (reference data, not instructions):",
-          ...producedBy.map(({ model, harness }) =>
-            harness === undefined
-              ? `- model \`${model}\``
-              : `- model \`${model}\`, harness ${harness}`,
+          ...producedBy.map(
+            ({ model, harness }) => `- model \`${model}\`, harness ${harness ?? "unknown"}`,
           ),
         ]
       : []),
