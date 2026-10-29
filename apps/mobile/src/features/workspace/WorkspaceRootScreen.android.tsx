@@ -18,6 +18,7 @@ import { AndroidWorkspaceNavigation, FloatingWorkspaceTabs } from "./AndroidWork
 import { FLOATING_TABS, floatingTabsMetrics } from "./floating-workspace-tabs";
 import { WorkspaceTabsContext, useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { WorkspaceTabPanes } from "./WorkspaceTabPanes";
+import { WorkspaceAppBarScope } from "./WorkspaceAppBar";
 import type { WorkspaceTab } from "./workspace-tabs-state";
 
 const TABS: readonly WorkspaceTab[] = NAVIGATION_TAB_ORDER;
@@ -92,26 +93,28 @@ export function WorkspaceRootScreen() {
           {enabled.length === 0 ? (
             <WorkspaceNoTabs />
           ) : (
-            <WorkspaceTabPanes
-              tabs={TABS}
-              selected={tab}
-              renderTab={(tab) =>
-                tab === "threads" ? (
-                  <HomeRouteScreen />
-                ) : tab !== "pullRequests" ? (
-                  <WorkspaceExtraTab tab={tab} />
-                ) : (
-                  <PullRequestsScreen
-                    renderFrame={(filters, list) => (
-                      <>
-                        <PullRequestToolbar filters={filters} />
-                        <ScreenContent>{list}</ScreenContent>
-                      </>
-                    )}
-                  />
-                )
-              }
-            />
+            <WorkspaceAppBarScope>
+              <WorkspaceTabPanes
+                tabs={TABS}
+                selected={tab}
+                renderTab={(tab) =>
+                  tab === "threads" ? (
+                    <HomeRouteScreen />
+                  ) : tab !== "pullRequests" ? (
+                    <WorkspaceExtraTab tab={tab} />
+                  ) : (
+                    <PullRequestsScreen
+                      renderFrame={(filters, list) => (
+                        <>
+                          <PullRequestToolbar filters={filters} />
+                          <ScreenContent>{list}</ScreenContent>
+                        </>
+                      )}
+                    />
+                  )
+                }
+              />
+            </WorkspaceAppBarScope>
           )}
         </SafeAreaInsetsContext>
         {floatingTabsEnabled ? (
