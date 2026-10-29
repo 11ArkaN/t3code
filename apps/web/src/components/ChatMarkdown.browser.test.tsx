@@ -285,7 +285,7 @@ describe("ChatMarkdown skill chips", () => {
       environmentId: EnvironmentId.make("workspace"),
       threadId: ThreadId.make("thread"),
     };
-    await using screen = await renderText("Run $review now", {
+    await using screen = await renderText("Run $review[a.ts](a.ts), then [b.ts](b.ts)$review now", {
       threadRef,
       skills: [
         {
@@ -301,7 +301,9 @@ describe("ChatMarkdown skill chips", () => {
       .spyOn(useRightPanelStore.getState(), "openFile")
       .mockImplementation(() => {});
 
-    await userEvent.click(screen.getByRole("button", { name: "Skill Review. Show details" }));
+    const chips = buttonsLabelled(screen.container, "Skill Review. Show details");
+    expect(chips).toHaveLength(2);
+    await userEvent.click(chips[0]!);
     await expect.element(page.getByText("Reviews the current branch.")).toBeVisible();
     await userEvent.click(page.getByRole("button", { name: "View instructions" }));
 

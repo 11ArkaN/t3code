@@ -7,10 +7,15 @@ type HastNode = {
 };
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const FORMATTING_TAGS = new Set(["strong", "em", "del"]);
+const PUNCTUATION = /^\p{P}/u;
 
 // Which of these become chips is only known at render time; the CSS rule for
 // `data-chip-word` applies `nowrap` only to the wrappers that hold one.
 function canRenderAsChip(node: HastNode): boolean {
+  if (FORMATTING_TAGS.has(node.tagName ?? "")) {
+    return node.children?.length === 1 && canRenderAsChip(node.children[0]!);
+  }
   return (
     node.tagName === "a" ||
     node.tagName === "img" ||
@@ -18,11 +23,12 @@ function canRenderAsChip(node: HastNode): boolean {
   );
 }
 
-function touchingGrapheme(node: HastNode | undefined, side: "first" | "last"): string {
+// Only punctuation moves: letters or `$` would split skill tokens matched later.
+function touchingPunctuation(node: HastNode | undefined, side: "first" | "last"): string {
   if (node?.type !== "text" || !node.value) return "";
   const at = side === "first" ? 0 : node.value.length - 1;
   const grapheme = graphemes.segment(node.value).containing(at)?.segment ?? "";
-  return /\s/.test(grapheme) ? "" : grapheme;
+  return PUNCTUATION.test(grapheme) ? grapheme : "";
 }
 
 function glueChips(parent: HastNode): void {
@@ -38,8 +44,8 @@ function glueChips(parent: HastNode): void {
     }
     const before = glued.at(-1);
     const after = children[index + 1];
-    const leading = touchingGrapheme(before, "last");
-    const trailing = touchingGrapheme(after, "first");
+    const leading = touchingPunctuation(before, "last");
+    const trailing = touchingPunctuation(after, "first");
     if (!leading && !trailing) {
       glued.push(child);
       continue;
@@ -68,8 +74,8 @@ function glueChips(parent: HastNode): void {
 /**
  * Chips render as atomic inlines, and browsers allow a line break between one
  * and the text touching it, so a period could wrap away from its file chip.
- * Wrapping the chip with the character on each side keeps them on one line;
- * text beyond those characters already follows the usual line-breaking rules.
+ * Wrapping the chip with the punctuation mark on each side keeps them on one
+ * line; text beyond those marks already follows the usual line-breaking rules.
  */
 export function rehypeChipWords() {
   return (tree: HastNode) => glueChips(tree);

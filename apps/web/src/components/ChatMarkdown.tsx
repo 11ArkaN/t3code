@@ -1314,7 +1314,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       chip
     ) : (
       <span data-markdown-copy={copyMarkdown}>
-        <span className="text-wrap">{children} </span>
+        <span className="[text-wrap-mode:wrap]">{children} </span>
         {chip}
       </span>
     );

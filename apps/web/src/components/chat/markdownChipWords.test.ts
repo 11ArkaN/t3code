@@ -48,9 +48,11 @@ describe("rehypeChipWords", () => {
     expect(children.map(textOf)).toEqual(["utils.ts."]);
   });
 
-  it("moves a whole surrogate pair or emoji sequence", () => {
-    const children = glued(text("x 😀"), link, text("👍🏽 y"));
-    expect(children.map(textOf)).toEqual(["x ", "😀utils.ts👍🏽", " y"]);
+  it("moves only punctuation, so letters and symbols keep skill tokens whole", () => {
+    expect(glued(text("Run $review"), link).map(textOf)).toEqual(["Run $review", "utils.ts"]);
+    expect(glued(link, text("$review now")).map(textOf)).toEqual(["utils.ts", "$review now"]);
+    expect(glued(text("x 😀"), link, text("2 y")).map(textOf)).toEqual(["x 😀", "utils.ts", "2 y"]);
+    expect(glued(text("«"), link, text("»、")).map(textOf)).toEqual(["«utils.ts»", "、"]);
   });
 
   it("treats inline code and images as chips but not code blocks", () => {
@@ -70,6 +72,23 @@ describe("rehypeChipWords", () => {
     const strong = element("strong", [link, text(":")]);
     glued(strong);
     expect(strong.children!.map(textOf)).toEqual(["utils.ts:"]);
+  });
+
+  it("glues a formatting element that holds only a chip", () => {
+    const bold = element("strong", [link]);
+    expect(glued(bold, text("."))).toMatchObject([{ properties: { dataChipWord: "" } }]);
+    expect(glued(bold, text("."))[0]!.children![0]).toBe(bold);
+    const code = element("code", [text("src/foo.ts")], { dataInlineCode: "" });
+    const nested = element("em", [element("strong", [code])]);
+    expect(glued(text("- "), nested, text(": description")).map(textOf)).toEqual([
+      "- ",
+      "src/foo.ts:",
+      " description",
+    ]);
+    const mixed = element("strong", [text("see "), link]);
+    expect(glued(mixed, text("."))[0]).toBe(mixed);
+    const separate = element("strong", [text(".")]);
+    expect(glued(link, separate)[0]).toBe(link);
   });
 
   it("shares a character between adjacent chips with the first one", () => {
