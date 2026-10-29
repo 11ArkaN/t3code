@@ -1522,13 +1522,14 @@ it.effect("stopping the parent stops follow-up work on a task there that has its
         result: "All green.",
       });
 
-      // The parent sends the thread there a follow-up, which starts a run there.
+      // The parent sends the thread there a follow-up, which starts a run there as a new task.
       const sent = yield* a.call("t3_thread_send", {
         environmentId: box.environmentId,
         threadId: delegated.remoteChild.threadId,
         message: "Now run the slow suite too.",
       });
       expect(sent.isError, JSON.stringify(sent.content)).toBe(false);
+      const followUpId = (sent.structuredContent as { taskId: NodeId }).taskId;
       expect(yield* Ref.get(thread.sent)).toEqual(["Now run the slow suite too."]);
       expect(yield* Ref.get(thread.interrupted)).toBe(0);
 
@@ -1536,9 +1537,15 @@ it.effect("stopping the parent stops follow-up work on a task there that has its
         threadId: parentThreadId,
         commandId: CommandId.make("command:stop:laptop-parent-after-result"),
       });
-      // The thread there is stopped as Stop does, and the task keeps its result.
+      // The thread there is stopped as Stop does, for each task, and the first keeps its result.
       const task = yield* stoppedThere(a, delegated.taskId);
-      expect(yield* Ref.get(thread.stops)).toEqual(["thread.stop", "delegated-tasks"]);
+      expect(yield* stoppedThere(a, followUpId, null)).toMatchObject({ status: "interrupted" });
+      expect((yield* Ref.get(thread.stops)).toSorted()).toEqual([
+        "delegated-tasks",
+        "delegated-tasks",
+        "thread.stop",
+        "thread.stop",
+      ]);
       expect(task).toMatchObject({ status: "completed", result: "All green." });
       expect(yield* a.projections.getOpenRemoteDelegatedTasks).toEqual([]);
 
@@ -1548,7 +1555,8 @@ it.effect("stopping the parent stops follow-up work on a task there that has its
         commandId: CommandId.make("command:stop:laptop-parent-again"),
       });
       expect(yield* stoppedThere(a, delegated.taskId, 2)).toMatchObject({ status: "completed" });
-      expect(yield* Ref.get(thread.interrupted)).toBe(2);
+      expect(yield* stoppedThere(a, followUpId, 1)).toMatchObject({ status: "interrupted" });
+      expect(yield* Ref.get(thread.interrupted)).toBe(4);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
@@ -1630,11 +1638,12 @@ it.effect("a delayed Stop acknowledgement leaves a newer Stop owed", () =>
       });
       yield* Deferred.await(thread.stopStarted);
       // Work starts after the first Stop landed there, but before its acknowledgement returns.
-      yield* a.call("t3_thread_send", {
+      const sent = yield* a.call("t3_thread_send", {
         environmentId: box.environmentId,
         threadId: delegated.remoteChild.threadId,
         message: "Run another check.",
       });
+      const followUpId = (sent.structuredContent as { taskId: NodeId }).taskId;
       yield* a.threads.stopDelegatedTasks({
         threadId: parentThreadId,
         commandId: CommandId.make("command:stop:delayed-second"),
@@ -1648,7 +1657,9 @@ it.effect("a delayed Stop acknowledgement leaves a newer Stop owed", () =>
         status: "completed",
         result: "All green.",
       });
-      expect(yield* Ref.get(thread.interrupted)).toBe(2);
+      // The follow-up the work became is stopped there too, as its own task.
+      expect(yield* stoppedThere(a, followUpId, null)).toMatchObject({ status: "interrupted" });
+      expect(yield* Ref.get(thread.interrupted)).toBe(3);
       expect(yield* a.projections.getOpenRemoteDelegatedTasks).toEqual([]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
