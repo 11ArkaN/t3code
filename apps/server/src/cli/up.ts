@@ -187,18 +187,17 @@ const TAGGING_TIP = [
  */
 export const upPortCheck = (input: {
   readonly configuredPort: string | undefined;
-  readonly defaultPortFree: boolean;
+  /** Whether the port the service will use, configured or default, is free. */
+  readonly portFree: boolean;
   /** The live server this T3 home already runs, if any. */
   readonly running: { readonly port: number; readonly serviceManaged: boolean } | null;
 }): "ok" | "taken" | "custom" | "manual" => {
   // The service cannot take this home over from a server started by hand.
   if (input.running !== null && !input.running.serviceManaged) return "manual";
-  if (input.configuredPort !== undefined) {
-    return Number(input.configuredPort) === ServerConfig.DEFAULT_PORT ? "ok" : "custom";
-  }
-  return input.defaultPortFree || input.running?.port === ServerConfig.DEFAULT_PORT
-    ? "ok"
-    : "taken";
+  const port =
+    input.configuredPort === undefined ? ServerConfig.DEFAULT_PORT : Number(input.configuredPort);
+  if (!input.portFree && input.running?.port !== port) return "taken";
+  return port === ServerConfig.DEFAULT_PORT ? "ok" : "custom";
 };
 
 const runUp = Effect.fn("cli.up")(function* (flags: {
@@ -230,11 +229,10 @@ const runUp = Effect.fn("cli.up")(function* (flags: {
     const net = yield* NetService.NetService;
     const runtime = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
     const running = Option.filter(runtime, (state) => isProcessAlive(state.pid));
+    const port = Number(configuredPort ?? ServerConfig.DEFAULT_PORT);
     const portCheck = upPortCheck({
       configuredPort,
-      defaultPortFree:
-        configuredPort === undefined &&
-        (yield* net.canListenOnHost(ServerConfig.DEFAULT_PORT, "0.0.0.0")),
+      portFree: yield* net.canListenOnHost(port, "0.0.0.0"),
       running: Option.match(running, {
         onNone: () => null,
         onSome: (state) => ({ port: state.port, serviceManaged: state.serviceManaged === true }),
@@ -247,7 +245,7 @@ const runUp = Effect.fn("cli.up")(function* (flags: {
     }
     if (portCheck === "taken") {
       return yield* new TailscaleUpError({
-        reason: `Port ${ServerConfig.DEFAULT_PORT} is in use by another program. Free it, or set T3CODE_PORT in ${serviceEnvPath} and add this box by name and port.`,
+        reason: `Port ${port} is in use by another program. Free it, or set another T3CODE_PORT in ${serviceEnvPath} and add this box by name and port.`,
       });
     }
     if (portCheck === "custom") {
@@ -280,7 +278,6 @@ const runUp = Effect.fn("cli.up")(function* (flags: {
     // An installed service reads service.env only when it starts.
     if (!result.changed) yield* service.restart;
 
-    const port = Number(configuredPort ?? ServerConfig.DEFAULT_PORT);
     const directUrl = `http://${address}:${port}`;
     yield* Console.log(
       [

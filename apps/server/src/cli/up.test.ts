@@ -39,12 +39,14 @@ it.each([
   { configuredPort: undefined, free: false, running: SERVICE, expected: "ok" },
   { configuredPort: undefined, free: false, running: null, expected: "taken" },
   { configuredPort: undefined, free: false, running: MANUAL, expected: "manual" },
-  { configuredPort: "3773", free: false, running: null, expected: "ok" },
+  // t3 up writes T3CODE_PORT=3773, so a later run still checks the port.
+  { configuredPort: "3773", free: false, running: null, expected: "taken" },
+  { configuredPort: "3773", free: false, running: SERVICE, expected: "ok" },
   { configuredPort: "4000", free: true, running: null, expected: "custom" },
   { configuredPort: "4000", free: true, running: { ...MANUAL, port: 4000 }, expected: "manual" },
 ] as const)(
   "port check with T3CODE_PORT=$configuredPort, free=$free, running=$running is $expected",
   ({ configuredPort, free, running, expected }) => {
-    expect(upPortCheck({ configuredPort, defaultPortFree: free, running })).toBe(expected);
+    expect(upPortCheck({ configuredPort, portFree: free, running })).toBe(expected);
   },
 );
