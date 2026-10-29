@@ -705,10 +705,11 @@ describe("connection onboarding", () => {
         Effect.map((entries) => Option.getOrThrow(entries.get(PAIRED_ENVIRONMENT_ID)!.profile)),
       );
 
+      // The saved address typed bare, as the add form accepts it.
       yield* onboarding.updateBearer({
         environmentId: PAIRED_ENVIRONMENT_ID,
         label: "Studio",
-        httpBaseUrl: "http://100.88.1.2:3773/",
+        httpBaseUrl: "100.88.1.2",
       });
       expect(yield* savedProfile).toMatchObject({
         label: "Studio",

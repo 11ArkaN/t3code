@@ -250,7 +250,7 @@ const updateBearerConnection = Effect.fn(
         });
   const registration = yield* prepareBearerConnectionUpdate({
     input: Option.match(signedIn, {
-      onNone: () => input,
+      onNone: () => (signInBaseUrl === null ? input : { ...input, httpBaseUrl: signInBaseUrl }),
       onSome: (fresh) => ({ ...input, httpBaseUrl: fresh.profile.httpBaseUrl }),
     }),
     entry: Option.fromUndefinedOr(entry),
