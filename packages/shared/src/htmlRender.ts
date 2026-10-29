@@ -174,7 +174,10 @@ const FIXED_COLORS = {
 
 function readableForeground(foreground: string, background: string): string {
   const backgroundChannels = rgbChannels(background)!;
-  const foregroundChannels = rgbChannels(foreground);
+  // rgbChannels drops alpha, so only an opaque foreground can be measured as painted.
+  const foregroundChannels = /^#[\da-f]{6}(?:ff)?$/i.test(foreground)
+    ? rgbChannels(foreground)
+    : null;
   if (foregroundChannels && contrastRatio(foregroundChannels, backgroundChannels) >= 4.5) {
     return foreground;
   }
