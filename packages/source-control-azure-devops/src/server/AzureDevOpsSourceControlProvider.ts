@@ -1,6 +1,9 @@
 import { SourceControlProviderKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
+import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
 import type { NormalizedAzureDevOpsPullRequestRecord } from "./azureDevOpsPullRequests.ts";
@@ -13,21 +16,22 @@ import {
   type SourceControlCliDiscoverySpec,
 } from "@t3tools/source-control-core/server/discovery";
 
-function parseAzureAuth(input: SourceControlAuthProbeInput) {
-  const account = input.stdout.trim().split(/\r?\n/)[0]?.trim();
+const decodeProjectIds = decodeJsonResult(Schema.Array(Schema.NonEmptyString));
+const AZURE_AUTH_FAILURE =
+  /\baz (?:devops )?login\b|authentication failed|unauthori[sz]ed|\b401\b|TF400813|access denied/i;
 
+function parseAzureAuth(input: SourceControlAuthProbeInput) {
   if (input.exitCode !== 0) {
+    const output = combinedAuthOutput(input);
     return providerAuth({
-      status: "unauthenticated",
-      detail:
-        firstSafeAuthLine(combinedAuthOutput(input)) ?? "Run `az login` to authenticate Azure CLI.",
+      status: AZURE_AUTH_FAILURE.test(output) ? "unauthenticated" : "unknown",
+      detail: firstSafeAuthLine(output) ?? "Azure DevOps sign-in could not be checked.",
     });
   }
 
-  if (account !== undefined && account.length > 0) {
+  if (Result.isSuccess(decodeProjectIds(input.stdout))) {
     return providerAuth({
       status: "authenticated",
-      account,
       host: "dev.azure.com",
     });
   }
@@ -35,7 +39,7 @@ function parseAzureAuth(input: SourceControlAuthProbeInput) {
   return providerAuth({
     status: "unknown",
     host: "dev.azure.com",
-    detail: "Azure CLI account status could not be parsed.",
+    detail: "Azure DevOps project access could not be checked.",
   });
 }
 
@@ -45,7 +49,21 @@ export const discovery = {
   label: "Azure DevOps",
   executable: "az",
   versionArgs: ["--version"],
-  authArgs: ["account", "show", "--query", "user.name", "-o", "tsv"],
+  // The extension validates PATs with this read; `az account show` only sees Azure logins.
+  authArgs: [
+    "devops",
+    "project",
+    "list",
+    "--detect",
+    "true",
+    "--top",
+    "1",
+    "--query",
+    "value[].id",
+    "--only-show-errors",
+    "--output",
+    "json",
+  ],
   // `az --version` starts Python and takes ~6s on Windows, exceeding the default probe timeout.
   probeTimeoutMs: 20_000,
   parseAuth: parseAzureAuth,
