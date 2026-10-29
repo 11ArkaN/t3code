@@ -277,3 +277,19 @@ it("does not notify a completion the user settles during the grace", async () =>
   await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   expect(TestNotification.sent.map((sent) => sent.title)).toEqual([]);
 });
+
+it("still notifies a completion that auto-settles during the grace", async () => {
+  await using app = setup();
+  app.start();
+  using _timers = fakeTimers();
+  const latestTurn = {
+    turnId: "turn",
+    state: "completed",
+    completedAt: "2026-09-13T07:00:01.000Z",
+  };
+  state.shells.set("one", shell({ latestTurn }));
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS / 2);
+  state.shells.set("one", shell({ latestTurn, settledAt: latestTurn.completedAt }));
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Thread completed"]);
+});
