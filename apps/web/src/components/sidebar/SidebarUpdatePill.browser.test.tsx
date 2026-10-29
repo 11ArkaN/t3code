@@ -5,6 +5,7 @@ import { page, userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 import { act, render } from "../../../test/render";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
+import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
 import type { RestartingMachine, UpdateEverythingRow } from "./updateEverything.logic";
 
 const mocks = vi.hoisted(() => {
@@ -191,5 +192,40 @@ describe("SidebarUpdatePill update everything", () => {
     const dialog = page.getByRole("alertdialog");
     await expect.element(dialog.getByText("Codex")).toBeVisible();
     expect(dialog.getByText(interruption).query()).toBeNull();
+  });
+
+  it("keeps a blocked app update's description valid and its confirmation disabled", async () => {
+    setup(null);
+    await using _screen = await render(
+      <UpdateEverythingDialog
+        open
+        onOpenChange={() => {}}
+        version={null}
+        providerCount={0}
+        rows={[
+          {
+            environmentId: studio,
+            label: "Studio",
+            app: "desktop-app",
+            skipped: null,
+            providers: [],
+          },
+        ]}
+        restarts={[]}
+        disabledReason="An environment is not connected."
+        onConfirm={() => {}}
+      />,
+    );
+    const dialog = page.getByRole("alertdialog");
+    await expect.element(dialog.getByText("An environment is not connected.")).toBeVisible();
+    await expect
+      .element(dialog.getByRole("button", { name: "Update", exact: true }))
+      .toBeDisabled();
+    expect(dialog.getByText(interruption).query()).toBeNull();
+    const descriptionIds = dialog.element().getAttribute("aria-describedby")?.split(/\s+/);
+    expect(descriptionIds?.length).toBeGreaterThan(0);
+    for (const id of descriptionIds ?? []) {
+      expect(document.getElementById(id)).not.toBeNull();
+    }
   });
 });
