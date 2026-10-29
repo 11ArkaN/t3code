@@ -2534,7 +2534,9 @@ export const layerWsRpc = (
             Effect.andThen(peerLinkRequests.answer(input)),
           ),
         [WS_METHODS.tailnetDevicesList]: (_input) =>
-          tailnetSignIn.listDevices().pipe(Effect.map((devices) => ({ devices }))),
+          tailnetSignIn
+            .listDevices(currentSession.subject)
+            .pipe(Effect.map((devices) => ({ devices }))),
         [WS_METHODS.tailnetDevicesBlock]: ({ stableNodeId }) =>
           tailnetSignIn
             .blockDevice(stableNodeId)

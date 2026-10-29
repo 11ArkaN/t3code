@@ -71,7 +71,7 @@ export function TailnetDevicesSection(props: {
     }
     Dialog.confirm({
       title: `Block ${name}?`,
-      message: `Its sessions on ${props.environmentLabel} end now, and it cannot sign in through Tailscale until you unblock it. A device that rejoins Tailscale gets a new ID, so block it again or remove it from your tailnet.`,
+      message: `${device.current ? `This is the device you are using, so it loses access to ${props.environmentLabel} until another device unblocks it. ` : ""}Its sessions on ${props.environmentLabel} end now, and it cannot sign in through Tailscale until you unblock it. A device that rejoins Tailscale gets a new ID, so block it again or remove it from your tailnet.`,
       confirmText: "Block",
       destructive: true,
       onConfirm: () => void apply(device),
@@ -85,15 +85,14 @@ export function TailnetDevicesSection(props: {
           <ListActionRow
             key={device.stableNodeId}
             label={device.label ?? device.stableNodeId}
-            description={
+            description={`${device.current ? "This device · " : ""}${
               device.blockedAt !== null
                 ? "Blocked"
                 : device.activeSessionCount === 1
                   ? "1 session"
                   : `${device.activeSessionCount} sessions`
-            }
+            }`}
             detail={device.blockedAt === null ? "Block" : "Unblock"}
-            tone={device.blockedAt === null ? "danger" : "default"}
             loading={busyId === device.stableNodeId}
             onPress={() => toggle(device)}
           />

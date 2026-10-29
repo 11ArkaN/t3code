@@ -47,7 +47,7 @@ export function TailnetDevicesSettings({
     const name = device.label ?? device.stableNodeId;
     if (device.blockedAt === null) {
       const confirmed = await requestConfirmDialog(
-        `Block ${name}?\nIts sessions ${environmentLabel === undefined ? "here" : `on ${environmentLabel}`} end now, and it cannot sign in through Tailscale until you unblock it. A device that rejoins Tailscale gets a new ID, so block it again or remove it from your tailnet.`,
+        `Block ${name}?\n${device.current ? `This is the device you are using, so it loses access ${environmentLabel === undefined ? "here" : `to ${environmentLabel}`} until another device unblocks it. ` : ""}Its sessions ${environmentLabel === undefined ? "here" : `on ${environmentLabel}`} end now, and it cannot sign in through Tailscale until you unblock it. A device that rejoins Tailscale gets a new ID, so block it again or remove it from your tailnet.`,
         { variant: "destructive" },
       );
       if (confirmed !== true) return;
@@ -89,6 +89,7 @@ export function TailnetDevicesSettings({
                   {device.label ?? device.stableNodeId}
                 </h3>
                 <p className="text-xs text-muted-foreground">
+                  {device.current ? "This device · " : ""}
                   {device.blockedAt !== null
                     ? "Blocked"
                     : device.activeSessionCount === 1

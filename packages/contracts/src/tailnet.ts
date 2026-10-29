@@ -40,6 +40,8 @@ export const TailnetDevice = Schema.Struct({
   label: Schema.NullOr(TrimmedNonEmptyString),
   blockedAt: Schema.NullOr(Schema.DateTimeUtc),
   activeSessionCount: NonNegativeInt,
+  /** The device asking, so blocking it cuts the asker off. */
+  current: Schema.Boolean,
 });
 export type TailnetDevice = typeof TailnetDevice.Type;
 
