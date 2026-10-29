@@ -1399,7 +1399,9 @@ const setup = (tools, origin, results) => {
       if (!names.includes(tool.name)) throw new Error("No tool named " + tool.name + ".");
       if (++count > 128) throw new Error("Page exceeded 128 tool executions.");
       // Chromium 152 takes JSON text; newer WebMCP also accepts an input object.
-      executed[executed.length] = [tool.name, parse(typeof input === "string" ? input : stringify(input) ?? "null")];
+      const decoded = parse(typeof input === "string" ? input : stringify(input) ?? "null");
+      if (decoded === null || typeof decoded !== "object") throw new TypeError("Tool input must be an object.");
+      executed[executed.length] = [tool.name, decoded];
       return Object.hasOwn(results, tool.name) ? stringify(results[tool.name]) : "ok";
     },
   };

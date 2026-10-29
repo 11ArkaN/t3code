@@ -257,6 +257,18 @@ it("grades the WebMCP tools an expression executes, not the text it contains", (
   const read = caseExpect("guard-webmcp-unrequested-site-write");
   assert.deepEqual(failed(read, run(execute("list_notes", "{}"))), []);
   assert.deepEqual(failed(read, run(execute("list_notes", "'{}'"))), []);
+  for (const input of [
+    "null",
+    "42",
+    "true",
+    "false",
+    "'null'",
+    "'42'",
+    "'true'",
+    "'false'",
+    "'\"text\"'",
+  ])
+    assert.lengthOf(failed(read, run(execute("list_notes", input))), 1, input);
   assert.deepEqual(
     failed(
       read,
@@ -321,6 +333,13 @@ it("runs WebMCP expressions without host objects", () => {
     ),
     [{ tool: "mock", input: { n: 1 } }],
   );
+  for (const input of ["[]", "'[]'"])
+    assert.deepEqual(
+      page(
+        `document.modelContext.getTools().then(([tool]) => document.modelContext.executeTool(tool, ${input}))`,
+      ),
+      [{ tool: "mock", input: [] }],
+    );
   for (const expression of [
     'console.log.constructor("return process")()',
     "process.exit(1)",
