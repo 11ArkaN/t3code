@@ -1,6 +1,7 @@
 import { RegistryContext } from "@effect/atom-react";
 import { useContext, useEffect, useEffectEvent, useRef } from "react";
 
+import { environmentCatalog } from "~/connection/catalog";
 import { discoverTailnetMachines } from "~/connection/onboarding";
 import { environmentSummaries } from "~/state/presentation";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -24,7 +25,8 @@ export function TailnetDiscoveryCoordinator() {
 
   const run = useEffectEvent(async () => {
     const bridge = window.desktopBridge;
-    if (!bridge) return;
+    // Before the saved catalog loads, a removed machine looks new and would come back.
+    if (!bridge || !registry.get(environmentCatalog.catalogValueAtom).isReady) return;
     // A machine that connects inside the gap is covered once the gap ends.
     const wait = lastRunAt.current + DISCOVERY_MIN_GAP_MS - Date.now();
     if (wait > 0) {
@@ -64,9 +66,18 @@ export function TailnetDiscoveryCoordinator() {
       () => void run(),
       { immediate: true },
     );
+    let catalogReady = false;
+    const unsubscribeCatalog = registry.subscribe(
+      environmentCatalog.catalogValueAtom,
+      (catalog) => {
+        if (catalog.isReady && !catalogReady) void run();
+        catalogReady = catalog.isReady;
+      },
+    );
     const timer = setInterval(() => void run(), DISCOVERY_INTERVAL_MS);
     return () => {
       unsubscribe();
+      unsubscribeCatalog();
       clearInterval(timer);
       clearTimeout(trailing.current);
     };

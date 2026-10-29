@@ -135,6 +135,8 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        {/* Runs through first-run setup too, so its machine list shows tailnet machines. */}
+        {isElectron ? <TailnetDiscoveryCoordinator /> : null}
         <RootRouteBranch />
       </AnchoredToastProvider>
     </ToastProvider>
@@ -203,7 +205,6 @@ function RootRouteBranch() {
           <DesktopWebLinkCoordinator />
         ) : null}
         {isElectron ? <RunningThreadKeepAlive /> : null}
-        {isElectron ? <TailnetDiscoveryCoordinator /> : null}
         <RelayClientInstallDialog />
         <ConnectOnboardingDialog />
         <SshPasswordPromptDialog />
