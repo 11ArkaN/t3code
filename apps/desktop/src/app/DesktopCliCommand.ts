@@ -22,10 +22,13 @@ export class DesktopCliCommandError extends Schema.TaggedError<DesktopCliCommand
   { message: Schema.String },
 ) {}
 
-const unixCandidates = (home: string, platform: NodeJS.Platform) =>
+const userCandidates = (home: string) => [`${home}/.local/bin`, `${home}/bin`];
+
+// Older builds also linked into these macOS folders; still find and remove those links there.
+const knownLocations = (home: string, platform: NodeJS.Platform) =>
   platform === "darwin"
-    ? ["/opt/homebrew/bin", "/usr/local/bin", `${home}/.local/bin`, `${home}/bin`]
-    : [`${home}/.local/bin`, `${home}/bin`];
+    ? [...userCandidates(home), "/opt/homebrew/bin", "/usr/local/bin"]
+    : userCandidates(home);
 
 const pathEntries = (value: string | undefined, separator: string) =>
   (value ?? "").split(separator).filter((entry) => entry.length > 0);
@@ -149,7 +152,7 @@ export const make = Effect.gen(function* () {
         ? Option.some(launcher)
         : Option.none<string>();
     }
-    for (const directory of unixCandidates(environment.homeDirectory, environment.platform)) {
+    for (const directory of knownLocations(environment.homeDirectory, environment.platform)) {
       const link = path.join(directory, "t3");
       if (yield* isOurLink(link)) return Option.some(link);
     }
@@ -233,7 +236,7 @@ export const make = Effect.gen(function* () {
       );
     }
     const onPath = pathEntries(process.env.PATH, ":");
-    const candidates = unixCandidates(environment.homeDirectory, environment.platform);
+    const candidates = userCandidates(environment.homeDirectory);
     for (const directory of [
       ...candidates.filter((candidate) => onPath.includes(candidate)),
       ...candidates.filter((candidate) => !onPath.includes(candidate)),
@@ -253,7 +256,7 @@ export const make = Effect.gen(function* () {
       if (linked) return yield* state;
     }
     return yield* fail(
-      `Another t3 command is already installed, or no folder on your PATH is writable. Run the launcher directly at ${launcher}.`,
+      `Another t3 command is already in ~/.local/bin and ~/bin, or neither is writable. Run the launcher directly at ${launcher}.`,
     );
   }).pipe(Effect.withSpan("desktop.cliCommand.install"));
 
@@ -267,7 +270,7 @@ export const make = Effect.gen(function* () {
       }
       return yield* state;
     }
-    for (const directory of unixCandidates(environment.homeDirectory, environment.platform)) {
+    for (const directory of knownLocations(environment.homeDirectory, environment.platform)) {
       const link = path.join(directory, "t3");
       if (yield* isOurLink(link)) {
         yield* fs.remove(link).pipe(Effect.mapError(() => fail(`Could not remove ${link}.`)));
