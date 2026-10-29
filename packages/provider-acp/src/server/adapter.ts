@@ -7927,6 +7927,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       loadingMessageId: null,
                       loadingIndex: 0,
                     });
+                    if (threadInput.runtimePolicy !== undefined) {
+                      latestRuntimePolicy = threadInput.runtimePolicy;
+                    }
                     const activated = yield* activateSession(
                       sessionId,
                       threadInput.providerThread.appThreadId,
