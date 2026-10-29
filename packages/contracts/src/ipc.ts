@@ -11,8 +11,7 @@ import type {
 } from "./browserImport.ts";
 import { AuthAccessTokenResult, AuthSessionState } from "./auth.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
-import { TailscaleState } from "./server.ts";
-import type { TailnetPeerEnvironment } from "./tailnet.ts";
+import { type TailnetPeerEnvironment, TailscaleState } from "./tailnet.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";

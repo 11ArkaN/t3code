@@ -29,6 +29,7 @@ import { RuntimeMode } from "./providerPolicy.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderUsageLimits, UsageLimitSourceSnapshots } from "./providerUsageLimits.ts";
 import { ServerSettings } from "./settings.ts";
+import { TailscaleState } from "./tailnet.ts";
 import { DesktopUpdateChannelSchema } from "./ipc.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
@@ -606,38 +607,6 @@ export const ServerEventLoopStall = Schema.Struct({
   cpuCount: PositiveInt,
 });
 export type ServerEventLoopStall = typeof ServerEventLoopStall.Type;
-
-/** A machine's own Tailscale. `unreadable` means `tailscale status` failed in another way. */
-export const TailscaleState = Schema.Literals([
-  "running",
-  "not_installed",
-  "not_running",
-  "needs_login",
-  "needs_machine_approval",
-  "stopped",
-  "starting",
-  "unreadable",
-]);
-export type TailscaleState = typeof TailscaleState.Type;
-
-/** Maps tailscaled's `BackendState`. `NoState` is a daemon that has only just started. */
-export function tailscaleStateFromBackend(backendState: string | null): TailscaleState {
-  switch (backendState) {
-    case "Running":
-      return "running";
-    case "NeedsLogin":
-      return "needs_login";
-    case "NeedsMachineAuth":
-      return "needs_machine_approval";
-    case "Stopped":
-      return "stopped";
-    case "Starting":
-    case "NoState":
-      return "starting";
-    default:
-      return "unreadable";
-  }
-}
 
 export const ServerTailscaleIssueCause = Schema.Literals([
   "not_installed",
