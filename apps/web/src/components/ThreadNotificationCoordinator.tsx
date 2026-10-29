@@ -225,7 +225,7 @@ export function startThreadNotifications(
     entry.gate.retain(new Set(next.keys()));
     for (const [prior, state] of changed) {
       const { settledOverride, settledAt } = state.thread;
-      // Auto-settles stamp the run's own completion; a later stamp is the user dismissing it.
+      // Auto and agent settles stamp the run's own completion; a later stamp is the user dismissing it.
       const userSettled =
         settledOverride === "settled" &&
         state.completedAt !== null &&
