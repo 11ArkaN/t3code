@@ -18,7 +18,7 @@ export function DeviceWorkspace(props: {
   hostLabel: string;
   /** Leased from a Simlock pool: serve-sim input, no host commands. */
   simlock?: boolean;
-  hostDiagnostics: string | undefined;
+  hostDiagnostics: { readonly label: string; readonly detail: string } | undefined;
   visible: boolean;
   onFloat: () => void;
   onClose: () => void;
