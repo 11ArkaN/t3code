@@ -126,6 +126,21 @@ describe("htmlRenderTheme", () => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("replaces a translucent --accent-foreground on a lifted accent with an opaque readable one", () => {
+    const { variables } = htmlRenderTheme(
+      {
+        ...T3_CODE_DARK_THEME_COLORS,
+        canvas: "#161515",
+        accent: "#21180e",
+        accentForeground: "#ffffff80",
+      },
+      "dark",
+    );
+    const foreground = variables["--accent-foreground"]!;
+    expect(foreground).toMatch(/^#[\da-f]{6}$/i);
+    expect(contrastRatio(foreground, variables["--accent"]!)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("passes the default themes' accent through unchanged", () => {
     for (const [colors, appearance] of [
       [T3_CODE_DARK_THEME_COLORS, "dark"],
