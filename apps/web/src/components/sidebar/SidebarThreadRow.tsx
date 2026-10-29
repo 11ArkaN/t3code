@@ -135,18 +135,19 @@ function compactSidebarTimeLabel(label: string): string {
   return label.endsWith(" ago") ? label.slice(0, -4) : label;
 }
 
+function PendingSyncLabel() {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span />}>Pending</TooltipTrigger>
+      <TooltipPopup side="top">Waiting to sync with its environment</TooltipPopup>
+    </Tooltip>
+  );
+}
+
 // Subscribes to the minute tick itself, so only the label re-renders each
 // minute. The minute is passed as the clock so it is the formatter's input.
-function RelativeTimeLabel(props: { timestamp: string | null; pendingSync?: boolean }) {
+function RelativeTimeLabel(props: { timestamp: string | null }) {
   const nowMinute = useNowMinute();
-  if (props.pendingSync) {
-    return (
-      <Tooltip>
-        <TooltipTrigger render={<span />}>Pending</TooltipTrigger>
-        <TooltipPopup side="top">Waiting to sync with its environment</TooltipPopup>
-      </Tooltip>
-    );
-  }
   return props.timestamp === null
     ? null
     : compactSidebarTimeLabel(
@@ -682,7 +683,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     if (row !== null) revealRef?.(row, threadKey);
     return leaseRowRef(row);
   };
-
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const localLastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const lastVisitedAt = resolveThreadLastVisitedAt(thread.lastVisitedAt, localLastVisitedAt);
@@ -1296,9 +1296,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       !isWoke && "group-any-hover/sidebar-row:opacity-0",
                     )}
                   >
-                    {!pendingSync &&
-                    variantAction === "unsnooze" &&
-                    props.snoozeWakeLabelText !== null ? (
+                    {pendingSync ? (
+                      <span className="text-xs">
+                        <PendingSyncLabel />
+                      </span>
+                    ) : variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                       <span className="inline-flex items-center gap-1 text-xs text-info-foreground tabular-nums">
                         {/* The clock tells a wake time from an age at a glance. */}
                         <AlarmClockIcon aria-hidden className="size-3" />
@@ -1335,7 +1337,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                     ) : (
                       <span className="text-xs">
                         <RelativeTimeLabel
-                          pendingSync={pendingSync}
                           timestamp={
                             variantAction === "unsettle"
                               ? resolveSettledThreadTimestamp(thread)
@@ -1481,7 +1482,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                     )}
                   >
-                    {topStatus ? (
+                    {pendingSync ? (
+                      <PendingSyncLabel />
+                    ) : topStatus ? (
                       isWokeStatus ? (
                         <Tooltip>
                           <TooltipTrigger
@@ -1526,10 +1529,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         </span>
                       )
                     ) : (
-                      <RelativeTimeLabel
-                        pendingSync={pendingSync}
-                        timestamp={threadTimeTimestamp(thread)}
-                      />
+                      <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
                     )}
                   </span>
                   {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
