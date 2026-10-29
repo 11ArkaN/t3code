@@ -3,6 +3,7 @@ import { it as effectIt } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import type * as NodeOS from "node:os";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -20,6 +21,7 @@ import * as ServerConfig from "../config.ts";
 import * as DirectEndpoints from "./DirectEndpoints.ts";
 import { resolveBoundEndpoints } from "./DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./RemoteOpenTargets.ts";
+import * as TailscaleStatusReader from "./TailscaleStatusReader.ts";
 
 const INTERFACES: ReturnType<typeof NodeOS.networkInterfaces> = {
   lo0: [
@@ -224,6 +226,7 @@ const resolveWithServe = (probeStatus: number) =>
   Effect.flatMap(DirectEndpoints.DirectEndpoints, (service) => service.resolve()).pipe(
     Effect.provide(
       DirectEndpoints.layer.pipe(
+        Layer.provide(TailscaleStatusReader.layer),
         Layer.provide(
           Layer.mergeAll(layerServeConfig, layerTailscaleUp, layerServeProbe(probeStatus)),
         ),
@@ -281,20 +284,13 @@ const layerSshdListening = Layer.succeed(NetService.NetService, {
 
 const MDNS_ONLY = [{ kind: "mdns", host: "bb-1.local", username: "t3-user" }];
 
-// What ws.loadServerConfig resolves for every client that connects.
+// What ws.loadServerConfig resolves for every client that connects. The layers live in the
+// test's scope, as the server's do, so the shared status read outlives each connect.
 const connectWithTailscaleHung = (onStatusSpawn: () => void) =>
   Effect.gen(function* () {
-    const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
-    const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
-    return Effect.all([remoteOpenTargets.resolveTargets(), directEndpoints.resolve()], {
-      concurrency: "unbounded",
-    }).pipe(
-      Effect.provideService(HostProcess.Hostname, "bb-1"),
-      Effect.provideService(HostProcess.Username, "t3-user"),
-    );
-  }).pipe(
-    Effect.provide(
+    const context = yield* Layer.build(
       Layer.mergeAll(DirectEndpoints.layer, RemoteOpenTargets.layer).pipe(
+        Layer.provide(TailscaleStatusReader.layer),
         Layer.provide(
           Layer.mergeAll(
             layerServeConfig,
@@ -304,8 +300,16 @@ const connectWithTailscaleHung = (onStatusSpawn: () => void) =>
           ),
         ),
       ),
-    ),
-  );
+    );
+    const remoteOpenTargets = Context.get(context, RemoteOpenTargets.RemoteOpenTargets);
+    const directEndpoints = Context.get(context, DirectEndpoints.DirectEndpoints);
+    return Effect.all([remoteOpenTargets.resolveTargets(), directEndpoints.resolve()], {
+      concurrency: "unbounded",
+    }).pipe(
+      Effect.provideService(HostProcess.Hostname, "bb-1"),
+      Effect.provideService(HostProcess.Username, "t3-user"),
+    );
+  });
 
 describe("Tailscale status shared by DirectEndpoints and RemoteOpenTargets", () => {
   effectIt.effect("reads `tailscale status` once per connect, not once per service", () =>
