@@ -293,11 +293,12 @@ function makeLocalCommandHarness(input: {
   /**
    * A side chat whose context targets this run, an earlier run that failed or was cancelled before
    * the provider, or an earlier run that delivered it. `nativeForkFrom` plans a native fork of the
-   * parent.
+   * parent. `switchedProvider` puts the earlier run and its context on another provider thread.
    */
   readonly sideChat?: {
     readonly contextRun: "current" | "failed" | "cancelled" | "delivered";
     readonly nativeForkFrom?: "idle" | "busy";
+    readonly switchedProvider?: boolean;
   };
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
@@ -540,6 +541,9 @@ function makeLocalCommandHarness(input: {
                 ordinal: 1,
                 userMessageId: MessageId.make("side-chat-earlier-message"),
                 activeAttemptId: RunAttemptId.make("side-chat-earlier-attempt"),
+                ...(input.sideChat.switchedProvider
+                  ? { providerThreadId: oldProviderThreadId }
+                  : {}),
                 status:
                   input.sideChat.contextRun === "delivered"
                     ? "completed"
@@ -578,7 +582,9 @@ function makeLocalCommandHarness(input: {
           threadId,
           targetRunId: input.sideChat.contextRun === "current" ? runId : earlierRunId,
           fromProviderThreadIds: [],
-          toProviderThreadId: providerThreadId,
+          toProviderThreadId: input.sideChat.switchedProvider
+            ? oldProviderThreadId
+            : providerThreadId,
           coveredRunOrdinals: { from: 1, to: 1 },
           strategy: "manual_context",
           status: "ready",
@@ -1167,14 +1173,20 @@ effectIt.effect.each([
   { contextRun: "current", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
   { contextRun: "failed", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
   { contextRun: "cancelled", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
+  {
+    contextRun: "failed",
+    switchedProvider: true,
+    runtimeMode: "approval-required",
+    context: "SIDE_CHAT_CONTEXT",
+  },
   { contextRun: "delivered", runtimeMode: "full-access", context: "" },
 ] as const)(
-  "sends side chat context inline once, for the $contextRun run's turn",
-  ({ contextRun, runtimeMode, context }) =>
+  "sends side chat context inline once, for the first turn that reaches the provider: %j",
+  ({ runtimeMode, context, ...sideChat }) =>
     Effect.gen(function* () {
       const harness = makeLocalCommandHarness({
         text: "What is the main thread doing?",
-        sideChat: { contextRun },
+        sideChat,
       });
 
       yield* harness.start;
@@ -1189,6 +1201,7 @@ effectIt.effect.each([
       expect(harness.projection().contextHandoffs).toMatchObject([
         {
           id: "side-chat-context",
+          toProviderThreadId: "new-provider-thread",
           delivery: { nativeThreadId: "side-chat-native", status: "inline" },
         },
       ]);

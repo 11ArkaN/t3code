@@ -500,7 +500,7 @@ export function useComposerSend(input: ComposerSendInput) {
       );
       return;
     }
-    if (onSideChat && sendCtx && sideChatCommand) {
+    if (onSideChat && sendCtx && sideChatCommand && sideChatDisabledReason === null) {
       if (
         sendCtx.images.length > 0 ||
         sendCtx.files.length > 0 ||
@@ -532,7 +532,7 @@ export function useComposerSend(input: ComposerSendInput) {
       }
       return;
     }
-    if (activePendingProgress && sendCtx?.answeringPendingUserInput !== false) {
+    if (answeringQuestion) {
       if (directAnnotation) {
         notifyDirectAnnotationAttached();
         return;

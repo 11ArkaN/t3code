@@ -326,10 +326,10 @@ export const layer: Layer.Layer<
           .filter((transfer) => transfer.type === "subagent_result")
           .map((transfer) => transfer.id),
       );
-      const isPendingForRun = (handoff: OrchestrationV2ContextHandoff) =>
+      const isPendingForRun = (handoff: OrchestrationV2ContextHandoff, anyProviderThread = false) =>
         handoff.status === "ready" &&
         (handoff.targetRunId === run.id ||
-          (handoff.toProviderThreadId === run.providerThreadId &&
+          ((anyProviderThread || handoff.toProviderThreadId === run.providerThreadId) &&
             projection.runs.some(
               (source) =>
                 source.id === handoff.targetRunId &&
@@ -354,10 +354,12 @@ export const layer: Layer.Layer<
           (handoff.transferId == null || !subagentResultTransfers.has(handoff.transferId)) &&
           isPendingForRun(handoff),
       );
-      // Carried forward like other handoffs until a provider turn accepts it.
+      // Carried forward until a provider turn accepts it, also after a provider switch.
       const sideChatHandoff = projection.contextHandoffs.find(
         (handoff) =>
-          isSideChatHandoff(handoff) && handoff.delivery === undefined && isPendingForRun(handoff),
+          isSideChatHandoff(handoff) &&
+          handoff.delivery === undefined &&
+          isPendingForRun(handoff, true),
       );
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
@@ -1561,6 +1563,7 @@ export const layer: Layer.Layer<
                 : [
                     persistHandoff({
                       ...sideChatHandoff,
+                      toProviderThreadId: runningProviderThread.id,
                       delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
                     }),
                   ]),
