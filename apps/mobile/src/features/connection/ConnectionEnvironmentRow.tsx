@@ -135,7 +135,9 @@ export function ConnectionEnvironmentRow(props: {
               <Text className="text-xs text-danger-foreground">{diagnosis.headline}</Text>
               {connectionState.attempt > 0 ? (
                 <Text className="text-xs text-foreground-muted">
-                  {`Retrying · attempt ${connectionState.attempt}`}
+                  {connectionState.retryAt === null
+                    ? `Attempt ${connectionState.attempt}`
+                    : `Retrying · attempt ${connectionState.attempt}`}
                 </Text>
               ) : null}
             </>
