@@ -8,16 +8,16 @@ const DATABASE_NAME = "t3code-thread-triage-outbox";
 const STORE_NAME = "outbox";
 const KEY = "document";
 
-const storageError = (cause: unknown) => new ThreadTriageOutboxStorageError({ cause });
-
 const openDatabase = Effect.callback<IDBDatabase, ThreadTriageOutboxStorageError>((resume) => {
   try {
     const request = indexedDB.open(DATABASE_NAME, 1);
     request.addEventListener("upgradeneeded", () => request.result.createObjectStore(STORE_NAME));
-    request.addEventListener("error", () => resume(Effect.fail(storageError(request.error))));
+    request.addEventListener("error", () =>
+      resume(Effect.fail(new ThreadTriageOutboxStorageError({ cause: request.error }))),
+    );
     request.addEventListener("success", () => resume(Effect.succeed(request.result)));
   } catch (cause) {
-    resume(Effect.fail(storageError(cause)));
+    resume(Effect.fail(new ThreadTriageOutboxStorageError({ cause })));
   }
 });
 
@@ -35,14 +35,18 @@ const transact = (
           const transaction = database.transaction(STORE_NAME, mode);
           transaction.addEventListener("complete", () => resume(Effect.void));
           transaction.addEventListener("abort", () =>
-            resume(Effect.fail(storageError(failure ?? transaction.error))),
+            resume(
+              Effect.fail(
+                new ThreadTriageOutboxStorageError({ cause: failure ?? transaction.error }),
+              ),
+            ),
           );
           run(transaction.objectStore(STORE_NAME), (cause) => {
             failure = cause;
             transaction.abort();
           });
         } catch (cause) {
-          resume(Effect.fail(storageError(cause)));
+          resume(Effect.fail(new ThreadTriageOutboxStorageError({ cause })));
         }
       }),
     (database) => Effect.sync(() => database.close()),
