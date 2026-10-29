@@ -200,6 +200,49 @@ describe("Pi MCP tool exposure", () => {
     assert.include(bridge.getActiveTools(), "mcp__t3-code__preview_snapshot");
   });
 
+  it("keeps Pi's canonical MCP tool names callable by the model without declaring them twice", async () => {
+    const bridge = await loadMcpBridge({
+      modern: true,
+      toolSearchAvailable: true,
+      activatesOnRegistration: true,
+    });
+    const canonicalNames = [
+      "mcp__t3_code__orchestrator_capabilities",
+      "mcp__t3_code__delegate_task",
+      "mcp__t3_code__task_status",
+      "mcp__t3_code__preview_snapshot",
+    ];
+    const unreachableCanonicalNames = async () => {
+      const unreachable: string[] = [];
+      for (const name of canonicalNames) {
+        const result = await bridge.callModelTool(name, {});
+        if (result.isError === true) unreachable.push(name);
+      }
+      return unreachable;
+    };
+    const declaredCanonicalNames = () =>
+      bridge.declaredTools().filter((name) => name.startsWith("mcp__t3_code__"));
+    const event = { systemPrompt: "" };
+
+    await bridge.handlers.get("session_start")!(event, discoveryContext);
+    assert.deepEqual(
+      await unreachableCanonicalNames(),
+      [],
+      "model calls to these names fail with Tool not found after session start",
+    );
+    assert.deepEqual(declaredCanonicalNames(), [], "declared twice after session start");
+    assert.equal(bridge.requests.at(-1)?.method, "tools/call");
+
+    bridge.restoreActiveTools(["read", "mcp__t3-code__task_status"]);
+    await bridge.handlers.get("session_tree")!(event, discoveryContext);
+    assert.deepEqual(
+      await unreachableCanonicalNames(),
+      [],
+      "model calls to these names fail with Tool not found after an older tree loadout",
+    );
+    assert.deepEqual(declaredCanonicalNames(), [], "declared twice after an older tree loadout");
+  });
+
   it.each(["legacy Pi", "disabled tool search"])(
     "keeps tool execution available with %s",
     async (mode) => {
