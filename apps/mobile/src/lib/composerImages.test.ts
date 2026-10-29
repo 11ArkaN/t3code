@@ -142,6 +142,26 @@ describe("native pasted image cleanup", () => {
     expect(files.get(overflow)?.deleted).toBe(true);
     expect(files.get(userOwned)?.deleted).toBe(false);
   });
+
+  it("re-renders an over-limit paste whose dimensions already fit, like the photo picker", async () => {
+    const uri =
+      "file:///private/var/mobile/Containers/Data/Application/app/tmp/t3-composer-paste/photo.png";
+    const png = Buffer.alloc(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
+    png.write("IHDR", 12);
+    png.writeUInt32BE(2000, 16);
+    png.writeUInt32BE(2000, 20);
+    files.set(uri, { base64: png.toString("base64"), deleted: false });
+    manipulator.state.sourceSize = { width: 2000, height: 2000 };
+
+    const attachments = await convertPastedImagesToAttachments({
+      uris: [uri],
+      existingCount: 0,
+    });
+
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]?.sizeBytes).toBeLessThanOrEqual(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+  });
 });
 
 describe("composerStripAttachments", () => {
