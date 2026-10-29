@@ -220,7 +220,7 @@ export function T3ConnectUserProfilePage() {
       stackedThreadToast({
         type: "error",
         title: "Could not deregister server",
-        description: "T3 Connect couldn't confirm removal. Try again.",
+        description: "Could not remove this server. Try again.",
         ...(traceId
           ? {
               actionProps: {
@@ -230,11 +230,6 @@ export function T3ConnectUserProfilePage() {
             }
           : {}),
         actionVariant: "outline",
-        data: {
-          hideCopyButton: true,
-          expandableContent: message,
-          expandableLabels: { expand: "Show more", collapse: "Show less" },
-        },
       }),
     );
   };
