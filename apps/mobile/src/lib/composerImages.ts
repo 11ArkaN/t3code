@@ -589,6 +589,8 @@ export async function convertPastedImagesToAttachments(input: {
 
   for (const [index, uri] of input.uris.entries()) {
     const ownedTemporaryFile = isOwnedPastedImageUri(uri);
+    const renders: string[] = [];
+    let keptRender: string | null = null;
     try {
       if (index >= Math.max(0, remainingSlots)) {
         continue;
@@ -596,6 +598,7 @@ export async function convertPastedImagesToAttachments(input: {
       const mimeType = mimeTypeFromUri(uri);
       const pastedBase64 = await new File(uri).base64();
       const fitted = await fitComposerImage({ uri, mimeType, base64: pastedBase64 });
+      if (fitted) renders.push(fitted.uri);
       let image = {
         base64: fitted?.base64 ?? pastedBase64,
         mimeType,
@@ -604,6 +607,7 @@ export async function convertPastedImagesToAttachments(input: {
       };
       if (estimateBase64ByteSize(image.base64) > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
         image = await renderComposerJpeg(uri, image.name);
+        renders.push(image.previewUri);
       }
       const sizeBytes = estimateBase64ByteSize(image.base64);
       if (sizeBytes <= 0 || sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
@@ -614,6 +618,7 @@ export async function convertPastedImagesToAttachments(input: {
         continue;
       }
       const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
+      if (!ownedTemporaryFile) keptRender = image.previewUri;
       attachments.push({
         id: uuidv4(),
         type: "image",
@@ -627,14 +632,15 @@ export async function convertPastedImagesToAttachments(input: {
       console.warn("Failed to read pasted image", uri, cause);
       error = "Could not read a pasted image.";
     } finally {
-      if (ownedTemporaryFile) {
+      for (const discarded of [...(ownedTemporaryFile ? [uri] : []), ...renders]) {
+        if (discarded === keptRender) continue;
         try {
-          const file = new File(uri);
+          const file = new File(discarded);
           if (file.exists) {
             file.delete();
           }
         } catch (error) {
-          console.warn("Failed to remove temporary pasted image", uri, error);
+          console.warn("Failed to remove temporary pasted image", discarded, error);
         }
       }
     }

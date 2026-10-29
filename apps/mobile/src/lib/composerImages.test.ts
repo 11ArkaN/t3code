@@ -157,6 +157,7 @@ describe("native pasted image cleanup", () => {
     const uri =
       "file:///private/var/mobile/Containers/Data/Application/app/tmp/t3-composer-paste/photo.png";
     files.set(uri, { base64: oversizedPng(), deleted: false });
+    files.set("file:///cache/rendered.jpeg", { base64: "", deleted: false });
     manipulator.state.sourceSize = { width: 2000, height: 2000 };
 
     const { attachments } = await convertPastedImagesToAttachments({
@@ -166,6 +167,7 @@ describe("native pasted image cleanup", () => {
 
     expect(attachments).toHaveLength(1);
     expect(attachments[0]?.sizeBytes).toBeLessThanOrEqual(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+    expect(files.get("file:///cache/rendered.jpeg")?.deleted).toBe(true);
   });
 
   it("reports a paste it cannot read instead of dropping it silently", async () => {
