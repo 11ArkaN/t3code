@@ -300,8 +300,11 @@ To use what you learned, choose **Bring back**. The thread gets the side chat wi
 your next message there. Bring back is available while the thread is idle.
 
 Closing a side chat you never sent a message in deletes it. To delete one you used,
-choose the trash icon in its tab. Deleting a thread also deletes its side chats. On mobile, a thread lists its side chats above the
-composer. Tap one to open it and answer its questions.
+choose **Delete** at the top of the side chat. Deleting a thread also deletes its
+side chats.
+
+On mobile, a thread lists its side chats above the composer. Tap one to open it and
+answer its questions.
 
 ## Snooze until later
 

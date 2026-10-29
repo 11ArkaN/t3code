@@ -76,11 +76,17 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
   ThreadForkServiceV2.of({
     plan: Effect.fn("ThreadForkService.plan")(function* (input) {
       const { sourceRun } = input;
-      if (input.sideChat && input.sourceProjection.thread.lineage.sideChat) {
+      const sourceLineage = input.sourceProjection.thread.lineage;
+      if (
+        input.sideChat &&
+        (sourceLineage.sideChat || sourceLineage.relationshipToParent === "subagent")
+      ) {
         return yield* new ThreadForkPlanError({
           sourceThreadId: input.sourceProjection.thread.id,
           targetThreadId: input.targetThreadId,
-          cause: "A side chat cannot start another side chat.",
+          cause: sourceLineage.sideChat
+            ? "A side chat cannot start another side chat."
+            : "A subagent cannot start a side chat.",
         });
       }
       if (sourceRun !== null && !isForkableSourceRunStatus(sourceRun.status)) {

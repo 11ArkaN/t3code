@@ -108,6 +108,26 @@ function compactText(text: string, maxLength = 240): string {
   return `${compacted.slice(0, maxLength - 3)}...`;
 }
 
+export function visibleDeltaRunOrdinals(
+  projection: { readonly runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "ordinal">> },
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): OrchestrationV2ContextHandoff["coveredRunOrdinals"] {
+  const ordinals = items.flatMap((item) => {
+    if (item.runId === null) {
+      return [];
+    }
+    const run = projection.runs.find((candidate) => candidate.id === item.runId);
+    return run === undefined ? [] : [run.ordinal];
+  });
+  if (ordinals.length === 0) {
+    return { from: 1, to: 1 };
+  }
+  return {
+    from: Math.min(...ordinals),
+    to: Math.max(...ordinals),
+  };
+}
+
 export function summarizeDeltaItem(item: OrchestrationV2TurnItem): string | null {
   switch (item.type) {
     case "user_message":

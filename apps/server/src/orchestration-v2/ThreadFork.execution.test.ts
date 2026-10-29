@@ -613,7 +613,7 @@ const writeParentRun = (input: {
   readonly threadId: ThreadId;
   readonly runId: RunId;
   readonly ordinal: number;
-  readonly status: "running" | "completed";
+  readonly status: "preparing" | "running" | "completed";
   readonly text: string;
   /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
   readonly stable?: boolean;
@@ -682,6 +682,9 @@ const writeParentRun = (input: {
             completedAt: input.status === "completed" ? now : null,
             checkpointId: input.stable ? CheckpointId.make(`${input.runId}:checkpoint`) : null,
             contextHandoffId: null,
+            ...(input.status === "preparing"
+              ? { workspacePreparation: { type: "worktree" as const, baseRef: "main" } }
+              : {}),
           },
         },
         {
@@ -711,6 +714,55 @@ const writeParentRun = (input: {
             inputIntent: "turn_start",
             messageId,
             text: input.text,
+            attachments: [],
+          },
+        },
+      ],
+    });
+  });
+
+/** Marks `threadId` as imported from V1 and gives it one runless imported user message. */
+const writeImportedHistory = (threadId: ThreadId, text: string) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const { thread } = yield* orchestrator.getThreadProjection(threadId);
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make(`${threadId}:imported`),
+          type: "thread.metadata-updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...thread, historyOrigin: "v1_import" },
+        },
+        {
+          id: EventId.make(`${threadId}:imported-item`),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`${threadId}:imported-item`),
+            threadId,
+            runId: null,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            createdBy: "user",
+            creationSource: "web",
+            inputIntent: "turn_start",
+            messageId: MessageId.make(`${threadId}:imported-message`),
+            text,
             attachments: [],
           },
         },
@@ -797,6 +849,27 @@ it.effect("a side chat of an idle parent still starts with the framing note", ()
   }).pipe(Effect.provide(forkCases[0]!.layer)),
 );
 
+it.effect("a side chat waits for the parent's new worktree", () =>
+  Effect.gen(function* () {
+    const parentId = ThreadId.make("side-chat-worktree-parent");
+    yield* createParent(parentId);
+    yield* writeParentRun({
+      threadId: parentId,
+      runId: RunId.make("side-chat-worktree-parent-run"),
+      ordinal: 1,
+      status: "preparing",
+      text: "Parent work",
+    });
+
+    const rejected = yield* forkSideChat(
+      "side-chat-worktree-fork",
+      parentId,
+      ThreadId.make("side-chat-worktree-child"),
+    ).pipe(Effect.flip);
+    assert.include(String(rejected.cause), "still preparing its worktree");
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
 it.effect("closing a side chat deletes it only while unused; a deleted parent takes no more", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -849,6 +922,7 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
     const parentId = ThreadId.make("side-chat-busy-parent");
     const sideChatId = ThreadId.make("side-chat-busy-child");
     yield* createParent(parentId);
+    yield* writeImportedHistory(parentId, "PARENT_IMPORTED_MARKER");
     yield* writeParentRun({
       threadId: parentId,
       runId: RunId.make("side-chat-busy-parent-run"),
@@ -934,6 +1008,7 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       contextHandoffId: handoff!.id,
     });
     assert.include(handoff!.summaryText, "You are in a side chat beside the main thread.");
+    assert.include(handoff!.summaryText, "- User: PARENT_IMPORTED_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_RUNNING_MARKER");
     assert.include(handoff!.summaryText, `t3_thread_read on thread ${parentId}`);
     assert.equal(

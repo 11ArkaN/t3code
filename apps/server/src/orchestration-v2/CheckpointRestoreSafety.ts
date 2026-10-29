@@ -49,7 +49,11 @@ export const isCheckpointRestoreIsolated = Effect.fn("orchestrationV2.isCheckpoi
         for (const otherThread of [...shell.threads, ...shell.archivedThreads]) {
           if (otherThread.id === thread.id || otherThread.deletedAt !== null) continue;
           // An idle side chat that only answered questions never touched the shared worktree.
-          if (otherThread.lineage.sideChat === true && otherThread.activeRunId === null) {
+          if (
+            otherThread.lineage.sideChat === true &&
+            otherThread.activeRunId === null &&
+            otherThread.worktreePath === worktreePath
+          ) {
             const { turnItems } = yield* projections.getThreadRecords(
               otherThread.id,
               ["turnItems"],

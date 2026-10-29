@@ -150,6 +150,8 @@ export interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
   sideChatAvailable?: boolean;
+  /** Overrides the default reason while side chats are available but cannot start. */
+  sideChatDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -329,6 +331,7 @@ function RightPanelEmptyState(props: {
   pullRequestsAvailable: boolean;
   deviceAvailable: boolean;
   sideChatAvailable: boolean;
+  sideChatDisabledReason: string | null;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
@@ -397,8 +400,8 @@ function RightPanelEmptyState(props: {
             description: "Ask a side question while this thread keeps working.",
             icon: MessagesSquare,
             shortcut: "S",
-            available: props.sideChatAvailable,
-            disabledReason: SURFACE_UNAVAILABLE_HINTS.sideChat,
+            available: props.sideChatAvailable && !props.sideChatDisabledReason,
+            disabledReason: props.sideChatDisabledReason ?? SURFACE_UNAVAILABLE_HINTS.sideChat,
             onClick: props.onAddSideChat,
           },
         ]
@@ -691,29 +694,37 @@ function SurfaceIcon({
   }
 }
 
+/** What a side chat tab's dot shows and its title's accessible name says. */
+function sideChatTabState(shell: EnvironmentThreadShell | null) {
+  if (shell === null) return null;
+  if (shell.hasPendingApprovals || shell.pendingSubagentRequest === "approval") {
+    return "needs approval";
+  }
+  if (shell.hasPendingUserInput || shell.pendingSubagentRequest === "user_input") {
+    return "needs input";
+  }
+  return threadRuntimeIsActive(shell.runtime) ? "running" : null;
+}
+
 // Static dots: a side chat tab can stay open for a whole run.
 function SideChatTabIcon(props: { environmentId: EnvironmentId | null; threadId: ThreadId }) {
-  const shell = useQuietThreadShell(
-    props.environmentId === null ? null : scopeThreadRef(props.environmentId, props.threadId),
+  const state = sideChatTabState(
+    useQuietThreadShell(
+      props.environmentId === null ? null : scopeThreadRef(props.environmentId, props.threadId),
+    ),
   );
-  const needsYou =
-    shell !== null &&
-    (shell.hasPendingApprovals ||
-      shell.hasPendingUserInput ||
-      Boolean(shell.pendingSubagentRequest));
-  const running = shell !== null && threadRuntimeIsActive(shell.runtime);
   return (
     <>
       <MessagesSquare className="size-3 shrink-0" />
-      {needsYou || running ? (
+      {state === null ? null : (
         <span
           className={cn(
             "absolute -top-0.5 -right-0.5 size-1.5 rounded-full",
-            needsYou ? "bg-info" : "bg-muted-foreground",
+            state === "running" ? "bg-muted-foreground" : "bg-info",
           )}
           aria-hidden
         />
-      ) : null}
+      )}
     </>
   );
 }
@@ -894,6 +905,7 @@ function RightPanelTab(
       : null,
   );
   const title = sideChatShell?.title ?? props.title;
+  const sideChatState = sideChatTabState(sideChatShell);
   const content = (
     <>
       <PanelTabCloseButton label={`Close ${title}`} onClick={() => onClose(surface)}>
@@ -963,6 +975,7 @@ function RightPanelTab(
                   if (surface.kind === "device" && props.canRename) onStartRename(surface.id);
                 }}
                 className="cursor-pointer flex min-w-0 items-center"
+                aria-label={sideChatState === null ? undefined : `${title}, ${sideChatState}`}
                 onClick={() => onActivate(surface)}
               >
                 <span className="truncate">{title}</span>
@@ -1139,8 +1152,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             label: "Side chat",
             icon: MessagesSquare,
             shortcut: "S",
-            available: props.sideChatAvailable === true,
-            disabledReason: SURFACE_DISABLED_REASONS.sideChat,
+            available: props.sideChatAvailable === true && !props.sideChatDisabledReason,
+            disabledReason: props.sideChatDisabledReason ?? SURFACE_DISABLED_REASONS.sideChat,
             onClick: props.onAddSideChat,
           },
         ]
@@ -1528,6 +1541,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestsAvailable={props.pullRequestsAvailable}
             deviceAvailable={props.deviceAvailable}
             sideChatAvailable={props.sideChatAvailable === true}
+            sideChatDisabledReason={props.sideChatDisabledReason ?? null}
           />
         ) : (
           props.children

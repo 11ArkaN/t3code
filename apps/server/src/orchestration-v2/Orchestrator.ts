@@ -59,6 +59,7 @@ import {
   latestProviderTurnForAttempt,
   parseGoalCommand,
   orchestrationV2RunWorkStartedAt,
+  orchestrationV2WorktreePending,
   ProviderInstanceId,
   ProviderInteractionMode,
   resolveProviderInstanceEnabled,
@@ -103,7 +104,7 @@ import {
   resolveMessageDispatchIntent,
 } from "./CommandPolicy.ts";
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
-import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
+import { ContextHandoffServiceV2, visibleDeltaRunOrdinals } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
 import {
   cancelledBeforeStart,
@@ -894,26 +895,6 @@ function latestContextTransfer(
       ? transfer
       : latest;
   }, undefined);
-}
-
-function visibleDeltaRunOrdinals(
-  projection: Pick<OrchestrationV2ThreadProjection, "runs">,
-  items: ReadonlyArray<OrchestrationV2TurnItem>,
-): OrchestrationV2ContextHandoff["coveredRunOrdinals"] {
-  const ordinals = items.flatMap((item) => {
-    if (item.runId === null) {
-      return [];
-    }
-    const run = projection.runs.find((candidate) => candidate.id === item.runId);
-    return run === undefined ? [] : [run.ordinal];
-  });
-  if (ordinals.length === 0) {
-    return { from: 1, to: 1 };
-  }
-  return {
-    from: Math.min(...ordinals),
-    to: Math.max(...ordinals),
-  };
 }
 
 export function shouldPrepareLegacyImportHandoff(input: {
@@ -4151,6 +4132,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.sourceThreadId} was deleted.`,
       });
     }
+    // The fork would copy no worktree path and run in the project checkout.
+    if (
+      command.sideChat === true &&
+      orchestrationV2WorktreePending(sourceProjection.thread.worktreePath, sourceProjection.runs)
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.sourceThreadId} is still preparing its worktree. Start the side chat once it is ready.`,
+      });
+    }
     if ((yield* findThread(command.targetThreadId)) !== null) {
       return yield* new OrchestratorThreadAlreadyExistsError({
         commandId: command.commandId,
@@ -6546,13 +6538,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   }),
               ),
             );
+    // Without a source run the digest covers the parent's whole history, imported items included.
+    const sideChatParentRunIds = [
+      ...sourceRunsAfterFork.map((run) => run.id),
+      ...(sourceRun === null && sourceProjection?.thread.historyOrigin === "v1_import"
+        ? [null]
+        : []),
+    ];
     const sideChatParentItems =
-      !sideChatFork || sourceRunsAfterFork.length === 0 || sourceProjection === null
+      !sideChatFork || sideChatParentRunIds.length === 0 || sourceProjection === null
         ? []
-        : yield* readHandoffItems(
-            sourceProjection.thread.id,
-            sourceRunsAfterFork.map((run) => run.id),
-          );
+        : yield* readHandoffItems(sourceProjection.thread.id, sideChatParentRunIds);
     // The framing note goes in even when the parent has no activity after the fork point.
     const sideChatContextHandoff =
       !sideChatFork || pendingForkTransfer === undefined || sourceProjection === null

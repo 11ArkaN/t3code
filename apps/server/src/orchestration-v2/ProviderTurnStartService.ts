@@ -1046,7 +1046,7 @@ export const layer: Layer.Layer<
       };
       let resumedRetryHandoff: ReadonlyArray<OrchestrationV2ContextHandoff> | undefined;
       let resumedHandoffContext: ReturnType<typeof handoffContextForThread> | undefined;
-      let forkFellBackToPortable = false;
+      let portableForkFallback: OrchestrationV2ContextHandoff | undefined;
       const loadedProviderThread = yield* Effect.gen(function* () {
         if (nativeForkTransfer !== undefined) {
           const sourceProjection = yield* projectionStore.getThreadRecords(
@@ -1118,7 +1118,10 @@ export const layer: Layer.Layer<
             toProviderThreadId: providerThread.id,
             fromProviderInstanceId: sourceRun.providerInstanceId,
             toProviderInstanceId: run.providerInstanceId,
-            coveredRunOrdinals: { from: 1, to: sourceRun.ordinal },
+            coveredRunOrdinals: ContextHandoffService.visibleDeltaRunOrdinals(
+              sourceProjection,
+              sourceItems,
+            ),
             strategy: "full_thread_summary",
             items: sourceItems,
             runs: sourceProjection.runs,
@@ -1135,7 +1138,7 @@ export const layer: Layer.Layer<
             }),
           );
           if (loaded === undefined) return undefined;
-          forkFellBackToPortable = true;
+          portableForkFallback = handoff;
           effectiveHandoffs = [handoff, ...effectiveHandoffs];
           yield* eventSink.write({
             events: [
@@ -1356,8 +1359,11 @@ export const layer: Layer.Layer<
         ownerNodeId: providerThread.ownerNodeId,
         firstRunOrdinal: providerThread.firstRunOrdinal ?? run.ordinal,
         lastRunOrdinal: run.ordinal,
-        handoffIds: providerThread.handoffIds,
-        forkedFrom: forkFellBackToPortable ? null : providerThread.forkedFrom,
+        handoffIds:
+          portableForkFallback === undefined
+            ? providerThread.handoffIds
+            : [...providerThread.handoffIds, portableForkFallback.id],
+        forkedFrom: portableForkFallback === undefined ? providerThread.forkedFrom : null,
         status: "active",
         createdAt: providerThread.createdAt,
         updatedAt: now,
@@ -1403,7 +1409,7 @@ export const layer: Layer.Layer<
           payload: runningProviderThread,
         },
         ...(nativeForkTransfer === undefined ||
-        forkFellBackToPortable ||
+        portableForkFallback !== undefined ||
         runningProviderThread.nativeThreadRef === null
           ? []
           : [

@@ -1191,11 +1191,16 @@ effectIt.effect.each([
 );
 
 effectIt.effect.each([
-  { nativeForkFrom: "idle", forks: true, transferStatus: "consumed" },
-  { nativeForkFrom: "busy", forks: false, transferStatus: "resolved_portable" },
+  { nativeForkFrom: "idle", forks: true, transferStatus: "consumed", handoffIds: [] },
+  {
+    nativeForkFrom: "busy",
+    forks: false,
+    transferStatus: "resolved_portable",
+    handoffIds: ["side-chat-fork-context"],
+  },
 ] as const)(
   "runs a planned native side chat fork when the parent is $nativeForkFrom",
-  ({ nativeForkFrom, forks, transferStatus }) =>
+  ({ nativeForkFrom, forks, transferStatus, handoffIds }) =>
     Effect.gen(function* () {
       const harness = makeLocalCommandHarness({
         text: "What is the main thread doing?",
@@ -1211,6 +1216,7 @@ effectIt.effect.each([
       expect(harness.startTurn.mock.calls[0]?.[0].message.text.includes("PARENT_HISTORY")).toBe(
         !forks,
       );
+      expect(harness.projection().providerThreads[0]?.handoffIds).toEqual(handoffIds);
     }),
 );
 

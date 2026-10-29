@@ -709,6 +709,17 @@ export function orchestrationV2RunWorkStartedAt(
   return run.workStartedAt ?? run.startedAt ?? run.requestedAt;
 }
 
+/** Work started now would run in the project checkout, not the thread's coming worktree. */
+export function orchestrationV2WorktreePending(
+  worktreePath: string | null,
+  runs: ReadonlyArray<Pick<OrchestrationV2Run, "status" | "workspacePreparation">>,
+): boolean {
+  return (
+    worktreePath === null &&
+    runs.some((run) => run.status === "preparing" && run.workspacePreparation?.type === "worktree")
+  );
+}
+
 export const OrchestrationV2RunAttempt = Schema.Struct({
   id: RunAttemptId,
   // Provider-thread rows can be reused after recovery; retain the native input destination.
