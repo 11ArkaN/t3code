@@ -10,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import * as browserDefaults from "~/browser/browserDefaults";
 import { BrowserSettingsReadError, openUrlInPreview } from "~/browser/openFileInPreview";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
-import { useRightPanelStore } from "~/rightPanelStore";
+import {
+  hostRightPanel,
+  selectActiveRightPanelSurface,
+  useRightPanelStore,
+} from "~/rightPanelStore";
 import {
   applyPreviewServerSnapshot,
   readThreadPreviewState,
@@ -91,6 +95,23 @@ describe("openPreviewSession", () => {
 });
 
 describe("openUrlInPreview from a link", () => {
+  it("opens a side chat's link in the parent's browser panel", async () => {
+    const sideChatRef = { ...threadRef, threadId: "side-chat" as ScopedThreadRef["threadId"] };
+    using _hosted = { [Symbol.dispose]: hostRightPanel(sideChatRef, threadRef) };
+    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+
+    await openUrlInPreview({ openPreview, threadRef: sideChatRef, url: "https://t3.chat/" });
+
+    expect(openPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ input: expect.objectContaining({ threadId: threadRef.threadId }) }),
+    );
+    expect(readThreadPreviewState(threadRef).activeTabId).toBe(snapshot.tabId);
+    expect(readThreadPreviewState(sideChatRef).sessions).toEqual({});
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef)?.kind,
+    ).toBe("preview");
+  });
+
   // regression: #16961 a background link open switched the active preview tab
   it("keeps the current tab active for a background open", async () => {
     applyPreviewServerSnapshot(threadRef, { ...snapshot, tabId: "tab-current" });

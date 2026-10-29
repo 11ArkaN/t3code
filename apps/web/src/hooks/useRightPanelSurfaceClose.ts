@@ -1,4 +1,3 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
   AuthPreviewOperateScope,
@@ -6,7 +5,6 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { useClosedViewStore } from "../closedViewStore";
 import { agentControlledBrowserCloseConfirmation } from "../components/ChatView.logic";
 import { closePreviewSession } from "../components/preview/closePreviewSession";
 import { useThreadTerminalActions } from "../components/terminal/useThreadTerminalActions";
@@ -20,7 +18,6 @@ import {
   useRightPanelStore,
   type RightPanelSurface,
 } from "../rightPanelStore";
-import { readThreadShell } from "../state/entities";
 import { previewEnvironment } from "../state/preview";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { threadEnvironment } from "../state/threads";
@@ -73,26 +70,11 @@ export function useRightPanelSurfaceClose(input: {
       surface.kind === "side-chat" &&
       readEnvironmentScope(ref.environmentId, AuthOrchestrationOperateScope)
     ) {
-      // The server keeps a side chat with a run or message; this client's shell can lag one.
+      // The server keeps a side chat with a run or message. Reopen skips one it deleted.
       void deleteThread({
         environmentId: ref.environmentId,
         input: { threadId: surface.threadId, onlyIfUnused: true },
       });
-      if (
-        readThreadShell(scopeThreadRef(ref.environmentId, surface.threadId))?.latestRun !== null
-      ) {
-        return;
-      }
-      const closedViews = useClosedViewStore.getState();
-      for (const entry of closedViews.entries) {
-        if (
-          entry.kind === "panel-tab" &&
-          entry.surface.id === surface.id &&
-          scopedThreadKey(entry.threadRef) === scopedThreadKey(ref)
-        ) {
-          closedViews.remove(entry.id);
-        }
-      }
     }
   };
   const closeAfterAgentBrowserConfirmation = (

@@ -1090,7 +1090,9 @@ export default function ChatView(props: ChatViewProps) {
     renderedRightPanelSurface,
   );
   const canMaximizeRightPanel = rightPanelOpen;
-  const rightPanelMaximized = canMaximizeRightPanel && rightPanelState.maximized === true;
+  // An embedded side chat has no panel; a stale maximized flag would hide its own column.
+  const rightPanelMaximized =
+    !embedded && canMaximizeRightPanel && rightPanelState.maximized === true;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
@@ -1499,10 +1501,6 @@ export default function ChatView(props: ChatViewProps) {
   };
   const downloadFileAttachmentStable = useStableCallback(downloadFileAttachment);
   const openFileAttachment = (attachment: ChatFileAttachment) => {
-    if (parentPanel) {
-      parentPanel.openFileAttachment(attachment);
-      return;
-    }
     if (activeThreadRef) {
       useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
       return;
@@ -2379,6 +2377,7 @@ export default function ChatView(props: ChatViewProps) {
     pullRequestPanelTarget,
     threadPanelPresentation,
     isServerThread,
+    embedded,
     isGitRepo,
     browserAvailable,
     canOperatePreview,
@@ -3176,10 +3175,7 @@ export default function ChatView(props: ChatViewProps) {
       getShortcutContext={getShortcutContextStable}
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
-      sideChatParentPanel={{
-        openToolDiff: onOpenToolDiffStable,
-        openFileAttachment: openFileAttachmentStable,
-      }}
+      sideChatParentPanel={{ openToolDiff: onOpenToolDiffStable }}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,

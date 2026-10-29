@@ -220,6 +220,7 @@ describe("v2 thread shell lists", () => {
 
     registry.set(snapshotAtom(environmentId), { ...v2ShellSnapshot, threads: [root, sideChat] });
     expect(registry.get(parent)?.pendingSubagentRequest).toBeNull();
+    expect(registry.get(sideChats).map((thread) => thread.pendingSubagentRequest)).toEqual([null]);
     expect(registry.get(inputs)).toEqual([]);
     disposeSideChats();
     disposeNavigation();

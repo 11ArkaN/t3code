@@ -691,15 +691,11 @@ function SurfaceIcon({
   }
 }
 
-function useSideChatShell(environmentId: EnvironmentId | null, threadId: ThreadId) {
-  return useQuietThreadShell(
-    environmentId === null ? null : scopeThreadRef(environmentId, threadId),
-  );
-}
-
 // Static dots: a side chat tab can stay open for a whole run.
 function SideChatTabIcon(props: { environmentId: EnvironmentId | null; threadId: ThreadId }) {
-  const shell = useSideChatShell(props.environmentId, props.threadId);
+  const shell = useQuietThreadShell(
+    props.environmentId === null ? null : scopeThreadRef(props.environmentId, props.threadId),
+  );
   const needsYou = shell !== null && (shell.hasPendingApprovals || shell.hasPendingUserInput);
   const running = shell !== null && threadRuntimeIsActive(shell.runtime);
   return (
@@ -716,10 +712,6 @@ function SideChatTabIcon(props: { environmentId: EnvironmentId | null; threadId:
       ) : null}
     </>
   );
-}
-
-function SideChatTabTitle(props: { environmentId: EnvironmentId | null; threadId: ThreadId }) {
-  return useSideChatShell(props.environmentId, props.threadId)?.title ?? "Side chat";
 }
 
 export function resolvePullRequestTabLink(
@@ -879,7 +871,6 @@ function RightPanelTab(
 ) {
   const {
     surface,
-    title,
     audio,
     audioRuntimeTabId,
     onActivate,
@@ -893,12 +884,12 @@ function RightPanelTab(
     id: surface.id,
     disabled: props.dragDisabled,
   });
-  const label =
-    surface.kind === "side-chat" ? (
-      <SideChatTabTitle environmentId={props.environmentId} threadId={surface.threadId} />
-    ) : (
-      title
-    );
+  const sideChatShell = useQuietThreadShell(
+    surface.kind === "side-chat" && props.environmentId !== null
+      ? scopeThreadRef(props.environmentId, surface.threadId)
+      : null,
+  );
+  const title = sideChatShell?.title ?? props.title;
   const content = (
     <>
       <PanelTabCloseButton label={`Close ${title}`} onClick={() => onClose(surface)}>
@@ -970,7 +961,7 @@ function RightPanelTab(
                 className="cursor-pointer flex min-w-0 items-center"
                 onClick={() => onActivate(surface)}
               >
-                <span className="truncate">{label}</span>
+                <span className="truncate">{title}</span>
               </button>
             }
           />
@@ -982,7 +973,7 @@ function RightPanelTab(
                 title={title}
               />
             ) : (
-              label
+              title
             )}
           </TooltipPopup>
         </Tooltip>

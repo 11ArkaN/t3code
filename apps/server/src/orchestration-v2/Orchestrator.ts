@@ -1156,6 +1156,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       );
 
+  /** Includes tombstones, which still reserve their id. */
+  const findThread = (threadId: ThreadId) =>
+    projectionStore.getThread(threadId).pipe(
+      Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+      Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
+    );
+
   /** Side chats live inside their parent, so deleting the parent deletes them too. */
   const liveSideChatIds = Effect.fn("Orchestrator.liveSideChatIds")(
     function* (threadId: ThreadId) {
@@ -4142,6 +4149,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandId: command.commandId,
         commandType: command.type,
         cause: `Thread ${command.sourceThreadId} was deleted.`,
+      });
+    }
+    if (command.sideChat === true && (yield* findThread(command.targetThreadId)) !== null) {
+      return yield* new OrchestratorThreadAlreadyExistsError({
+        commandId: command.commandId,
+        threadId: command.targetThreadId,
       });
     }
 
@@ -12547,6 +12560,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   const dispatchOnce = Effect.fn("orchestrationV2.dispatch.once")(function* (
     command: OrchestrationV2ServerCommand,
+    sideChatIds: ReadonlyArray<ThreadId>,
   ): Effect.fn.Return<
     {
       readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
@@ -12659,7 +12673,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // The dispatch wrapper holds each side chat's lock, so none can commit after this plan.
         const plans = [
           yield* planDeletion(command),
-          ...(yield* Effect.forEach(yield* liveSideChatIds(command.threadId), (threadId) =>
+          ...(yield* Effect.forEach(sideChatIds, (threadId) =>
             planDeletion({
               ...command,
               commandId: CommandId.make(`${command.commandId}:side-chat:${threadId}`),
@@ -12955,8 +12969,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     };
   });
 
+  /** `sideChatIds` are the live side chats a `thread.delete` cascades to, read under their locks. */
   const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
     command: OrchestrationV2ServerCommand,
+    sideChatIds: ReadonlyArray<ThreadId> = [],
   ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.command_id": command.commandId,
@@ -13032,7 +13048,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (shell !== null) yield* refuseAboveDispatchModeLimit(command, threadId, shell);
     }
 
-    const plan = yield* dispatchOnce(command).pipe(
+    const plan = yield* dispatchOnce(command, sideChatIds).pipe(
       Effect.filterOrFail(
         (planned) =>
           planned.events.length > 0 ||
@@ -13184,13 +13200,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       dispatchWithReceiptEffect(command),
     );
     // A parent's lock comes before its side chats' locks, so a delete cascade and a side chat
-    // fork or command never interleave.
+    // fork or command never interleave. A fork from a side chat or onto an existing thread would
+    // invert that order; dispatch rejects both, so they skip the source lock.
     if (
       command.type === "thread.fork" &&
       command.sideChat === true &&
       command.sourceThreadId !== command.targetThreadId
-    )
-      return yield* threadDispatch.withLock(command.sourceThreadId, dispatch);
+    ) {
+      const source = yield* findThread(command.sourceThreadId);
+      const target = yield* findThread(command.targetThreadId);
+      return yield* source === null || source.lineage.sideChat === true || target !== null
+        ? dispatch
+        : threadDispatch.withLock(command.sourceThreadId, dispatch);
+    }
     if (command.type === "thread.delete")
       return yield* threadDispatch.withLock(
         command.threadId,
@@ -13198,7 +13220,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           Effect.flatMap((sideChatIds) =>
             sideChatIds.reduce(
               (locked, sideChatId) => threadDispatch.withLock(sideChatId, locked),
-              dispatchWithReceiptEffect(command),
+              dispatchWithReceiptEffect(command, sideChatIds),
             ),
           ),
         ),

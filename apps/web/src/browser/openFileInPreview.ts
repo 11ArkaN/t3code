@@ -24,7 +24,11 @@ import {
   setActivePreviewTab,
   updatePreviewServerSnapshot,
 } from "~/previewStateStore";
-import { selectSelectedRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
+import {
+  rightPanelHostRef,
+  selectSelectedRightPanelSurface,
+  useRightPanelStore,
+} from "~/rightPanelStore";
 
 import { resolveBrowserDefaults } from "./browserDefaults";
 
@@ -63,17 +67,18 @@ export async function openUrlInPreview<E>(input: {
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const runtime = previewRuntimeFor(input.threadRef.environmentId);
-  const previousActiveTabId = readThreadPreviewState(input.threadRef).activeTabId;
+  const threadRef = rightPanelHostRef(input.threadRef);
+  const runtime = previewRuntimeFor(threadRef.environmentId);
+  const previousActiveTabId = readThreadPreviewState(threadRef).activeTabId;
   // The server changes the active tab, not panel selection; selection changes come from the user.
   const selectedSurface = () =>
-    selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, input.threadRef)
-      ?.id ?? null;
+    selectSelectedRightPanelSurface(useRightPanelStore.getState().byThreadKey, threadRef)?.id ??
+    null;
   const surfaceBeforeOpen = selectedSurface();
   const result = await input.openPreview({
-    environmentId: input.threadRef.environmentId,
+    environmentId: threadRef.environmentId,
     input: {
-      threadId: input.threadRef.threadId,
+      threadId: threadRef.threadId,
       url: input.url,
       viewport: defaults.viewport,
       profileId: input.profileId ?? defaults.profileId,
@@ -81,21 +86,21 @@ export async function openUrlInPreview<E>(input: {
     },
   });
   return mapAtomCommandResult(result, (snapshot) => {
-    rememberPreviewUrl(input.threadRef, input.url);
+    rememberPreviewUrl(threadRef, input.url);
     if (input.background) {
-      updatePreviewServerSnapshot(input.threadRef, snapshot);
+      updatePreviewServerSnapshot(threadRef, snapshot);
       // Restore focus unless the user picked a tab while opening this one.
       if (
         previousActiveTabId &&
-        readThreadPreviewState(input.threadRef).activeTabId === snapshot.tabId &&
+        readThreadPreviewState(threadRef).activeTabId === snapshot.tabId &&
         selectedSurface() === surfaceBeforeOpen
       ) {
-        setActivePreviewTab(input.threadRef, previousActiveTabId);
+        setActivePreviewTab(threadRef, previousActiveTabId);
       }
       return;
     }
-    applyPreviewServerSnapshot(input.threadRef, snapshot);
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    applyPreviewServerSnapshot(threadRef, snapshot);
+    useRightPanelStore.getState().openBrowser(threadRef, snapshot.tabId);
   });
 }
 

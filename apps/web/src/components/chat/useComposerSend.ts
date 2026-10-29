@@ -511,7 +511,7 @@ export function useComposerSend(input: ComposerSendInput) {
         promptRef.current === promptAtSend
       ) {
         promptRef.current = "";
-        clearComposerDraftContent(composerDraftTarget);
+        setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       }
       return;

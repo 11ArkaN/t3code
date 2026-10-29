@@ -515,7 +515,8 @@ export function createEnvironmentThreadShellAtoms(input: {
             thread.id === next[index]?.id &&
             thread.title === next[index]?.title &&
             thread.hasPendingApprovals === next[index]?.hasPendingApprovals &&
-            thread.hasPendingUserInput === next[index]?.hasPendingUserInput,
+            thread.hasPendingUserInput === next[index]?.hasPendingUserInput &&
+            thread.pendingSubagentRequest === next[index]?.pendingSubagentRequest,
         )
       ) {
         return previous;

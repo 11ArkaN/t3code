@@ -881,6 +881,15 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       ThreadId.make("side-chat-busy-nested"),
     ).pipe(Effect.flip);
     assert.equal(nested._tag, "OrchestratorDispatchError");
+    // Either would take the side chat's lock before the parent's, against the delete cascade.
+    const ontoParent = yield* fork("side-chat-busy-onto-parent", sideChatId, parentId).pipe(
+      Effect.flip,
+    );
+    assert.equal(ontoParent._tag, "OrchestratorThreadAlreadyExistsError");
+    const ontoExisting = yield* fork("side-chat-busy-onto-existing", parentId, sideChatId).pipe(
+      Effect.flip,
+    );
+    assert.equal(ontoExisting._tag, "OrchestratorThreadAlreadyExistsError");
     const busyMergeBack = yield* orchestrator
       .dispatch({
         type: "thread.merge_back",

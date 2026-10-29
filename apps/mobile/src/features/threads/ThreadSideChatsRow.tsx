@@ -38,11 +38,13 @@ export function ThreadSideChatsRow(props: {
                 openLinkedThread({ environmentId: props.environmentId, threadId: sideChat.id })
               }
             >
-              {sideChat.hasPendingApprovals || sideChat.hasPendingUserInput ? (
+              {sideChat.hasPendingApprovals ||
+              sideChat.hasPendingUserInput ||
+              sideChat.pendingSubagentRequest ? (
                 <View
                   className={cn(
                     "h-1.5 w-1.5 shrink-0 rounded-full",
-                    sideChat.hasPendingApprovals
+                    sideChat.hasPendingApprovals || sideChat.pendingSubagentRequest === "approval"
                       ? "bg-warning-foreground"
                       : "bg-adaptive-indigo-600-300",
                   )}
