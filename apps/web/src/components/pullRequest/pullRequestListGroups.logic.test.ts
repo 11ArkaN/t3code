@@ -73,4 +73,37 @@ describe("pullRequestGroups text search", () => {
       26777, 26895, 26897,
     ]);
   });
+
+  it("lists loaded matches after the host's answer, narrowed by the typed filters", () => {
+    const hosted = entry({
+      number: 1,
+      title: "Toast",
+      author: { login: "bilal", name: null, avatarUrl: null },
+    });
+    const mine = entry({
+      number: 2,
+      title: "Toaster",
+      author: { login: "bilal", name: null, avatarUrl: null },
+    });
+    const theirs = entry({ number: 3, title: "Toasted" });
+
+    const { entries } = pullRequestGroups({
+      known: [hosted],
+      baseline: [theirs, mine, hosted],
+      providers: [GITHUB],
+      viewers: VIEWERS,
+      involvement: "all",
+      localFilters: { author: "bilal" },
+      hasLocalFilters: true,
+      text: "toa",
+      answeredLocally: true,
+      baselineEmpty: false,
+      held: undefined,
+      authored: undefined,
+      reviewing: undefined,
+      partitionsWanted: false,
+    });
+
+    expect(entries.map((row) => row.number)).toEqual([1, 2]);
+  });
 });
