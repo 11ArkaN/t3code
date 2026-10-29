@@ -148,33 +148,34 @@ function makeForkDeltaSummary(input: {
   ].join("\n");
 }
 
-const SIDE_CHAT_DIGEST_MAX_CHARS = 8_000;
+const SIDE_CHAT_CONTEXT_MAX_CHARS = 8_000;
 
 /** `digest` holds `summarizeDeltaItem` lines for parent items after the fork point, oldest first. */
 export function makeSideChatContext(input: {
   readonly parentThreadId: ThreadId;
   readonly digest: ReadonlyArray<string>;
 }): string {
-  const lines = input.digest;
+  const framing =
+    "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.";
+  const header = "Main thread activity since this side chat's starting point:";
+  const truncated = "- Earlier items truncated.";
+  const footer = `Use t3_thread_read on thread ${input.parentThreadId} to see the main thread's live state.`;
   const kept: Array<string> = [];
-  let remaining = SIDE_CHAT_DIGEST_MAX_CHARS;
-  for (const line of lines.toReversed()) {
+  // The cap covers the whole block, so the fixed lines are reserved before any digest line.
+  let remaining =
+    SIDE_CHAT_CONTEXT_MAX_CHARS - [framing, "", header, truncated, "", footer].join("\n").length;
+  for (const line of input.digest.toReversed()) {
     if (line.length + 1 > remaining) break;
     kept.unshift(line);
     remaining -= line.length + 1;
   }
   return [
-    "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.",
+    framing,
     ...(kept.length === 0
       ? []
-      : [
-          "",
-          "Main thread activity since this side chat's starting point:",
-          ...(kept.length < lines.length ? ["- Earlier items truncated."] : []),
-          ...kept,
-        ]),
+      : ["", header, ...(kept.length < input.digest.length ? [truncated] : []), ...kept]),
     "",
-    `Use t3_thread_read on thread ${input.parentThreadId} to see the main thread's live state.`,
+    footer,
   ].join("\n");
 }
 

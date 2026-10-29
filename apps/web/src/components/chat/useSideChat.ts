@@ -2,6 +2,7 @@ import type { OrchestrationV2ThreadShell, ScopedThreadRef } from "@t3tools/contr
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
 import {
+  type AtomCommandResult,
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
@@ -17,7 +18,8 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 
 /**
  * Starts side chats from `threadRef`, or offers none when it is null. `open` forks the
- * thread's latest stable point, shows the side chat's tab, and sends `prompt` there.
+ * thread's latest stable point, sends `prompt` there, and shows the side chat's tab. It
+ * resolves false when the side chat did not start, or another one is still starting.
  */
 export function useSideChat(input: {
   readonly threadRef: ScopedThreadRef | null;
@@ -25,9 +27,18 @@ export function useSideChat(input: {
 }) {
   const pendingRef = useRef(false);
   const forkSideChat = useAtomCommand(threadEnvironment.forkSideChat, { reportFailure: false });
+  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
+  const reportFailure = (
+    failure: Extract<AtomCommandResult<unknown, unknown>, { readonly _tag: "Failure" }>,
+    fallback: string,
+  ) => {
+    if (isAtomCommandInterrupted(failure)) return;
+    const error = squashAtomCommandFailure(failure);
+    input.onError(error instanceof Error ? error.message : fallback);
+  };
   const start = async (threadRef: ScopedThreadRef, prompt: string | undefined) => {
     const targetThreadId = newThreadId();
     const fork = await forkSideChat({
@@ -35,15 +46,19 @@ export function useSideChat(input: {
       input: { sourceThreadId: threadRef.threadId, targetThreadId, title: "Side chat" },
     });
     if (fork._tag === "Failure") {
-      if (!isAtomCommandInterrupted(fork)) {
-        const error = squashAtomCommandFailure(fork);
-        input.onError(error instanceof Error ? error.message : "Could not start a side chat.");
-      }
-      return;
+      reportFailure(fork, "Could not start a side chat.");
+      return false;
     }
+    // Drops the empty side chat a failed start leaves behind; one that got its message stays.
+    const discard = () =>
+      void deleteThread({
+        environmentId: threadRef.environmentId,
+        input: { threadId: targetThreadId, onlyIfUnused: true },
+      });
     if (!(await waitForThreadShell(scopeThreadRef(threadRef.environmentId, targetThreadId)))) {
       input.onError("The side chat was created, but it did not reach this client.");
-      return;
+      discard();
+      return false;
     }
     const text = prompt?.trim();
     // Send before showing the tab: closing a tab whose side chat has no run deletes it.
@@ -60,22 +75,24 @@ export function useSideChat(input: {
           createdAt: new Date().toISOString(),
         },
       });
-      if (turn._tag === "Failure" && !isAtomCommandInterrupted(turn)) {
-        const error = squashAtomCommandFailure(turn);
-        input.onError(
-          error instanceof Error ? error.message : "Could not send the side chat message.",
-        );
+      if (turn._tag === "Failure") {
+        reportFailure(turn, "Could not send the side chat message.");
+        discard();
+        return false;
       }
     }
     useRightPanelStore.getState().openSideChat(threadRef, targetThreadId);
+    return true;
   };
   const open = async (prompt?: string) => {
     const { threadRef } = input;
-    if (!threadRef || pendingRef.current) return;
+    if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    await start(threadRef, prompt).finally(() => {
+    try {
+      return await start(threadRef, prompt);
+    } finally {
       pendingRef.current = false;
-    });
+    }
   };
   return { available: input.threadRef !== null, open: useStableCallback(open) };
 }

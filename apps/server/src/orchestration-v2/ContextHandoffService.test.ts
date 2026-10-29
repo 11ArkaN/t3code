@@ -157,7 +157,7 @@ it.layer(layerTest)("ContextHandoffService legacy import", (it) => {
   );
 });
 
-it("caps the side chat digest to the newest parent items", () => {
+it("caps the side chat context block, keeping the newest parent items", () => {
   const parentThreadId = ThreadId.make("thread:side-chat-parent");
   const digest = Array.from({ length: 60 }, (_, index) =>
     ContextHandoffService.summarizeDeltaItem(
@@ -170,14 +170,11 @@ it("caps the side chat digest to the newest parent items", () => {
     )!,
   );
   const context = ContextHandoffService.makeSideChatContext({ parentThreadId, digest });
-  const kept = context
-    .split("\n")
-    .filter((line) => line.startsWith("- ") && line !== "- Earlier items truncated.");
 
   assert.include(context, "- Earlier items truncated.");
   assert.notInclude(context, "item-0 ");
   assert.include(context, "- Assistant: item-59 ");
-  assert.isAtMost(kept.join("\n").length, 8_000);
+  assert.isAtMost(context.length, 8_000);
   assert.isTrue(
     context.endsWith(
       `Use t3_thread_read on thread ${parentThreadId} to see the main thread's live state.`,

@@ -165,7 +165,7 @@ import {
   isForkableSourceRunStatus,
   ThreadForkServiceV2,
 } from "./ThreadForkService.ts";
-import { planThreadDeletion, type ThreadDeletionPlan } from "./ThreadDeletion.ts";
+import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -1155,6 +1155,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         Effect.map((records) => records.turnItems),
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       );
+
+  /** Side chats live inside their parent, so deleting the parent deletes them too. */
+  const liveSideChatIds = Effect.fn("Orchestrator.liveSideChatIds")(
+    function* (threadId: ThreadId) {
+      const { contextTransfers } = yield* projectionStore
+        .getThreadRecords(threadId, ["contextTransfers"])
+        .pipe(
+          Effect.catchTags({
+            ProjectionStoreThreadNotFoundError: () => Effect.succeed({ contextTransfers: [] }),
+          }),
+        );
+      const sideChatIds: Array<ThreadId> = [];
+      for (const transfer of contextTransfers) {
+        if (transfer.type !== "fork" || transfer.sourceThreadId !== threadId) continue;
+        const child = yield* projectionStore
+          .getThread(transfer.targetThreadId)
+          .pipe(
+            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          );
+        if (child?.lineage.sideChat === true && child.deletedAt === null) {
+          sideChatIds.push(child.id);
+        }
+      }
+      return sideChatIds;
+    },
+    (effect, threadId) =>
+      effect.pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
+  );
 
   const getProjectionWithPendingEvents =
     /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
@@ -4107,8 +4135,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
-    // The source is unlocked; validate the modes copied here, not an earlier read.
+    // Only side chat forks lock the source; validate the modes copied here, not an earlier read.
     yield* refuseAboveDispatchModeLimit(command, command.sourceThreadId, sourceProjection.thread);
+    if (command.sideChat === true && sourceProjection.thread.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.sourceThreadId} was deleted.`,
+      });
+    }
 
     const sourceRun = runForSourcePoint(sourceProjection, command.sourcePoint);
 
@@ -4246,6 +4281,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (transfer) =>
         transfer.type === "merge_back" &&
         transfer.status === "pending" &&
+        transfer.targetThreadId === command.targetThreadId &&
         transfer.sourceThreadId !== command.sourceThreadId,
     );
     if (otherPendingMergeBack !== undefined) {
@@ -6388,10 +6424,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         : sourceProjection.runs.filter(
             (candidate) => sourceRun === null || candidate.ordinal > sourceRun.ordinal,
           );
-    const sourceBoundaryTurn =
-      sourceProjection === null || sourceRun === null
-        ? undefined
-        : providerTurnForRun(sourceProjection, sourceRun);
     const forkExecution =
       pendingForkTransfer === undefined || sourceRun === null
         ? null
@@ -6407,9 +6439,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               sourceRunStatus: sourceRun.status,
               fromSpecificTurn: sourceRun !== null,
               sourceBusy: sourceRunsAfterFork.some(isBlockingRun),
-              hasTurnBoundary:
-                sourceBoundaryTurn !== undefined &&
-                adapter.canForkAtTurn?.(sourceBoundaryTurn) === true,
             }),
           );
     const canResolveForkNatively = forkExecution === "native_fork";
@@ -6511,11 +6540,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             sourceProjection.thread.id,
             sourceRunsAfterFork.map((run) => run.id),
           );
+    // The framing note goes in even when the parent has no activity after the fork point.
     const sideChatContextHandoff =
-      !sideChatFork ||
-      pendingForkTransfer === undefined ||
-      sourceProjection === null ||
-      (!sideChatWithoutSource && sourceRunsAfterFork.length === 0)
+      !sideChatFork || pendingForkTransfer === undefined || sourceProjection === null
         ? null
         : yield* contextHandoffService
             .prepareSideChatContext({
@@ -12598,14 +12625,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               "runtimeRequests",
               "subagents",
               "providerSessions",
-              "contextTransfers",
             ])
             .pipe(
               Effect.mapError(
                 (cause) => new OrchestratorProjectionError({ threadId: deletion.threadId, cause }),
               ),
             );
-          const plan = yield* mapDispatchError(command)(
+          return yield* mapDispatchError(command)(
             planThreadDeletion({
               command: deletion,
               projection,
@@ -12616,37 +12642,34 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               idAllocator,
             }),
           );
-          return { projection, plan };
         });
-        const { projection, plan } = yield* planDeletion(command);
-        // Side chats live inside their parent; deleting it from any client must not orphan them.
-        const forkTargets = new Set(
-          projection.contextTransfers.flatMap((transfer) =>
-            transfer.type === "fork" && transfer.sourceThreadId === command.threadId
-              ? [transfer.targetThreadId]
-              : [],
-          ),
-        );
-        const sideChatPlans: Array<ThreadDeletionPlan> = [];
-        for (const threadId of forkTargets) {
-          const sideChat = yield* projectionStore.getThread(threadId).pipe(
-            Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
-            Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
-          );
-          if (sideChat?.lineage.sideChat !== true || sideChat.deletedAt !== null) continue;
-          const sideChatDeletion = yield* planDeletion({
-            ...command,
-            commandId: CommandId.make(`${command.commandId}:side-chat:${threadId}`),
-            threadId,
-          });
-          sideChatPlans.push(sideChatDeletion.plan);
+        // Checked under the thread lock: a message sent since the client looked keeps the thread.
+        if (command.onlyIfUnused === true) {
+          const usage = yield* projectionStore
+            .getThreadRecords(command.threadId, ["runs", "messages"])
+            .pipe(
+              Effect.mapError(
+                (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+              ),
+            );
+          if (usage.runs.length > 0 || usage.messages.length > 0) {
+            return { events: [], effects: [] };
+          }
         }
+        // The dispatch wrapper holds each side chat's lock, so none can commit after this plan.
+        const plans = [
+          yield* planDeletion(command),
+          ...(yield* Effect.forEach(yield* liveSideChatIds(command.threadId), (threadId) =>
+            planDeletion({
+              ...command,
+              commandId: CommandId.make(`${command.commandId}:side-chat:${threadId}`),
+              threadId,
+            }),
+          )),
+        ];
         return {
-          events: [...plan.events, ...sideChatPlans.flatMap((sideChatPlan) => sideChatPlan.events)],
-          effects: [
-            ...plan.effects,
-            ...sideChatPlans.flatMap((sideChatPlan) => sideChatPlan.effects),
-          ],
+          events: plans.flatMap((plan) => plan.events),
+          effects: plans.flatMap((plan) => plan.effects),
         };
       }
       case "thread.archive":
@@ -13017,7 +13040,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.stop" ||
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
-          command.type === "thread.guest-share.close",
+          command.type === "thread.guest-share.close" ||
+          (command.type === "thread.delete" && command.onlyIfUnused === true),
         (_planned) =>
           new OrchestratorDispatchError({
             commandId: command.commandId,
@@ -13159,6 +13183,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       commandThreadId(command),
       dispatchWithReceiptEffect(command),
     );
+    // A parent's lock comes before its side chats' locks, so a delete cascade and a side chat
+    // fork or command never interleave.
+    if (
+      command.type === "thread.fork" &&
+      command.sideChat === true &&
+      command.sourceThreadId !== command.targetThreadId
+    )
+      return yield* threadDispatch.withLock(command.sourceThreadId, dispatch);
+    if (command.type === "thread.delete")
+      return yield* threadDispatch.withLock(
+        command.threadId,
+        liveSideChatIds(command.threadId).pipe(
+          Effect.flatMap((sideChatIds) =>
+            sideChatIds.reduce(
+              (locked, sideChatId) => threadDispatch.withLock(sideChatId, locked),
+              dispatchWithReceiptEffect(command),
+            ),
+          ),
+        ),
+      );
     // Answering a message-mode question can also start a follow-up.
     if (
       command.type !== "runtime-request.respond" &&

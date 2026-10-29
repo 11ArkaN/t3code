@@ -71,13 +71,18 @@ export function useRightPanelSurfaceClose(input: {
     }
     if (
       surface.kind === "side-chat" &&
-      readEnvironmentScope(ref.environmentId, AuthOrchestrationOperateScope) &&
-      readThreadShell(scopeThreadRef(ref.environmentId, surface.threadId))?.latestRun === null
+      readEnvironmentScope(ref.environmentId, AuthOrchestrationOperateScope)
     ) {
+      // The server keeps a side chat with a run or message; this client's shell can lag one.
       void deleteThread({
         environmentId: ref.environmentId,
-        input: { threadId: surface.threadId },
+        input: { threadId: surface.threadId, onlyIfUnused: true },
       });
+      if (
+        readThreadShell(scopeThreadRef(ref.environmentId, surface.threadId))?.latestRun !== null
+      ) {
+        return;
+      }
       const closedViews = useClosedViewStore.getState();
       for (const entry of closedViews.entries) {
         if (

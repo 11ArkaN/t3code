@@ -261,17 +261,16 @@ layer("CommandPolicyV2", (it) => {
         sourceRunStatus: "completed",
         fromSpecificTurn: true,
         sourceBusy: false,
-        hasTurnBoundary: false,
       });
 
       assert.equal(result, "portable_context");
     }),
   );
 
-  it.effect("forks a busy source natively only when the adapter can bound the fork", () =>
+  it.effect("forks a busy source through portable context", () =>
     Effect.gen(function* () {
       const policy = yield* CommandPolicy.CommandPolicyV2;
-      const decide = (sourceBusy: boolean, hasTurnBoundary: boolean) =>
+      const decide = (sourceBusy: boolean) =>
         policy.decideForkExecution({
           commandId,
           threadId,
@@ -282,12 +281,10 @@ layer("CommandPolicyV2", (it) => {
           sourceRunStatus: "completed",
           fromSpecificTurn: true,
           sourceBusy,
-          hasTurnBoundary,
         });
 
-      assert.equal(yield* decide(false, false), "native_fork");
-      assert.equal(yield* decide(true, true), "native_fork");
-      assert.equal(yield* decide(true, false), "portable_context");
+      assert.equal(yield* decide(false), "native_fork");
+      assert.equal(yield* decide(true), "portable_context");
     }),
   );
 });

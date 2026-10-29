@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  CheckpointId,
   CommandId,
   EventId,
   MessageId,
@@ -614,14 +615,50 @@ const writeParentRun = (input: {
   readonly ordinal: number;
   readonly status: "running" | "completed";
   readonly text: string;
+  /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
+  readonly stable?: boolean;
 }) =>
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
     const now = yield* DateTime.now;
-    const { instanceId, modelSelection } = forkCases[0]!;
+    const { driver, instanceId, modelSelection } = forkCases[0]!;
     const messageId = MessageId.make(`${input.runId}:message`);
+    const providerThreadId = input.stable
+      ? ProviderThreadId.make(`${input.runId}:provider-thread`)
+      : null;
     yield* eventSink.write({
       events: [
+        ...(providerThreadId === null
+          ? []
+          : [
+              {
+                id: EventId.make(`${input.runId}:provider-thread`),
+                type: "provider-thread.updated" as const,
+                threadId: input.threadId,
+                occurredAt: now,
+                payload: {
+                  id: providerThreadId,
+                  driver,
+                  providerInstanceId: instanceId,
+                  providerSessionId: null,
+                  appThreadId: input.threadId,
+                  ownerNodeId: null,
+                  nativeThreadRef: {
+                    driver,
+                    nativeId: `${input.runId}:native`,
+                    strength: "strong" as const,
+                  },
+                  nativeConversationHeadRef: null,
+                  status: "idle" as const,
+                  firstRunOrdinal: input.ordinal,
+                  lastRunOrdinal: input.ordinal,
+                  handoffIds: [],
+                  forkedFrom: null,
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              },
+            ]),
         {
           id: EventId.make(`${input.runId}:created`),
           type: "run.created",
@@ -634,7 +671,7 @@ const writeParentRun = (input: {
             ordinal: input.ordinal,
             providerInstanceId: instanceId,
             modelSelection,
-            providerThreadId: null,
+            providerThreadId,
             userMessageId: messageId,
             rootNodeId: null,
             activeAttemptId: null,
@@ -643,7 +680,7 @@ const writeParentRun = (input: {
             requestedAt: now,
             startedAt: now,
             completedAt: input.status === "completed" ? now : null,
-            checkpointId: null,
+            checkpointId: input.stable ? CheckpointId.make(`${input.runId}:checkpoint`) : null,
             contextHandoffId: null,
           },
         },
@@ -658,7 +695,7 @@ const writeParentRun = (input: {
             threadId: input.threadId,
             runId: input.runId,
             nodeId: null,
-            providerThreadId: null,
+            providerThreadId,
             providerTurnId: null,
             nativeItemRef: null,
             parentItemId: null,
@@ -699,6 +736,112 @@ const createParent = (threadId: ThreadId) =>
       creationSource: "web",
     });
   });
+
+const forkSideChat = (commandId: string, sourceThreadId: ThreadId, targetThreadId: ThreadId) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    return yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make(commandId),
+      sourceThreadId,
+      targetThreadId,
+      sourcePoint: { type: "latest_stable" },
+      sideChat: true,
+      createdBy: "user",
+      creationSource: "web",
+    });
+  });
+
+const askSideChat = (threadId: ThreadId, commandId: string) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make(commandId),
+      threadId,
+      messageId: MessageId.make(commandId),
+      text: "What is the main thread doing?",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+  });
+
+it.effect("a side chat of an idle parent still starts with the framing note", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const parentId = ThreadId.make("side-chat-idle-parent");
+    const sideChatId = ThreadId.make("side-chat-idle-child");
+    yield* createParent(parentId);
+    yield* writeParentRun({
+      threadId: parentId,
+      runId: RunId.make("side-chat-idle-parent-run"),
+      ordinal: 1,
+      status: "completed",
+      text: "Parent work",
+      stable: true,
+    });
+
+    yield* forkSideChat("side-chat-idle-fork", parentId, sideChatId);
+    yield* askSideChat(sideChatId, "side-chat-idle-first-message");
+
+    const started = yield* orchestrator.getThreadProjection(sideChatId);
+    assert.isNotNull(started.providerThreads[0]?.forkedFrom);
+    assert.lengthOf(started.contextHandoffs, 1);
+    const [handoff] = started.contextHandoffs;
+    assert.isTrue(
+      handoff!.summaryText.startsWith("You are in a side chat beside the main thread."),
+    );
+    assert.notInclude(handoff!.summaryText, "Main thread activity");
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
+
+it.effect("closing a side chat deletes it only while unused; a deleted parent takes no more", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const parentId = ThreadId.make("side-chat-close-parent");
+    const unused = ThreadId.make("side-chat-close-unused");
+    const used = ThreadId.make("side-chat-close-used");
+    yield* createParent(parentId);
+    yield* writeParentRun({
+      threadId: parentId,
+      runId: RunId.make("side-chat-close-parent-run"),
+      ordinal: 1,
+      status: "completed",
+      text: "Parent work",
+      stable: true,
+    });
+    yield* forkSideChat("side-chat-close-fork-unused", parentId, unused);
+    yield* forkSideChat("side-chat-close-fork-used", parentId, used);
+    yield* askSideChat(used, "side-chat-close-used-message");
+    const close = (threadId: ThreadId) =>
+      orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make(`side-chat-close:${threadId}`),
+        threadId,
+        onlyIfUnused: true,
+      });
+
+    yield* close(unused);
+    yield* close(used);
+    assert.isNotNull((yield* orchestrator.getThreadProjection(unused)).thread.deletedAt);
+    assert.isNull((yield* orchestrator.getThreadProjection(used)).thread.deletedAt);
+
+    yield* orchestrator.dispatch({
+      type: "thread.delete",
+      commandId: CommandId.make("side-chat-close-delete-parent"),
+      threadId: parentId,
+    });
+    assert.isNotNull((yield* orchestrator.getThreadProjection(used)).thread.deletedAt);
+    const orphan = yield* forkSideChat(
+      "side-chat-close-orphan",
+      parentId,
+      ThreadId.make("side-chat-close-orphan"),
+    ).pipe(Effect.flip);
+    assert.include(String(orphan.cause), "was deleted");
+  }).pipe(Effect.provide(forkCases[0]!.layer)),
+);
 
 it.effect("a side chat opened during the parent's first turn starts from a digest", () =>
   Effect.gen(function* () {
@@ -833,6 +976,34 @@ it.effect("merge-back rejects a second fork's context until the first is consume
     const rejected = yield* mergeBack("merge-back-guard-second", second).pipe(Effect.flip);
     assert.include(String(rejected.cause), first.threadId);
     yield* mergeBack("merge-back-guard-first-again", first);
+    // That pending merge-back targets the parent, so it does not block one into `first`.
+    const nested = { threadId: ThreadId.make("merge-back-guard-nested") };
+    const nestedRunId = RunId.make("merge-back-guard-nested-run");
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("merge-back-guard-fork-nested"),
+      sourceThreadId: first.threadId,
+      targetThreadId: nested.threadId,
+      sourcePoint: { type: "run", runId: first.runId },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* writeParentRun({
+      threadId: nested.threadId,
+      runId: nestedRunId,
+      ordinal: 1,
+      status: "completed",
+      text: "nested",
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.merge_back",
+      commandId: CommandId.make("merge-back-guard-nested"),
+      sourceThreadId: nested.threadId,
+      targetThreadId: first.threadId,
+      sourcePoint: { type: "run", runId: nestedRunId },
+      createdBy: "user",
+      creationSource: "web",
+    });
 
     const parent = yield* orchestrator.getThreadProjection(parentId);
     assert.deepEqual(

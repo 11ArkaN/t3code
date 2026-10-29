@@ -195,9 +195,33 @@ describe("v2 thread shell lists", () => {
     expect(registry.get(parent)?.pendingSubagentRequest).toBe("approval");
     expect(childThreadInputsTitle(registry.get(inputs))).toBe("Side chat needs approval");
 
+    const helper = {
+      ...sideChat,
+      id: ThreadId.make("side-chat-helper"),
+      creationSource: "mcp" as const,
+      lineage: {
+        ...sideChat.lineage,
+        parentThreadId: sideChat.id,
+        relationshipToParent: "subagent" as const,
+        sideChat: false,
+      },
+      pendingRuntimeRequest: { ...request, kind: "command" as const },
+    };
+    const sideChats = threads.sideChatsAtom(parentRef);
+    const disposeSideChats = registry.mount(sideChats);
+    registry.set(snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [root, sideChat, helper],
+    });
+    expect(registry.get(parent)?.pendingSubagentRequest).toBe("approval");
+    expect(
+      registry.get(sideChats).map((thread) => [thread.id, thread.pendingSubagentRequest]),
+    ).toEqual([[sideChat.id, "approval"]]);
+
     registry.set(snapshotAtom(environmentId), { ...v2ShellSnapshot, threads: [root, sideChat] });
     expect(registry.get(parent)?.pendingSubagentRequest).toBeNull();
     expect(registry.get(inputs)).toEqual([]);
+    disposeSideChats();
     disposeNavigation();
     disposeInputs();
     disposeParent();

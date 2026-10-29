@@ -14,6 +14,7 @@ import { XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ComposerHandleContext } from "../../composerHandleContext";
+import type { SideChatParentPanel } from "../../lib/sideChatPane";
 import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentShellHasSnapshot } from "../../state/shell";
@@ -29,6 +30,7 @@ import { BackgroundThreadContext } from "./backgroundThread";
 export default function SideChatPane(props: {
   readonly parentRef: ScopedThreadRef;
   readonly threadId: ThreadId;
+  readonly parentPanel: SideChatParentPanel;
   readonly onClose: () => void;
 }) {
   const { parentRef, threadId } = props;
@@ -112,7 +114,7 @@ export default function SideChatPane(props: {
               environmentId={parentRef.environmentId}
               threadId={threadId}
               routeKind="server"
-              embedded
+              embedded={props.parentPanel}
             />
           </ComposerHandleContext>
         </BackgroundThreadContext>

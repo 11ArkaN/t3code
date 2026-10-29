@@ -326,35 +326,37 @@ export const layer: Layer.Layer<
           .filter((transfer) => transfer.type === "subagent_result")
           .map((transfer) => transfer.id),
       );
+      const isPendingForRun = (handoff: OrchestrationV2ContextHandoff) =>
+        handoff.status === "ready" &&
+        (handoff.targetRunId === run.id ||
+          (handoff.toProviderThreadId === run.providerThreadId &&
+            projection.runs.some(
+              (source) =>
+                source.id === handoff.targetRunId &&
+                (source.status === "failed" ||
+                  source.status === "interrupted" ||
+                  (source.status === "completed" &&
+                    handoff.delivery === undefined &&
+                    // Compaction and /goal turns defer history to the next turn.
+                    projection.messages.some(
+                      (message) =>
+                        message.id === source.userMessageId &&
+                        (isCompactionCommandMessage(message) || parseGoalCommand(message) !== null),
+                    ))),
+            )));
       const handoffs = projection.contextHandoffs.filter(
         (handoff) =>
           !ContextHandoffService.isSideChatContextHandoff(handoff) &&
           (handoff.transferId == null || !subagentResultTransfers.has(handoff.transferId)) &&
-          handoff.status === "ready" &&
-          (handoff.targetRunId === run.id ||
-            (handoff.toProviderThreadId === run.providerThreadId &&
-              projection.runs.some(
-                (source) =>
-                  source.id === handoff.targetRunId &&
-                  (source.status === "failed" ||
-                    source.status === "interrupted" ||
-                    (source.status === "completed" &&
-                      handoff.delivery === undefined &&
-                      // Compaction and /goal turns defer history to the next turn.
-                      projection.messages.some(
-                        (message) =>
-                          message.id === source.userMessageId &&
-                          (isCompactionCommandMessage(message) ||
-                            parseGoalCommand(message) !== null),
-                      ))),
-              ))),
+          isPendingForRun(handoff),
       );
-      const sideChatContext =
-        projection.contextHandoffs.find(
-          (handoff) =>
-            handoff.targetRunId === run.id &&
-            ContextHandoffService.isSideChatContextHandoff(handoff),
-        )?.summaryText ?? "";
+      // Carried forward like other handoffs until a provider turn accepts it.
+      const sideChatHandoff = projection.contextHandoffs.find(
+        (handoff) =>
+          ContextHandoffService.isSideChatContextHandoff(handoff) &&
+          handoff.delivery === undefined &&
+          isPendingForRun(handoff),
+      );
       const nativeForkTransfer = projection.contextTransfers.find(
         (transfer) =>
           transfer.type === "fork" &&
@@ -645,19 +647,15 @@ export const layer: Layer.Layer<
       });
       const { isCurrentAttemptInStatus } = runControls;
 
-      const threadRuntimePolicy = yield* runtimePolicy.resolve({
-        thread: projection.thread,
+      // A side chat shares its parent's worktree; its first turn always asks before acting.
+      const resolvedRuntimePolicy = yield* runtimePolicy.resolve({
+        thread:
+          projection.thread.lineage.sideChat === true &&
+          !projection.runs.some((previous) => previous.ordinal < run.ordinal)
+            ? { ...projection.thread, runtimeMode: "approval-required" }
+            : projection.thread,
         modelSelection: run.modelSelection,
       });
-      // A side chat shares its parent's worktree; its first turn always asks before acting.
-      const resolvedRuntimePolicy =
-        projection.thread.lineage.sideChat === true &&
-        !projection.runs.some((previous) => previous.ordinal < run.ordinal)
-          ? ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-              ...threadRuntimePolicy,
-              runtimeMode: "approval-required",
-            })
-          : threadRuntimePolicy;
       if (!(yield* isCurrentAttemptInStatus("starting"))) return;
       const existingSessionProjection = projection.providerSessions.find(
         (candidate) => candidate.id === providerSessionId,
@@ -1389,6 +1387,26 @@ export const layer: Layer.Layer<
       const routableSubagents = projection.subagents.filter((subagent) =>
         RunExecutionService.canRouteRelatedSubagent(subagent.status),
       );
+      const persistHandoff = Effect.fn("ProviderTurnStartService.persist")(function* (
+        handoff: OrchestrationV2ContextHandoff,
+      ) {
+        const updatedAt = yield* DateTime.now;
+        yield* eventSink.write({
+          events: [
+            {
+              id: yield* idAllocator.allocate.event({
+                threadId: projection.thread.id,
+              }),
+              type: "context-handoff.updated",
+              threadId: projection.thread.id,
+              runId: run.id,
+              providerInstanceId: run.providerInstanceId,
+              occurredAt: updatedAt,
+              payload: { ...handoff, updatedAt },
+            },
+          ],
+        });
+      });
       const startWithHandoffs = Effect.fn("ProviderTurnStartService.startWithHandoffs")(
         function* (turnInput: Parameters<typeof session.startTurn>[0], compact = false) {
           const delivery = yield* deliverContextHandoffs({
@@ -1406,27 +1424,15 @@ export const layer: Layer.Layer<
                       ...history,
                     }),
                 }),
-            persist: Effect.fn("ProviderTurnStartService.persist")(function* (handoff) {
-              const updatedAt = yield* DateTime.now;
-              yield* eventSink.write({
-                events: [
-                  {
-                    id: yield* idAllocator.allocate.event({
-                      threadId: projection.thread.id,
-                    }),
-                    type: "context-handoff.updated",
-                    threadId: projection.thread.id,
-                    runId: run.id,
-                    providerInstanceId: run.providerInstanceId,
-                    occurredAt: updatedAt,
-                    payload: { ...handoff, updatedAt },
-                  },
-                ],
-              });
-            }),
+            persist: persistHandoff,
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
+          // Like history, the side chat context waits for a turn that sends a prompt.
+          const sideChatContext =
+            sideChatHandoff === undefined || compact || goalCommand
+              ? ""
+              : sideChatHandoff.summaryText;
           const context = [delivery.context, sideChatContext, restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
@@ -1452,13 +1458,29 @@ export const layer: Layer.Layer<
             ),
           );
           // After provider acceptance, failed delivery bookkeeping must not stop live ingestion.
-          yield* delivery.delivered.pipe(
-            Effect.catchCause(() =>
-              Effect.logWarning("Failed to record accepted context handoff delivery", {
-                runId: run.id,
-                deliveryStatus: "pending",
-              }),
-            ),
+          const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
+          yield* Effect.forEach(
+            [
+              delivery.delivered,
+              ...(sideChatContext === "" || sideChatHandoff === undefined || nativeThreadId == null
+                ? []
+                : [
+                    persistHandoff({
+                      ...sideChatHandoff,
+                      delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
+                    }),
+                  ]),
+            ],
+            (record) =>
+              record.pipe(
+                Effect.catchCause(() =>
+                  Effect.logWarning("Failed to record accepted context handoff delivery", {
+                    runId: run.id,
+                    deliveryStatus: "pending",
+                  }),
+                ),
+              ),
+            { discard: true },
           );
         },
         Effect.mapError((cause) =>
@@ -1476,7 +1498,7 @@ export const layer: Layer.Layer<
       const deliverySession =
         effectiveHandoffs.length === 0 &&
         retryHandoff.length === 0 &&
-        sideChatContext === "" &&
+        sideChatHandoff === undefined &&
         restartNote === "" &&
         !noteContinuation
           ? session
