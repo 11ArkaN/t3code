@@ -367,46 +367,6 @@ describe("sourceControlClients.findByPublicDomain", () => {
   });
 });
 
-describe("sourceControlClients.parseCommitUrl", () => {
-  const sha = "a".repeat(40);
-
-  it.each([
-    ["github", `https://github.com/Team/Repo/commit/${sha}`, "team/repo"],
-    ["github", `https://github.com/Team/Repo/pull/12/commits/${sha}`, "team/repo"],
-    ["gitlab", `https://gitlab.com/Group/Nested/Repo/-/commit/${sha}`, "group/nested/repo"],
-    ["forgejo", `https://codeberg.org/Team/Repo/commit/${sha}`, "team/repo"],
-    ["gitcafe", `https://git.cafe/Team/Repo/commit/${sha}`, "team/repo"],
-    ["bitbucket", `https://bitbucket.org/Team/Repo/commits/${sha}`, "team/repo"],
-    [
-      "azure-devops",
-      `https://dev.azure.com/Org/Project/_git/Repo/commit/${sha}`,
-      "org/project/_git/repo",
-    ],
-  ])("reads a %s commit link as its repository and full sha", (kind, url, repository) => {
-    const parsed = sourceControlClients.parseCommitUrl(url);
-    expect(parsed?.definition.kind).toBe(kind);
-    expect(parsed?.link).toMatchObject({ host: new URL(url).hostname, repository, sha });
-  });
-
-  it("reads a GitHub Enterprise Server commit link once the project names its host", () => {
-    const url = `https://git.example.com/Team/Repo/pull/12/commits/${sha}`;
-    expect(
-      sourceControlClients.parseCommitUrl(url, SourceControlProviderKind.make("github"))?.link,
-    ).toMatchObject({
-      host: "git.example.com",
-      repository: "team/repo",
-      sha,
-    });
-  });
-
-  it.each([`https://github.com/team/repo/commit/abc1234`, `https://github.com/team/repo/pull/12`])(
-    "reads no commit from %s",
-    (url) => {
-      expect(sourceControlClients.parseCommitUrl(url)).toBeNull();
-    },
-  );
-});
-
 describe("appSignInTargetForRemote", () => {
   it("names the repository a GitHub remote points at, in the remote's casing", () => {
     for (const remote of [

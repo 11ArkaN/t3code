@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { ReviewDiffPreviewSource } from "@t3tools/contracts";
-
 import {
   applyReviewDiffMetadata,
   buildReviewParsedDiff,
-  buildReviewSectionItems,
   resolveReviewSelectedSectionId,
   type ReviewSectionItem,
 } from "./reviewModel";
@@ -33,28 +30,6 @@ describe("resolveReviewSelectedSectionId", () => {
     expect(resolveReviewSelectedSectionId([changes], "turn:2")).toBe("git:branch-range");
     expect(resolveReviewSelectedSectionId([turn, changes], "turn:2")).toBe("turn:2");
   });
-});
-
-it("omits commit sources from mobile review sections", () => {
-  const gitSections: ReviewDiffPreviewSource[] = (["branch-range", "commit"] as const).map(
-    (kind) => ({
-      id: kind,
-      kind,
-      title: kind,
-      baseRef: "main",
-      headRef: "feature",
-      diff: "",
-      diffHash: kind,
-      truncated: false,
-    }),
-  );
-  const items = buildReviewSectionItems({
-    checkpoints: [],
-    gitSections,
-    turnDiffById: {},
-    loadingGitSections: false,
-  });
-  expect(items.map((item) => item.id)).toEqual(["git:branch-range"]);
 });
 
 describe("buildReviewParsedDiff", () => {

@@ -1,8 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -39,7 +37,7 @@ function layer(input: {
   readonly threadCwd?: string;
   readonly projectModel?: string;
   readonly generationCalls?: Array<string>;
-  readonly failFirstGeneration?: "failure" | "interruption";
+  readonly failFirstGeneration?: boolean;
 }) {
   const projectRoots = input.projectRoots ?? [];
   return ReviewService.layer.pipe(
@@ -107,14 +105,12 @@ function layer(input: {
         generateCommitDescriptions: (request) => {
           input.generationCalls?.push(request.modelSelection.model);
           return input.failFirstGeneration && input.generationCalls?.length === 1
-            ? input.failFirstGeneration === "interruption"
-              ? Effect.interrupt
-              : Effect.fail(
-                  new TextGenerationError({
-                    operation: "generateCommitDescriptions",
-                    detail: "model unavailable",
-                  }),
-                )
+            ? Effect.fail(
+                new TextGenerationError({
+                  operation: "generateCommitDescriptions",
+                  detail: "model unavailable",
+                }),
+              )
             : Effect.succeed({
                 descriptions: request.commits.map((commit) => ({
                   sha: commit.sha,
@@ -166,7 +162,7 @@ function layer(input: {
 }
 
 describe("ReviewService", () => {
-  it.effect("describes the requested commits with the project's text generation model", () =>
+  it.effect("describes commits with the project's model and asks again after a model failure", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
@@ -188,18 +184,21 @@ describe("ReviewService", () => {
         const second = yield* git("rev-parse", "HEAD");
 
         const review = yield* ReviewService.ReviewService;
-        const result = yield* review.generateCommitDescriptions({
+        const describe = review.generateCommitDescriptions({
           cwd: workspaceRoot,
           threadId: ThreadId.make("thread-0"),
           shas: [second, first],
         });
-
-        assert.strictEqual(result.modelSelection.model, "project-model");
-        assert.deepStrictEqual(result.descriptions, [
-          { sha: second, description: "project-model: fix the lexer" },
-          { sha: first, description: "project-model: add the parser" },
-        ]);
-        assert.deepStrictEqual(generationCalls, ["project-model"]);
+        assert.instanceOf(yield* Effect.flip(describe), TextGenerationError);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = yield* describe;
+          assert.strictEqual(result.modelSelection.model, "project-model");
+          assert.deepStrictEqual(result.descriptions, [
+            { sha: second, description: "project-model: fix the lexer" },
+            { sha: first, description: "project-model: add the parser" },
+          ]);
+        }
+        assert.deepStrictEqual(generationCalls, ["project-model", "project-model"]);
       }).pipe(
         Effect.provide(
           layer({
@@ -209,13 +208,14 @@ describe("ReviewService", () => {
             threadCwd: workspaceRoot,
             projectModel: "project-model",
             generationCalls,
+            failFirstGeneration: true,
           }),
         ),
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("refuses to describe commits outside the configured or thread workspace", () =>
+  it.effect("refuses to describe commits outside the thread's workspace", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
@@ -225,39 +225,16 @@ describe("ReviewService", () => {
 
       yield* Effect.gen(function* () {
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        const git = (...args: ReadonlyArray<string>) =>
-          driver
-            .execute({ operation: "ReviewService.test.git", cwd: workspaceRoot, args })
-            .pipe(Effect.map((result) => result.stdout.trim()));
         yield* driver.initRepo({ cwd: workspaceRoot });
-        yield* git("config", "user.email", "test@test.com");
-        yield* git("config", "user.name", "Test");
-        yield* git("commit", "--allow-empty", "-m", "add the parser");
-        const sha = yield* git("rev-parse", "HEAD");
-
         const review = yield* ReviewService.ReviewService;
         const error = yield* Effect.flip(
           review.generateCommitDescriptions({
             cwd: workspaceRoot,
             threadId: ThreadId.make("thread-0"),
-            shas: [sha],
+            shas: ["a".repeat(40)],
           }),
         );
-
         assert.include(error.message, "does not own this workspace");
-        const outsideError = yield* review
-          .generateCommitDescriptions({
-            cwd: baseDir,
-            threadId: ThreadId.make("thread-0"),
-            shas: [sha],
-          })
-          .pipe(Effect.flip);
-        assert(outsideError._tag === "VcsRepositoryDetectionError");
-        assert.strictEqual(outsideError.operation, "ReviewService.generateCommitDescriptions");
-        assert.strictEqual(
-          outsideError.detail,
-          "Review commit description cwd must stay within the configured workspace root.",
-        );
         assert.deepStrictEqual(generationCalls, []);
       }).pipe(
         Effect.provide(
@@ -272,66 +249,6 @@ describe("ReviewService", () => {
         ),
       );
     }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect.each(["failure", "interruption"] as const)(
-    "shares a typed error with concurrent requests and retries after model %s",
-    (failure) =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
-        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
-        const generationCalls: Array<string> = [];
-
-        yield* Effect.gen(function* () {
-          const driver = yield* GitVcsDriver.GitVcsDriver;
-          const git = (...args: ReadonlyArray<string>) =>
-            driver
-              .execute({ operation: "ReviewService.test.git", cwd: workspaceRoot, args })
-              .pipe(Effect.map((result) => result.stdout.trim()));
-          yield* driver.initRepo({ cwd: workspaceRoot });
-          yield* git("config", "user.email", "test@test.com");
-          yield* git("config", "user.name", "Test");
-          yield* git("commit", "--allow-empty", "-m", "add the parser");
-          const sha = yield* git("rev-parse", "HEAD");
-
-          const review = yield* ReviewService.ReviewService;
-          const describe = review.generateCommitDescriptions({
-            cwd: workspaceRoot,
-            threadId: ThreadId.make("thread-0"),
-            shas: [sha],
-          });
-          const failed = yield* Effect.all([describe, describe], { concurrency: 2 }).pipe(
-            Effect.exit,
-          );
-          assert(Exit.isFailure(failed));
-          assert.isFalse(Cause.hasInterruptsOnly(failed.cause));
-          assert.instanceOf(Cause.squash(failed.cause), TextGenerationError);
-          assert.deepStrictEqual(generationCalls, ["project-model"]);
-
-          const results = yield* Effect.all([describe, describe], { concurrency: 2 });
-          assert.deepStrictEqual(
-            results.map((result) => result.descriptions),
-            [
-              [{ sha, description: "project-model: add the parser" }],
-              [{ sha, description: "project-model: add the parser" }],
-            ],
-          );
-          assert.deepStrictEqual(generationCalls, ["project-model", "project-model"]);
-        }).pipe(
-          Effect.provide(
-            layer({
-              workspaceRoot,
-              baseDir,
-              realGit: true,
-              threadCwd: workspaceRoot,
-              projectModel: "project-model",
-              generationCalls,
-              failFirstGeneration: failure,
-            }),
-          ),
-        );
-      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>

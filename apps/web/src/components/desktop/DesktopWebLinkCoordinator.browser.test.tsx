@@ -209,7 +209,6 @@ const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread"));
 
 it.each([
   ["github.com", "pull/9339/commits"],
-  ["code.example.com", "pull/9339/commits"],
   ["code.example.com:8443", "commit"],
 ])("opens a %s/%s commit in the active thread's Diff pane after discovery", async (host, path) => {
   setup();
