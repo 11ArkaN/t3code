@@ -3390,6 +3390,142 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
     }),
   );
 
+  it.effect("create_pr tells the writer which model and harness made the change", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/thread-model"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "thread-model.txt"), "model\n");
+      yield* runGit(repoDir, ["add", "thread-model.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Thread model"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      const threadId = ThreadId.make("thread:pr-thread-model");
+      const providerInstanceId = ProviderInstanceId.make("claudeAgent");
+      const modelSelection = { instanceId: providerInstanceId, model: "claude-opus-5-5" };
+      const createdAt = DateTime.makeUnsafe("2026-09-27T00:00:00.000Z");
+      const run = {
+        id: RunId.make("run:pr-thread-model:1"),
+        threadId,
+        ordinal: 1,
+        providerInstanceId,
+        modelSelection,
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:pr-thread-model:1"),
+        rootNodeId: null,
+        activeAttemptId: null,
+        status: "completed" as const,
+        requestedAt: createdAt,
+        startedAt: createdAt,
+        completedAt: createdAt,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      let generatedPrompt = "";
+      const writer = fromRunner("test", (request) => {
+        generatedPrompt = request.prompt;
+        return decodeJsonReply(request, "test", '{"title":"Thread model","body":"Body"}');
+      });
+
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          textGenerationModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-6.1-terra",
+          },
+        },
+        textGeneration: { generatePrContent: writer.generatePrContent },
+        seed: Effect.gen(function* () {
+          const store = yield* ProjectionStore.ProjectionStoreV2;
+          yield* store.apply({
+            id: EventId.make("event:pr-thread-model:thread"),
+            type: "thread.created",
+            threadId,
+            providerInstanceId,
+            occurredAt: createdAt,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: threadId,
+              projectId: ProjectId.make("project:pr-thread-model"),
+              title: "PR thread model",
+              providerInstanceId,
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: repoDir,
+              activeProviderThreadId: null,
+              lineage: {
+                parentThreadId: null,
+                relationshipToParent: null,
+                rootThreadId: threadId,
+              },
+              forkedFrom: null,
+              createdAt,
+              updatedAt: createdAt,
+              archivedAt: null,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+          });
+          yield* store.apply({
+            id: EventId.make("event:pr-thread-model:run:1"),
+            type: "run.updated",
+            threadId,
+            runId: run.id,
+            occurredAt: createdAt,
+            payload: run,
+          });
+          const item = {
+            id: TurnItemId.make("item:pr-thread-model:1"),
+            threadId,
+            runId: run.id,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "completed" as const,
+            title: null,
+            startedAt: createdAt,
+            completedAt: createdAt,
+            updatedAt: createdAt,
+            type: "user_message" as const,
+            messageId: run.userMessageId,
+            createdBy: "user" as const,
+            creationSource: "web" as const,
+            inputIntent: "turn_start" as const,
+            text: "Add the thread model file",
+            attachments: [],
+          };
+          yield* store.apply({
+            id: EventId.make("event:pr-thread-model:item:1"),
+            type: "turn-item.updated",
+            threadId,
+            runId: run.id,
+            occurredAt: createdAt,
+            payload: item,
+          });
+        }),
+      });
+
+      yield* manager.runStackedAction({
+        actionId: "test-action-id",
+        cwd: repoDir,
+        action: "create_pr",
+        threadId,
+      });
+
+      expect(generatedPrompt).toContain("Add the thread model file");
+      expect(generatedPrompt).toContain("claude-opus-5-5");
+      expect(generatedPrompt).toContain("claudeAgent");
+    }),
+  );
+
   it.effect.each(["commit", "short-commit", "tag", "revision"] as const)(
     "creates a PR against the default branch with a legacy %s base setting",
     (kind) =>
