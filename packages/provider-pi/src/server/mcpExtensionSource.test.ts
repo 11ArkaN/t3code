@@ -137,7 +137,11 @@ describe("Pi MCP tool exposure", () => {
   };
 
   it("keeps orchestration direct and optional bridge tools discoverable on modern Pi", async () => {
-    const bridge = await loadMcpBridge({ modern: true, toolSearchAvailable: true });
+    const bridge = await loadMcpBridge({
+      modern: true,
+      toolSearchAvailable: true,
+      activatesOnRegistration: true,
+    });
     await bridge.handlers.get("session_start")!({ systemPrompt: "" }, discoveryContext);
     const start = bridge.handlers.get("before_agent_start");
     assert.isDefined(start);
@@ -151,8 +155,18 @@ describe("Pi MCP tool exposure", () => {
       "mcp__t3_code__task_status",
       "mcp__t3_code__preview_snapshot",
     ];
-    assert.deepEqual(bridge.getActiveTools(), ["read", "tool_search", ...aliases]);
-    assert.deepEqual(bridge.declaredTools(), []);
+    const publicDirect = [
+      "mcp__t3-code__orchestrator_capabilities",
+      "mcp__t3-code__delegate_task",
+      "mcp__t3-code__task_status",
+    ];
+    assert.sameMembers(bridge.getActiveTools(), [
+      "read",
+      "tool_search",
+      ...publicDirect,
+      ...aliases,
+    ]);
+    assert.deepEqual(bridge.declaredTools(), publicDirect);
     assert.deepEqual(
       bridge.tools
         .filter((tool) => tool.name.startsWith("mcp__t3-code__"))
@@ -168,7 +182,7 @@ describe("Pi MCP tool exposure", () => {
       bridge.tools
         .filter((tool) => tool.name.startsWith("mcp__t3_code__"))
         .map((tool) => [tool.name, tool.exposure]),
-      aliases.map((name) => [name, "direct"]),
+      aliases.map((name) => [name, "model-only"]),
     );
     const result = await bridge.tools
       .find((tool) => tool.name === "mcp__t3-code__preview_snapshot")!
@@ -247,7 +261,12 @@ describe("Pi MCP tool exposure", () => {
     assert.deepEqual(declaredCanonicalNames(), [], "declared twice after session start");
     assert.equal(bridge.requests.at(-1)?.method, "tools/call");
 
-    bridge.restoreActiveTools(["read", "mcp__t3-code__task_status"]);
+    bridge.restoreActiveTools([
+      "read",
+      "mcp__t3-code__orchestrator_capabilities",
+      "mcp__t3-code__delegate_task",
+      "mcp__t3-code__task_status",
+    ]);
     await bridge.handlers.get("session_tree")!(event, discoveryContext);
     assert.deepEqual(
       await unreachableCanonicalNames(),
@@ -255,6 +274,18 @@ describe("Pi MCP tool exposure", () => {
       "model calls to these names fail with Tool not found after an older tree loadout",
     );
     assert.deepEqual(declaredCanonicalNames(), [], "declared twice after an older tree loadout");
+    assert.isFalse(
+      bridge.callableTools().some((name) => name.startsWith("mcp__t3_code__")),
+      "aliases duplicate the codemode catalog",
+    );
+
+    bridge.restoreActiveTools(["read", "mcp__t3-code__task_status"]);
+    await bridge.handlers.get("session_tree")!(event, discoveryContext);
+    assert.deepEqual(
+      await unreachableCanonicalNames(),
+      ["mcp__t3_code__orchestrator_capabilities", "mcp__t3_code__delegate_task"],
+      "an alias stays callable while its direct public tool is off",
+    );
   });
 
   it.each(["legacy Pi", "disabled tool search"])(
@@ -278,7 +309,7 @@ describe("Pi MCP tool exposure", () => {
         bridge.tools
           .filter((tool) => tool.name.startsWith("mcp__t3_code__"))
           .map((tool) => tool.exposure),
-        mode === "legacy Pi" ? [] : ["direct", "direct", "direct", "direct"],
+        mode === "legacy Pi" ? [] : ["model-only", "model-only", "model-only", "model-only"],
       );
       assert.isFalse(bridge.declaredTools().some((name) => name.startsWith("mcp__t3_code__")));
       const tool = bridge.tools.find((tool) => tool.name === "mcp__t3-code__preview_snapshot");

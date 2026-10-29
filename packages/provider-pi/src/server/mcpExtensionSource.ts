@@ -351,6 +351,7 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   const directTools = new Set(["orchestrator_capabilities", "delegate_task", "task_status"]);
   const ALIAS_PREFIX = "mcp__t3_code__";
   let deferOptionalTools = supportsExposure;
+  const isDeferred = (name: string) => deferOptionalTools && !directTools.has(name);
   let catalog: ReadonlyArray<McpTool> = [];
 
   const client = createMcpClient(endpoint, token);
@@ -358,8 +359,8 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
 
   const registerTools = () => {
     // Preserve public names for saved loadouts and tool selectors. The alias,
-    // Pi's own MCP name for T3, reserves it against Pi's configured MCP servers
-    // and stays active and callable without a second declaration.
+    // Pi's own MCP name for T3, reserves it against Pi's configured MCP servers.
+    // model-only keeps it out of codemode; it hides its own declaration.
     const prefixes = supportsExposure ? ["mcp__t3-code__", ALIAS_PREFIX] : ["mcp__t3-code__"];
     readOnlyMcpTools.clear();
     for (const tool of catalog) {
@@ -368,7 +369,7 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
         const toolName = \`\${prefix}\${name}\`;
         if (tool.annotations?.readOnlyHint === true) readOnlyMcpTools.add(toolName);
         const isAlias = prefix === ALIAS_PREFIX;
-        const exposure = !isAlias && deferOptionalTools && !directTools.has(name) ? "deferred" : "direct";
+        const exposure = isAlias ? "model-only" : isDeferred(name) ? "deferred" : "direct";
         pi.registerTool({
           name: toolName,
           label: name,
@@ -426,14 +427,6 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     const exposureChanged = deferOptionalTools !== hasToolSearch;
     deferOptionalTools = hasToolSearch;
     if (exposureChanged) registerTools();
-    // Aliases are callable only while active. Keep one active exactly while
-    // --exclude-tools left its public tool, including after older tree restores.
-    const registered = new Set(pi.getAllTools().map((tool) => tool.name));
-    const aliases = new Set(catalog
-      .filter((tool) => registered.has("mcp__t3-code__" + tool.name))
-      .map((tool) => ALIAS_PREFIX + tool.name));
-    const current = pi.getActiveTools();
-    const active = current.filter((name) => !name.startsWith(ALIAS_PREFIX) || aliases.has(name));
     // Completion gateways can silently drop calls to undeclared tools named
     // in history or guidance. Eagerly load T3 schemas, including after tree
     // restores, while retaining deferred exposure for Pi's allowlist rules.
@@ -441,10 +434,22 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
     const required = [
       ...(hasToolSearch ? ["tool_search"] : []),
       ...(ctx.model?.api === "openai-completions" ? catalog.map((tool) => "mcp__t3-code__" + tool.name) : []),
-      ...aliases,
     ];
-    const missing = required.filter((name) => !active.includes(name));
-    if (missing.length > 0 || active.length !== current.length) pi.setActiveTools([...active, ...missing]);
+    const current = pi.getActiveTools();
+    const missing = required.filter((name) => !current.includes(name));
+    if (missing.length > 0) pi.setActiveTools([...current, ...missing]);
+    // An alias is callable only while active. It follows its public tool:
+    // gone when --exclude-tools removed it, off while a direct one is off.
+    const registered = new Set(pi.getAllTools().map((tool) => tool.name));
+    const loaded = pi.getActiveTools();
+    const aliases = catalog
+      .filter((tool) => registered.has(ALIAS_PREFIX + tool.name) &&
+        registered.has("mcp__t3-code__" + tool.name) &&
+        (isDeferred(tool.name) || loaded.includes("mcp__t3-code__" + tool.name)))
+      .map((tool) => ALIAS_PREFIX + tool.name);
+    const kept = loaded.filter((name) => !name.startsWith(ALIAS_PREFIX) || aliases.includes(name));
+    const added = aliases.filter((name) => !loaded.includes(name));
+    if (added.length > 0 || kept.length !== loaded.length) pi.setActiveTools([...kept, ...added]);
   };
 
   // Tree navigation restores its saved loadout after session_start.

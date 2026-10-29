@@ -180,15 +180,18 @@ export async function loadMcpBridge(
   // Pi resolves model tool calls against the active, non-hidden tools only.
   const modelTools = () =>
     tools.filter((tool) => activeTools.includes(tool.name) && exposureOf(tool.name) !== "hidden");
+  // Pi's ctx.executeTool() catalog, which codemode scripts search and list.
+  const callableTools = () =>
+    tools.filter(
+      (tool) =>
+        ["codemode", "deferred"].includes(exposureOf(tool.name)) ||
+        (exposureOf(tool.name) === "direct" && activeTools.includes(tool.name)),
+    );
   const declaredTools = () => {
     const active = modelTools();
     const loadout = {
       declared: active,
-      callable: tools.filter(
-        (tool) =>
-          ["codemode", "deferred"].includes(exposureOf(tool.name)) ||
-          (exposureOf(tool.name) === "direct" && active.includes(tool)),
-      ),
+      callable: callableTools(),
       registered: tools,
       getExposure: exposureOf,
     };
@@ -201,6 +204,7 @@ export async function loadMcpBridge(
     handlers,
     tools,
     declaredTools,
+    callableTools: () => callableTools().map((tool) => tool.name),
     callModelTool: async (name: string, args: Record<string, unknown>) => {
       const tool = modelTools().find((candidate) => candidate.name === name);
       if (tool === undefined) {
