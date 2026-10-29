@@ -23,6 +23,7 @@ import {
   selectHistory,
 } from "@t3tools/provider-core/server/handoffBudget";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { createOrchestrationV2TurnItemVisibility } from "@t3tools/shared/orchestrationV2Timeline";
 import type { ProjectionStoreV2Shape } from "./ProjectionStore.ts";
 
 export class ContextHandoffPrepareError extends Schema.TaggedError<ContextHandoffPrepareError>()(
@@ -147,7 +148,7 @@ export const readInheritedHandoffItems = Effect.fn(
   ) {
     const { threadId, runId } = current.forkedFrom;
     seen.add(threadId);
-    const source = yield* projectionStore.getThreadRecords(threadId, ["runs"]);
+    const source = yield* projectionStore.getThreadRecords(threadId, ["runs", "attempts"]);
     const forkRun = source.runs.find((run) => run.id === runId);
     if (forkRun === undefined) break;
     const { turnItems } = yield* projectionStore.getThreadRecords(threadId, ["turnItems"], {
@@ -156,7 +157,13 @@ export const readInheritedHandoffItems = Effect.fn(
         ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
       ],
     });
-    segments.unshift(turnItems);
+    // Rolled-back runs and cancelled queued messages are not part of the conversation.
+    const visible = createOrchestrationV2TurnItemVisibility({
+      runs: source.runs,
+      attempts: source.attempts,
+      items: turnItems,
+    });
+    segments.unshift(turnItems.filter(visible));
     current = source.thread;
   }
   return segments.flat();

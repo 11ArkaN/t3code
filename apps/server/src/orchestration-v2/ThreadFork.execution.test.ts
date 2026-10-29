@@ -234,8 +234,15 @@ it.effect.each(forkCases)(
       });
       yield* writeParentRun({
         threadId: grandparentThreadId,
-        runId: grandparentRunId,
+        runId: RunId.make("fork-boundary-grandparent-rolled-back-run"),
         ordinal: 1,
+        status: "rolled_back",
+        text: "ROLLED_BACK_MARKER",
+      });
+      yield* writeParentRun({
+        threadId: grandparentThreadId,
+        runId: grandparentRunId,
+        ordinal: 2,
         status: "completed",
         text: "GRANDPARENT_MARKER",
       });
@@ -408,6 +415,7 @@ it.effect.each(forkCases)(
       const handoff = target.contextHandoffs[0]!;
       const history = handoff.history?.messages.map((message) => message.text).join("\n") ?? "";
       assert.include(`${handoff.summaryText}\n${history}`, "GRANDPARENT_MARKER");
+      assert.notInclude(`${handoff.summaryText}\n${history}`, "ROLLED_BACK_MARKER");
       assert.include(`${handoff.summaryText}\n${history}`, "INCLUDED_SOURCE_MARKER");
       assert.notInclude(`${handoff.summaryText}\n${history}`, "EXCLUDED_LATER_MARKER");
       assert.isNull(target.providerThreads[0]?.forkedFrom);
@@ -632,7 +640,7 @@ const writeParentRun = (input: {
   readonly threadId: ThreadId;
   readonly runId: RunId;
   readonly ordinal: number;
-  readonly status: "preparing" | "running" | "completed";
+  readonly status: "preparing" | "running" | "completed" | "rolled_back";
   readonly text: string;
   /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
   readonly stable?: boolean;
