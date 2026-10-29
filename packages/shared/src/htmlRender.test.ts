@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  htmlRenderTheme,
   injectHtmlRenderBootstrap,
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
 } from "./htmlRender.ts";
+import { T3_CODE_DARK_THEME_COLORS, T3_CODE_LIGHT_THEME_COLORS } from "./themePalettes.ts";
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
 const reference = { attachmentId: "thread-abc-123.html", title: "Chart", height: 420 };
@@ -60,6 +62,49 @@ describe("injectHtmlRenderBootstrap", () => {
       injected.indexOf("<html><head>"),
     );
     expect(injected).toContain('<meta name="viewport" content="width=device-width');
+  });
+});
+
+function relativeLuminance(hex: string) {
+  const [r = 0, g = 0, b = 0] = [1, 3, 5].map((start) => {
+    const channel = Number.parseInt(hex.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(a: string, b: string) {
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].toSorted((x, y) => y - x);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
+describe("htmlRenderTheme", () => {
+  it.each([
+    { appearance: "dark", base: T3_CODE_DARK_THEME_COLORS, canvas: "#161515", accent: "#21180e" },
+    { appearance: "light", base: T3_CODE_LIGHT_THEME_COLORS, canvas: "#fafafa", accent: "#ece6d8" },
+  ] as const)(
+    "keeps --accent and --chart-1 visible on a $appearance theme whose accent matches its canvas",
+    ({ appearance, base, canvas, accent }) => {
+      const { variables } = htmlRenderTheme({ ...base, canvas, accent }, appearance);
+      const background = variables["--background"]!;
+      for (const name of ["--accent", "--chart-1"]) {
+        expect(
+          contrastRatio(variables[name]!, background),
+          `${name} ${variables[name]} contrast on --background ${background}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    },
+  );
+
+  it("passes the default themes' accent through unchanged", () => {
+    for (const [colors, appearance] of [
+      [T3_CODE_DARK_THEME_COLORS, "dark"],
+      [T3_CODE_LIGHT_THEME_COLORS, "light"],
+    ] as const) {
+      const { variables } = htmlRenderTheme(colors, appearance);
+      expect(variables["--accent"]).toBe(colors.accent);
+      expect(variables["--chart-1"]).toBe(colors.accent);
+    }
   });
 });
 
