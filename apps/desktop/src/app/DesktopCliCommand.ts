@@ -221,13 +221,19 @@ export const make = Effect.gen(function* () {
       }
       return yield* state;
     }
+    const candidates = userCandidates(environment.homeDirectory);
     const existing = yield* installedAt;
-    if (Option.isSome(existing)) {
-      const target = yield* fs.readLink(existing.value).pipe(Effect.option);
+    const replaced = Option.getOrUndefined(existing);
+    // A link in an older macOS folder stays until the new one exists, so a failure keeps a t3.
+    const legacy = replaced !== undefined && !candidates.includes(path.dirname(replaced));
+    if (replaced !== undefined) {
+      const target = yield* fs.readLink(replaced).pipe(Effect.option);
       if (Option.getOrUndefined(target) === launcher) return yield* state;
-      yield* fs
-        .remove(existing.value)
-        .pipe(Effect.mapError(() => fail(`Could not replace ${existing.value}.`)));
+      if (!legacy) {
+        yield* fs
+          .remove(replaced)
+          .pipe(Effect.mapError(() => fail(`Could not replace ${replaced}.`)));
+      }
     }
     const shadowedBy = yield* foreignFirstOnPath;
     if (Option.isSome(shadowedBy)) {
@@ -236,7 +242,6 @@ export const make = Effect.gen(function* () {
       );
     }
     const onPath = pathEntries(process.env.PATH, ":");
-    const candidates = userCandidates(environment.homeDirectory);
     for (const directory of [
       ...candidates.filter((candidate) => onPath.includes(candidate)),
       ...candidates.filter((candidate) => !onPath.includes(candidate)),
@@ -253,7 +258,9 @@ export const make = Effect.gen(function* () {
         Effect.as(true),
         Effect.orElseSucceed(() => false),
       );
-      if (linked) return yield* state;
+      if (!linked) continue;
+      if (legacy) yield* fs.remove(replaced).pipe(Effect.ignore);
+      return yield* state;
     }
     return yield* fail(
       `Another t3 command is already in ~/.local/bin and ~/bin, or neither is writable. Run the launcher directly at ${launcher}.`,
