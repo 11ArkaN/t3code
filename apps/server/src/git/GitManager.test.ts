@@ -26,6 +26,7 @@ import type {
   GitActionProgressEvent,
   GitPreparePullRequestThreadInput,
   ModelSelection,
+  ServerProvider,
 } from "@t3tools/contracts";
 
 import {
@@ -589,6 +590,7 @@ function makeManager(input?: {
   providerScenario?: FakeProviderScenario;
   sourceControlProvider?: SourceControlProvider["Service"];
   textGeneration?: Partial<FakeGitTextGeneration>;
+  providers?: ReadonlyArray<ServerProvider>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
   gitConfigReads?: string[];
@@ -696,7 +698,7 @@ function makeManager(input?: {
   const layerManager = Layer.mergeAll(
     Layer.succeed(TextGeneration.TextGeneration, textGeneration),
     Layer.mock(ProviderRegistry.ProviderRegistry)({
-      getProviders: Effect.succeed([]),
+      getProviders: Effect.succeed(input?.providers ?? []),
     }),
     Layer.succeed(
       ProjectSetupScriptRunner.ProjectSetupScriptRunner,
@@ -3401,9 +3403,23 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       const threadId = ThreadId.make("thread:pr-thread-model");
-      const providerInstanceId = ProviderInstanceId.make("claudeAgent");
+      const providerInstanceId = ProviderInstanceId.make("claude_work");
       const modelSelection = { instanceId: providerInstanceId, model: "claude-opus-5-5" };
       const createdAt = DateTime.makeUnsafe("2026-09-27T00:00:00.000Z");
+      const provider: ServerProvider = {
+        instanceId: providerInstanceId,
+        driver: ProviderDriverKind.make("claudeAgent"),
+        displayName: "Work account",
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: "2026-09-27T00:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      };
       const run = {
         id: RunId.make("run:pr-thread-model:1"),
         threadId,
@@ -3435,6 +3451,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           },
         },
         textGeneration: { generatePrContent: writer.generatePrContent },
+        providers: [provider],
         seed: Effect.gen(function* () {
           const store = yield* ProjectionStore.ProjectionStoreV2;
           yield* store.apply({
@@ -3471,14 +3488,26 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               deletedAt: null,
             },
           });
-          yield* store.apply({
-            id: EventId.make("event:pr-thread-model:run:1"),
-            type: "run.updated",
-            threadId,
-            runId: run.id,
-            occurredAt: createdAt,
-            payload: run,
-          });
+          for (const payload of [
+            run,
+            {
+              ...run,
+              id: RunId.make("run:pr-thread-model:2"),
+              ordinal: 2,
+              modelSelection: { instanceId: providerInstanceId, model: "claude-haiku-5-5" },
+              userMessageId: MessageId.make("message:pr-thread-model:2"),
+              status: "rolled_back" as const,
+            },
+          ]) {
+            yield* store.apply({
+              id: EventId.make(`event:pr-thread-model:run:${payload.ordinal}`),
+              type: "run.updated",
+              threadId,
+              runId: payload.id,
+              occurredAt: createdAt,
+              payload,
+            });
+          }
           const item = {
             id: TurnItemId.make("item:pr-thread-model:1"),
             threadId,
@@ -3521,8 +3550,9 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
       });
 
       expect(generatedPrompt).toContain("Add the thread model file");
-      expect(generatedPrompt).toContain("claude-opus-5-5");
-      expect(generatedPrompt).toContain("claudeAgent");
+      expect(generatedPrompt).toContain("- model `claude-opus-5-5`, harness Claude");
+      expect(generatedPrompt).not.toContain("Work account");
+      expect(generatedPrompt).not.toContain("claude-haiku-5-5");
     }),
   );
 

@@ -36,6 +36,8 @@ import {
   ModelSelection,
   type OrchestrationV2TurnItem,
   type ProjectId,
+  PROVIDER_DISPLAY_NAMES,
+  ProviderDriverKind,
   SourceControlProviderError,
   type SourceControlWritingStyleSettings,
   type ThreadId,
@@ -706,12 +708,13 @@ export const make = Effect.gen(function* () {
       const providers = yield* providerRegistry.getProviders;
       const producedBy = Arr.dedupeWith(
         (runSelections.length > 0 ? runSelections : [thread.modelSelection]).map(
-          ({ instanceId, model }) => ({
-            model,
-            harness:
-              providers.find((provider) => provider.instanceId === instanceId)?.displayName ??
-              instanceId,
-          }),
+          ({ instanceId, model }) => {
+            // The instance's displayName is a user label (often an account), not the harness.
+            const driver =
+              providers.find((provider) => provider.instanceId === instanceId)?.driver ??
+              ProviderDriverKind.make(instanceId);
+            return { model, harness: PROVIDER_DISPLAY_NAMES[driver] ?? driver };
+          },
         ),
         (left, right) => left.model === right.model && left.harness === right.harness,
       );
