@@ -1738,13 +1738,15 @@ export const layerWsRpc = (
           ),
         );
 
+      // Concurrent, so both services share one Tailscale read and its grace window.
       const resolveNetworkTargets = Effect.fn("ws.resolveNetworkTargets")(function* () {
-        return {
-          remoteOpenTargets: yield* resolveAvailableEditorsForConfig(
-            remoteOpenTargets.resolveTargets(),
-          ),
-          directEndpoints: yield* resolveAvailableEditorsForConfig(directEndpoints.resolve()),
-        };
+        return yield* Effect.all(
+          {
+            remoteOpenTargets: resolveAvailableEditorsForConfig(remoteOpenTargets.resolveTargets()),
+            directEndpoints: resolveAvailableEditorsForConfig(directEndpoints.resolve()),
+          },
+          { concurrency: "unbounded" },
+        );
       });
 
       const loadServerConfig = Effect.fn("ws.loadServerConfig")(function* (options: {
@@ -3104,7 +3106,7 @@ export const layerWsRpc = (
               // Buffer changes through discovery and the initial snapshot's RPC ACK wait.
               const keybindingsChanges = yield* keybindings.subscribeChanges;
               const settingsChanges = yield* serverSettings.subscribeChanges;
-              // Discovery can start the Tailscale refresh this snapshot misses.
+              // A Tailscale refresh that outlasts the snapshot's grace arrives as a follow-up.
               const tailscaleChanges = yield* tailscaleStatus.subscribeChanges;
               const config = yield* loadServerConfig({
                 usageLimitsCommand,
@@ -3201,7 +3203,15 @@ export const layerWsRpc = (
                   config,
                   liveUpdates,
                   externalLauncher,
-                  tailscaleChanges.pipe(Stream.mapEffect(resolveNetworkTargets)),
+                  // Re-resolving from the settled change must not start a refresh, or a flapping
+                  // CLI would chain refreshes through every open subscription.
+                  tailscaleChanges.pipe(
+                    Stream.mapEffect(() =>
+                      resolveNetworkTargets().pipe(
+                        Effect.provideService(TailscaleStatusReader.SettledReadOnly, true),
+                      ),
+                    ),
+                  ),
                 ),
               );
             }),

@@ -6,9 +6,11 @@ import {
 } from "@t3tools/tailscale";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -24,6 +26,15 @@ export class TailscaleStatusReader extends Context.Service<
     readonly subscribeChanges: Effect.Effect<Stream.Stream<void>, never, Scope.Scope>;
   }
 >()("t3/environment/TailscaleStatusReader") {}
+
+/** Answer from the last settled read without refreshing, for re-resolves that a settled change drives. */
+export const SettledReadOnly = Context.Reference<boolean>(
+  "t3/environment/TailscaleStatusReader/SettledReadOnly",
+  { defaultValue: () => false },
+);
+
+// A healthy CLI answers in tens of milliseconds, so a connect still gets a fresh read from it.
+const FRESH_READ_GRACE = Duration.millis(250);
 
 // Callers treat every failure alike, so failures compare equal regardless of cause.
 const outcomeKey = (exit: Exit.Exit<TailscaleStatus, TailscaleStatusError>) =>
@@ -60,12 +71,18 @@ const make = Effect.gen(function* () {
   yield* refresh;
 
   return TailscaleStatusReader.of({
-    // A caller gets the previous read's result; the refresh it starts serves the next caller
-    // and, when its outcome differs, reaches open subscribers through `subscribeChanges`.
+    // A caller gets the refresh it starts or joins if that settles within the grace, else the
+    // previous read's result; a later outcome reaches open subscribers through `subscribeChanges`.
     read: Effect.fn("TailscaleStatusReader.read")(function* () {
       const previous = settled;
+      if (previous !== undefined && (yield* SettledReadOnly)) return yield* previous;
       const pending = yield* refresh;
-      return yield* previous ?? Deferred.await(pending);
+      if (previous === undefined) return yield* Deferred.await(pending);
+      const fresh = yield* Deferred.await(pending).pipe(
+        Effect.exit,
+        Effect.timeoutOption(FRESH_READ_GRACE),
+      );
+      return yield* Option.getOrElse(fresh, () => previous);
     }),
     subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
   });

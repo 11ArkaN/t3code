@@ -180,26 +180,31 @@ const TAILSCALE_STATUS_JSON = JSON.stringify({
   Self: { DNSName: "bb-1.tail1234.ts.net.", TailscaleIPs: ["100.64.1.2"] },
 });
 
-const layerTailscaleUp = Layer.succeed(
-  ChildProcessSpawner.ChildProcessSpawner,
-  ChildProcessSpawner.make(() =>
-    Effect.succeed(
-      ChildProcessSpawner.makeHandle({
-        pid: ChildProcessSpawner.ProcessId(1),
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
-        unref: Effect.succeed(Effect.void),
-        stdin: Sink.drain,
-        stdout: Stream.make(new TextEncoder().encode(TAILSCALE_STATUS_JSON)),
-        stderr: Stream.empty,
-        all: Stream.empty,
-        getInputFd: () => Sink.drain,
-        getOutputFd: () => Stream.empty,
+// `tailscale status` exits non-zero while tailscaled is unavailable, and prints the node once it is up.
+const layerTailscale = (isUp: () => boolean) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make(() =>
+      Effect.sync(() => {
+        const up = isUp();
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(up ? 0 : 1)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: up ? Stream.make(new TextEncoder().encode(TAILSCALE_STATUS_JSON)) : Stream.empty,
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        });
       }),
     ),
-  ),
-);
+  );
+
+const layerTailscaleUp = layerTailscale(() => true);
 
 const layerServeProbe = (status: number) =>
   Layer.succeed(
@@ -286,18 +291,13 @@ const MDNS_ONLY = [{ kind: "mdns", host: "bb-1.local", username: "t3-user" }];
 
 // What ws.loadServerConfig resolves for every client that connects. The layers live in the
 // test's scope, as the server's do, so the shared status read outlives each connect.
-const connectWithTailscaleHung = (onStatusSpawn: () => void) =>
+const connectWithTailscale = (layerSpawner: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
       Layer.mergeAll(DirectEndpoints.layer, RemoteOpenTargets.layer).pipe(
         Layer.provide(TailscaleStatusReader.layer),
         Layer.provide(
-          Layer.mergeAll(
-            layerServeConfig,
-            layerTailscaleHung(onStatusSpawn),
-            layerServeProbe(200),
-            layerSshdListening,
-          ),
+          Layer.mergeAll(layerServeConfig, layerSpawner, layerServeProbe(200), layerSshdListening),
         ),
       ),
     );
@@ -315,7 +315,7 @@ describe("Tailscale status shared by DirectEndpoints and RemoteOpenTargets", () 
   effectIt.effect("reads `tailscale status` once per connect, not once per service", () =>
     Effect.gen(function* () {
       let statusReads = 0;
-      const connect = yield* connectWithTailscaleHung(() => statusReads++);
+      const connect = yield* connectWithTailscale(layerTailscaleHung(() => statusReads++));
       const first = yield* Effect.forkChild(connect);
       yield* TestClock.adjust("4 seconds");
       expect(yield* Fiber.join(first)).toEqual([MDNS_ONLY, []]);
@@ -327,7 +327,7 @@ describe("Tailscale status shared by DirectEndpoints and RemoteOpenTargets", () 
     "answers a later connect from the settled failed read without waiting again",
     () =>
       Effect.gen(function* () {
-        const connect = yield* connectWithTailscaleHung(() => {});
+        const connect = yield* connectWithTailscale(layerTailscaleHung(() => {}));
         const first = yield* Effect.forkChild(connect);
         yield* TestClock.adjust("4 seconds");
         expect(yield* Fiber.join(first)).toEqual([MDNS_ONLY, []]);
@@ -338,5 +338,19 @@ describe("Tailscale status shared by DirectEndpoints and RemoteOpenTargets", () 
           Option.some([MDNS_ONLY, []]),
         );
       }),
+  );
+
+  effectIt.effect("answers a connect from a recovered read that settles within the grace", () =>
+    Effect.gen(function* () {
+      let tailscaleUp = false;
+      const connect = yield* connectWithTailscale(layerTailscale(() => tailscaleUp));
+      expect(yield* connect, "startup read fails").toEqual([MDNS_ONLY, []]);
+
+      tailscaleUp = true;
+      expect(yield* connect).toEqual([
+        [{ kind: "tailscale", host: "bb-1.tail1234.ts.net", username: "t3-user" }, ...MDNS_ONLY],
+        [{ kind: "tailnet", httpBaseUrl: "https://bb-1.tail1234.ts.net/" }],
+      ]);
+    }),
   );
 });

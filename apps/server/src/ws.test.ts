@@ -884,15 +884,18 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
 );
 
 // `tailscale status` exits non-zero while tailscaled is unavailable, and prints the node once it is up.
-const layerTailscaleRecovering = (isUp: () => boolean) =>
+// Each spawn asks `nextRead` for its outcome and for the effect the process exits after.
+const layerTailscale = (
+  nextRead: () => { readonly up: boolean; readonly exits: Effect.Effect<void> },
+) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make(() =>
       Effect.sync(() => {
-        const up = isUp();
+        const { up, exits } = nextRead();
         return ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(1),
-          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(up ? 0 : 1)),
+          exitCode: exits.pipe(Effect.as(ChildProcessSpawner.ExitCode(up ? 0 : 1))),
           isRunning: Effect.succeed(false),
           kill: () => Effect.void,
           unref: Effect.succeed(Effect.void),
@@ -915,104 +918,107 @@ const layerTailscaleRecovering = (isUp: () => boolean) =>
     ),
   );
 
-it.effect("sends the recovered Tailscale target to a subscription opened on a stale failure", () =>
-  Effect.gen(function* () {
-    let tailscaleUp = false;
-    const tailscaleServices = yield* Layer.build(
-      RemoteOpenTargets.layer.pipe(
-        Layer.provideMerge(TailscaleStatusReader.layer),
-        Layer.provide(
-          Layer.mergeAll(
-            layerTailscaleRecovering(() => tailscaleUp),
-            Layer.mock(NetService.NetService)({ hasListenerOnHost: () => Effect.succeed(true) }),
-          ),
+const targetKinds = (event: ServerConfigStreamEvent) =>
+  event.type === "snapshot" ? event.config.remoteOpenTargets?.map((target) => target.kind) : [];
+
+// Builds the shared Tailscale services in the caller's scope, as the server does, then
+// waits for the startup read so a test controls which reads its connect sees.
+const subscribeServerConfigWithTailscale = Effect.fn(function* (
+  layerSpawner: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+  beforeConnect: Effect.Effect<void>,
+) {
+  const tailscaleServices = yield* Layer.build(
+    RemoteOpenTargets.layer.pipe(
+      Layer.provideMerge(TailscaleStatusReader.layer),
+      Layer.provide(
+        Layer.mergeAll(
+          layerSpawner,
+          Layer.mock(NetService.NetService)({ hasListenerOnHost: () => Effect.succeed(true) }),
         ),
       ),
-    );
-    const reader = Context.get(tailscaleServices, TailscaleStatusReader.TailscaleStatusReader);
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(reader.read())), "startup read fails");
-    tailscaleUp = true;
+    ),
+  );
+  const reader = Context.get(tailscaleServices, TailscaleStatusReader.TailscaleStatusReader);
+  assert.isTrue(Exit.isFailure(yield* Effect.exit(reader.read())), "startup read fails");
+  yield* beforeConnect;
 
-    const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
-    const configRpcServices = Layer.mergeAll(
-      layerUnusedConfigRpcServices,
-      Layer.succeedContext(tailscaleServices),
-      Layer.mock(ExternalLauncher.ExternalLauncher)({
-        resolveAvailableEditors: () => Effect.succeed([]),
-        // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
-        resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+  const responses = yield* Queue.unbounded<ServerConfigStreamEvent>();
+  const configRpcServices = Layer.mergeAll(
+    layerUnusedConfigRpcServices,
+    Layer.succeedContext(tailscaleServices),
+    Layer.mock(ExternalLauncher.ExternalLauncher)({
+      resolveAvailableEditors: () => Effect.succeed([]),
+      // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
+      resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+    }),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([]),
+      streamChanges: Stream.never,
+    }),
+    Layer.mock(UsageLimitSources.UsageLimitSources)({ streamChanges: Stream.make([]) }),
+    Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      scratchRoot: Effect.succeedNone,
+      namedProjectsRoot: process.cwd(),
+    }),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({
+      getDescriptor: Effect.succeed({
+        environmentId: EnvironmentId.make("config-test"),
+        label: "Config test",
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.0",
+        capabilities: { repositoryIdentity: false },
       }),
-      Layer.mock(ProviderRegistry.ProviderRegistry)({
-        getProviders: Effect.succeed([]),
-        streamChanges: Stream.never,
-      }),
-      Layer.mock(UsageLimitSources.UsageLimitSources)({ streamChanges: Stream.make([]) }),
-      Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
-      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-        scratchRoot: Effect.succeedNone,
-        namedProjectsRoot: process.cwd(),
-      }),
-      Layer.mock(ServerEnvironment.ServerEnvironment)({
-        getDescriptor: Effect.succeed({
-          environmentId: EnvironmentId.make("config-test"),
-          label: "Config test",
-          platform: { os: "linux", arch: "x64" },
-          serverVersion: "0.0.0",
-          capabilities: { repositoryIdentity: false },
+    }),
+    Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+      getDescriptor: () =>
+        Effect.succeed({
+          policy: "loopback-browser",
+          bootstrapMethods: [],
+          sessionMethods: ["browser-session-cookie"],
+          sessionCookieName: "config-test-session",
         }),
-      }),
-      Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-        getDescriptor: () =>
-          Effect.succeed({
-            policy: "loopback-browser",
-            bootstrapMethods: [],
-            sessionMethods: ["browser-session-cookie"],
-            sessionCookieName: "config-test-session",
-          }),
-      }),
-    );
-    const server = yield* RpcServer.makeNoSerialization(RpcGroup.make(WsSubscribeServerConfigRpc), {
-      ...WS_RPC_SERVER_OPTIONS,
-      onFromServer: (response) =>
-        response._tag === "Chunk"
-          ? Effect.forEach(response.values, (event) => Queue.offer(responses, event), {
-              discard: true,
-            })
-          : Effect.void,
-    }).pipe(
-      Effect.provide(
-        layerWsRpc(
-          {
-            sessionId: AuthSessionId.make("config-test"),
-            subject: "config-test",
-            method: "browser-session-cookie",
-            scopes: [],
-          },
-          {},
-          yield* ServerBrowser.ServerBrowser,
-        ).pipe(Layer.provide(configRpcServices)),
-      ),
-    );
-    const requestId = RpcMessage.RequestId("config");
-    yield* server.write(0, {
-      _tag: "Request",
-      id: requestId,
-      tag: WS_METHODS.subscribeServerConfig,
-      payload: {},
-      headers: Headers.empty,
-    });
-    const targetKinds = (event: ServerConfigStreamEvent) =>
-      event.type === "snapshot" ? event.config.remoteOpenTargets?.map((target) => target.kind) : [];
-
-    const first = yield* Queue.take(responses);
-    assert.equal(first.type, "snapshot");
-    assert.deepEqual(targetKinds(first), ["mdns"], "first snapshot answers from the stale failure");
-    yield* server.write(0, { _tag: "Ack", requestId });
-    const followUp = yield* Queue.take(responses);
-    assert.equal(followUp.type, "snapshot");
-    assert.deepEqual(targetKinds(followUp), ["tailscale", "mdns"]);
-    yield* server.write(0, { _tag: "Interrupt", requestId, interruptors: [] });
+    }),
+  );
+  const server = yield* RpcServer.makeNoSerialization(RpcGroup.make(WsSubscribeServerConfigRpc), {
+    ...WS_RPC_SERVER_OPTIONS,
+    onFromServer: (response) =>
+      response._tag === "Chunk"
+        ? Effect.forEach(response.values, (event) => Queue.offer(responses, event), {
+            discard: true,
+          })
+        : Effect.void,
   }).pipe(
+    Effect.provide(
+      layerWsRpc(
+        {
+          sessionId: AuthSessionId.make("config-test"),
+          subject: "config-test",
+          method: "browser-session-cookie",
+          scopes: [],
+        },
+        {},
+        yield* ServerBrowser.ServerBrowser,
+      ).pipe(Layer.provide(configRpcServices)),
+    ),
+  );
+  const requestId = RpcMessage.RequestId("config");
+  yield* server.write(0, {
+    _tag: "Request",
+    id: requestId,
+    tag: WS_METHODS.subscribeServerConfig,
+    payload: {},
+    headers: Headers.empty,
+  });
+  return {
+    responses,
+    ack: server.write(0, { _tag: "Ack", requestId }),
+    interrupt: server.write(0, { _tag: "Interrupt", requestId, interruptors: [] }),
+  };
+});
+
+const provideConfigSources = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
     Effect.provide(
       Layer.mergeAll(
         Layer.fresh(layerConfigSources),
@@ -1021,7 +1027,67 @@ it.effect("sends the recovered Tailscale target to a subscription opened on a st
       ),
     ),
     Effect.scoped,
-  ),
+  );
+
+it.effect("sends the recovered Tailscale target to a subscription opened on a stale failure", () =>
+  Effect.gen(function* () {
+    let tailscaleUp = false;
+    const recoveredReadSpawned = yield* Deferred.make<void>();
+    const recoveredReadAnswers = yield* Deferred.make<void>();
+    const subscription = yield* subscribeServerConfigWithTailscale(
+      layerTailscale(() => {
+        if (!tailscaleUp) return { up: false, exits: Effect.void };
+        Deferred.doneUnsafe(recoveredReadSpawned, Exit.void);
+        return { up: true, exits: Deferred.await(recoveredReadAnswers) };
+      }),
+      Effect.sync(() => {
+        tailscaleUp = true;
+      }),
+    );
+
+    // The recovered read outlasts the connect's grace, so it must arrive as a follow-up.
+    yield* Deferred.await(recoveredReadSpawned);
+    yield* TestClock.adjust("1 second");
+    const first = yield* Queue.take(subscription.responses);
+    assert.equal(first.type, "snapshot");
+    assert.deepEqual(targetKinds(first), ["mdns"], "first snapshot answers from the stale failure");
+    yield* subscription.ack;
+    yield* Deferred.succeed(recoveredReadAnswers, undefined);
+    const followUp = yield* Queue.take(subscription.responses);
+    assert.equal(followUp.type, "snapshot");
+    assert.deepEqual(targetKinds(followUp), ["tailscale", "mdns"]);
+    yield* subscription.interrupt;
+  }).pipe(provideConfigSources),
+);
+
+it.effect("re-resolves a subscription after a Tailscale change without reading again", () =>
+  Effect.gen(function* () {
+    let statusReads = 0;
+    const secondReadSpawned = yield* Deferred.make<void>();
+    const secondReadAnswers = yield* Deferred.make<void>();
+    // A flapping tailscaled: every read answers the opposite of the last one.
+    const subscription = yield* subscribeServerConfigWithTailscale(
+      layerTailscale(() => {
+        statusReads++;
+        if (statusReads % 2 === 1) return { up: false, exits: Effect.void };
+        if (statusReads === 2) {
+          Deferred.doneUnsafe(secondReadSpawned, Exit.void);
+          return { up: true, exits: Deferred.await(secondReadAnswers) };
+        }
+        return { up: true, exits: Effect.void };
+      }),
+      Effect.void,
+    );
+
+    yield* Deferred.await(secondReadSpawned);
+    yield* TestClock.adjust("1 second");
+    assert.deepEqual(targetKinds(yield* Queue.take(subscription.responses)), ["mdns"]);
+    yield* subscription.ack;
+    yield* Deferred.succeed(secondReadAnswers, undefined);
+    assert.deepEqual(targetKinds(yield* Queue.take(subscription.responses)), ["tailscale", "mdns"]);
+    assert.equal(statusReads, 2, "only startup and the connect read tailscale status");
+    yield* subscription.interrupt;
+  }).pipe(provideConfigSources),
 );
 
 // Compaction keeps the oldest and newest event per message, so a cursor older
