@@ -4,57 +4,81 @@ import {
 } from "@t3tools/client-runtime/platform";
 import * as Effect from "effect/Effect";
 
-const STORAGE_KEY = "t3code:thread-triage-outbox";
+const DATABASE_NAME = "t3code-thread-triage-outbox";
+const STORE_NAME = "outbox";
+const KEY = "document";
 
-/** Kept out of the environment cache so clearing cached data keeps unsynced settles and snoozes. */
-export const browserThreadTriageOutboxStore = makeThreadTriageOutboxStore({
-  read: Effect.try({
-    try: () => window.localStorage.getItem(STORAGE_KEY),
-    catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
-  }),
-  write: (value) =>
-    Effect.try({
-      try: () => window.localStorage.setItem(STORAGE_KEY, value),
-      catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
-    }),
-  // Reject writes without cross-tab exclusion so shared localStorage changes cannot be lost.
-  exclusive: (effect) =>
-    typeof navigator === "undefined" || navigator.locks === undefined
-      ? Effect.fail(
-          new ThreadTriageOutboxStorageError({
-            cause: new Error("Offline thread changes require Web Locks. Use HTTPS or localhost."),
-          }),
-        )
-      : Effect.acquireUseRelease(
-          // Register cleanup before waiting, so the wait remains interruptible.
-          Effect.sync(() => ({
-            controller: new AbortController(),
-            release: undefined as (() => void) | undefined,
-          })),
-          (lock) =>
-            Effect.tryPromise({
-              try: () =>
-                new Promise<void>((granted, rejected) => {
-                  navigator.locks
-                    .request(
-                      STORAGE_KEY,
-                      { signal: lock.controller.signal },
-                      () =>
-                        new Promise<void>((release) => {
-                          lock.release = release;
-                          // Cancellation may finish before a granted lock's callback runs.
-                          if (lock.controller.signal.aborted) release();
-                          granted();
-                        }),
-                    )
-                    .catch(rejected);
-                }),
-              catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
-            }).pipe(Effect.andThen(effect)),
-          (lock) =>
-            Effect.sync(() => {
-              lock.controller.abort();
-              lock.release?.();
-            }),
-        ),
+const storageError = (cause: unknown) => new ThreadTriageOutboxStorageError({ cause });
+
+const openDatabase = Effect.callback<IDBDatabase, ThreadTriageOutboxStorageError>((resume) => {
+  try {
+    const request = indexedDB.open(DATABASE_NAME, 1);
+    request.addEventListener("upgradeneeded", () => request.result.createObjectStore(STORE_NAME));
+    request.addEventListener("error", () => resume(Effect.fail(storageError(request.error))));
+    request.addEventListener("success", () => resume(Effect.succeed(request.result)));
+  } catch (cause) {
+    resume(Effect.fail(storageError(cause)));
+  }
 });
+
+/** Succeeds once the transaction commits; `abort` rolls it back and fails with that cause. */
+const transact = (
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore, abort: (cause: unknown) => void) => void,
+) =>
+  Effect.acquireUseRelease(
+    openDatabase,
+    (database) =>
+      Effect.callback<void, ThreadTriageOutboxStorageError>((resume) => {
+        let failure: unknown;
+        try {
+          const transaction = database.transaction(STORE_NAME, mode);
+          transaction.addEventListener("complete", () => resume(Effect.void));
+          transaction.addEventListener("abort", () =>
+            resume(Effect.fail(storageError(failure ?? transaction.error))),
+          );
+          run(transaction.objectStore(STORE_NAME), (cause) => {
+            failure = cause;
+            transaction.abort();
+          });
+        } catch (cause) {
+          resume(Effect.fail(storageError(cause)));
+        }
+      }),
+    (database) => Effect.sync(() => database.close()),
+  );
+
+const stored = (value: unknown) => (typeof value === "string" ? value : null);
+
+/**
+ * Kept out of the environment cache so clearing cached data keeps unsynced settles and snoozes.
+ * Browsers run readwrite transactions on one store in order across tabs, so concurrent changes
+ * from several tabs all land, on plain HTTP as well as secure origins.
+ */
+export const browserThreadTriageOutboxStorage = {
+  read: Effect.suspend(() => {
+    let value: string | null = null;
+    return transact("readonly", (store) => {
+      const request = store.get(KEY);
+      request.addEventListener("success", () => {
+        value = stored(request.result);
+      });
+    }).pipe(Effect.map(() => value));
+  }),
+  modify: (next) =>
+    transact("readwrite", (store, abort) => {
+      const request = store.get(KEY);
+      request.addEventListener("success", () => {
+        try {
+          const value = next(stored(request.result));
+          if (value !== null) store.put(value, KEY);
+        } catch (cause) {
+          abort(cause);
+        }
+      });
+    }),
+} satisfies Parameters<typeof makeThreadTriageOutboxStore>[0];
+
+export const browserThreadTriageOutboxStore = makeThreadTriageOutboxStore(
+  browserThreadTriageOutboxStorage,
+);

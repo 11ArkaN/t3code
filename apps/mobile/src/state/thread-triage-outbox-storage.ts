@@ -11,18 +11,24 @@ async function getStorageFile() {
   return new File(Paths.document, "thread-triage-outbox.json");
 }
 
+async function readStorageFile() {
+  const file = await getStorageFile();
+  return file.exists ? await file.text() : null;
+}
+
 /** Lives outside the client cache so clearing cached data keeps unsynced settles and snoozes. */
 export const mobileThreadTriageOutboxStore = makeThreadTriageOutboxStore({
   read: Effect.tryPromise({
-    try: async () => {
-      const file = await getStorageFile();
-      return file.exists ? await file.text() : null;
-    },
+    try: readStorageFile,
     catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
   }),
-  write: (value) =>
+  // One process owns this file, and the store already serializes its own changes.
+  modify: (next) =>
     Effect.tryPromise({
-      try: async () => writeFileAtomically(await getStorageFile(), value),
+      try: async () => {
+        const value = next(await readStorageFile());
+        if (value !== null) await writeFileAtomically(await getStorageFile(), value);
+      },
       catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
     }),
 });

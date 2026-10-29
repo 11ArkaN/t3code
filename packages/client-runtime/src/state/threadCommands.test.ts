@@ -24,7 +24,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { RpcClientError } from "effect/rpc";
@@ -155,13 +154,22 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
         ? Effect.fail(new ThreadTriageOutboxStorageError({ cause: "unreadable" }))
         : Effect.succeed(storage.value);
     }),
-    write: (value) =>
-      storage.failWrites
-        ? Effect.fail(new ThreadTriageOutboxStorageError({ cause: "disk full" }))
-        : Effect.sync(() => {
-            storage.value = value;
-            if (storage.writes) Queue.offerUnsafe(storage.writes, value);
-          }),
+    modify: (next) =>
+      Effect.suspend(() => {
+        if (storage.reads) Queue.offerUnsafe(storage.reads, undefined);
+        if (storage.failReads) {
+          return Effect.fail(new ThreadTriageOutboxStorageError({ cause: "unreadable" }));
+        }
+        const value = next(storage.value);
+        if (value === null) return Effect.void;
+        if (storage.failWrites) {
+          return Effect.fail(new ThreadTriageOutboxStorageError({ cause: "disk full" }));
+        }
+        return Effect.sync(() => {
+          storage.value = value;
+          if (storage.writes) Queue.offerUnsafe(storage.writes, value);
+        });
+      }),
   });
   const runtime = Atom.runtime(
     Layer.mergeAll(
@@ -860,35 +868,6 @@ describe("settle and snooze while the environment is offline", () => {
       expect((yield* Effect.promise(() => undo))._tag).toBe("Failure");
       const request = yield* Queue.take(h.requests);
       expect(request.command.type).toBe("thread.settle");
-    }),
-  );
-
-  it.effect("keeps every tab's change when a shared lock serializes their writes", () =>
-    Effect.gen(function* () {
-      const shared = { value: null as string | null };
-      const crossTab = Semaphore.makeUnsafe(1);
-      // Yields after reading, as another process's write can land before this one writes.
-      const makeTab = () =>
-        makeThreadTriageOutboxStore({
-          read: Effect.sync(() => shared.value).pipe(Effect.tap(() => Effect.yieldNow)),
-          write: (value) =>
-            Effect.sync(() => {
-              shared.value = value;
-            }),
-          exclusive: (effect) => crossTab.withPermits(1)(effect),
-        });
-      const change = (threadId: string) => ({
-        environmentId: ENVIRONMENT_ID,
-        threadId: ThreadId.make(threadId),
-        commandId: CommandId.make(`command-${threadId}`),
-        action: { type: "settle" as const },
-        queuedAt: NOW,
-        snapshotSequence: 1,
-      });
-      yield* Effect.all([makeTab().put(change("first")), makeTab().put(change("second"))], {
-        concurrency: "unbounded",
-      });
-      expect(stored(shared).map((entry) => entry.threadId)).toEqual(["first", "second"]);
     }),
   );
 

@@ -1,6 +1,7 @@
 import { CommandId, EnvironmentId, NonNegativeInt, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
@@ -29,8 +30,8 @@ export type ThreadTriageOutboxDocument = typeof ThreadTriageOutboxDocument.Type;
 
 const EMPTY_DOCUMENT: ThreadTriageOutboxDocument = { entries: [], operableEnvironmentIds: [] };
 const StoredDocument = Schema.fromJsonString(ThreadTriageOutboxDocument);
-const decodeStored = Schema.decodeUnknownEffect(StoredDocument);
-const encodeStored = Schema.encodeEffect(StoredDocument);
+const decodeStored = Schema.decodeUnknownExit(StoredDocument);
+const encodeStored = Schema.encodeSync(StoredDocument);
 
 export class ThreadTriageOutboxStorageError extends Schema.TaggedError<ThreadTriageOutboxStorageError>()(
   "ThreadTriageOutboxStorageError",
@@ -101,9 +102,12 @@ export class ThreadTriageOutboxStore extends Context.Reference<ThreadTriageOutbo
       let value: string | null = null;
       return makeThreadTriageOutboxStore({
         read: Effect.sync(() => value),
-        write: (next) =>
-          Effect.sync(() => {
-            value = next;
+        modify: (next) =>
+          Effect.try({
+            try: () => {
+              value = next(value) ?? value;
+            },
+            catch: (cause) => new ThreadTriageOutboxStorageError({ cause }),
           }),
       });
     },
@@ -112,26 +116,26 @@ export class ThreadTriageOutboxStore extends Context.Reference<ThreadTriageOutbo
 
 export function makeThreadTriageOutboxStore(storage: {
   readonly read: Effect.Effect<string | null, ThreadTriageOutboxStorageError>;
-  readonly write: (value: string) => Effect.Effect<void, ThreadTriageOutboxStorageError>;
-  /** Serializes each read-modify-write with other processes sharing the storage, such as tabs. */
-  readonly exclusive?: <A, E>(
-    effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | ThreadTriageOutboxStorageError>;
+  /**
+   * Replaces the stored value with `next(stored)`, or keeps it when that is null, in one step
+   * that other processes sharing the storage, such as tabs, cannot interleave.
+   */
+  readonly modify: (
+    next: (stored: string | null) => string | null,
+  ) => Effect.Effect<void, ThreadTriageOutboxStorageError>;
 }): ThreadTriageOutboxStoreShape {
-  const exclusive = storage.exclusive ?? ((effect) => effect);
   const lock = Semaphore.makeUnsafe(1);
   const clearedListeners = new Set<(environmentId: EnvironmentId) => void>();
+  const parse = (raw: string | null) =>
+    raw === null ? Exit.succeed(EMPTY_DOCUMENT) : decodeStored(raw);
+  const discardUnreadable = (cause: unknown) =>
+    Effect.logWarning("Discarding unreadable offline thread changes.", { cause: String(cause) });
   const load = storage.read.pipe(
     Effect.flatMap((raw) =>
-      raw === null
-        ? Effect.succeed(EMPTY_DOCUMENT)
-        : decodeStored(raw).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("Discarding unreadable offline thread changes.", {
-                cause: String(cause),
-              }).pipe(Effect.as(EMPTY_DOCUMENT)),
-            ),
-          ),
+      Exit.match(parse(raw), {
+        onSuccess: Effect.succeed,
+        onFailure: (cause) => discardUnreadable(cause).pipe(Effect.as(EMPTY_DOCUMENT)),
+      }),
     ),
   );
   /** A null transform skips the write. `after` still runs inside the lock. */
@@ -140,19 +144,20 @@ export function makeThreadTriageOutboxStore(storage: {
     after: Effect.Effect<void> = Effect.void,
   ) =>
     lock.withPermits(1)(
-      exclusive(
-        load.pipe(
-          Effect.flatMap((document) => {
-            const next = transform(document);
-            return next === null
-              ? Effect.void
-              : encodeStored(next).pipe(
-                  Effect.mapError((cause) => new ThreadTriageOutboxStorageError({ cause })),
-                  Effect.flatMap(storage.write),
-                );
-          }),
-        ),
-      ).pipe(Effect.ensuring(after)),
+      Effect.suspend(() => {
+        let parsed = parse(null);
+        return storage
+          .modify((raw) => {
+            parsed = parse(raw);
+            const next = transform(Exit.isSuccess(parsed) ? parsed.value : EMPTY_DOCUMENT);
+            return next === null ? null : encodeStored(next);
+          })
+          .pipe(
+            Effect.tap(() =>
+              Exit.isFailure(parsed) ? discardUnreadable(parsed.cause) : Effect.void,
+            ),
+          );
+      }).pipe(Effect.ensuring(after)),
     );
   const updateEntries = (
     transform: (entries: ReadonlyArray<PendingThreadTriage>) => ReadonlyArray<PendingThreadTriage>,
