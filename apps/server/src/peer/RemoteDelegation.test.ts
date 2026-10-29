@@ -100,6 +100,8 @@ interface BoxThread {
   readonly laterReply: Ref.Ref<string | null>;
   /** The reply of a run queued there behind the later one; once set, the thread settles on it. */
   readonly queuedReply: Ref.Ref<string | null>;
+  /** A run there restarted, which its continuation finished with this reply. */
+  readonly restart: Ref.Ref<{ readonly of: RunId; readonly reply: string } | null>;
   /** The run each wait asked for, in order. */
   readonly waitedFor: Ref.Ref<ReadonlyArray<RunId | undefined>>;
   /** The thread's run ends with a task of its own still running, whose result wakes it again. */
@@ -148,6 +150,7 @@ const makeBoxThread = Effect.gen(function* () {
     laterError: yield* Ref.make<string | null>(null),
     laterReply: yield* Ref.make<string | null>(null),
     queuedReply: yield* Ref.make<string | null>(null),
+    restart: yield* Ref.make<{ readonly of: RunId; readonly reply: string } | null>(null),
     waitedFor: yield* Ref.make<ReadonlyArray<RunId | undefined>>([]),
     nested: yield* Ref.make(false),
     nestedWaiting: yield* Deferred.make<void>(),
@@ -210,6 +213,7 @@ const serveBox = (thread: BoxThread) => {
 const boxRunId = RunId.make("run:box");
 const boxLaterRunId = RunId.make("run:box-later");
 const boxQueuedRunId = RunId.make("run:box-queued");
+const continuationOf = (runId: RunId) => RunId.make(`${runId}:restarted`);
 
 const boxToolkitLayer = (thread: BoxThread) => {
   const runId = boxRunId;
@@ -281,15 +285,23 @@ const boxToolkitLayer = (thread: BoxThread) => {
             Option.isSome(laterDone) &&
             input.untilDelegatedWorkSettled === true &&
             (yield* Ref.get(thread.queuedReply)) !== null;
+          // A restarted run is reported as its continuation, as the box follows the chain.
+          const restarted = (yield* Ref.get(thread.restart))?.of;
+          const latest = (runId: RunId) => (runId === restarted ? continuationOf(runId) : runId);
           return {
             threadId: input.threadId,
             run: {
-              id: boxLaterRunId,
+              id: latest(boxLaterRunId),
               status: Option.isSome(laterDone) ? "completed" : "running",
             } as OrchestrationV2Run,
             timedOut: Option.isNone(laterDone),
             ...(queued
-              ? { resultRun: { id: boxQueuedRunId, status: "completed" } as OrchestrationV2Run }
+              ? {
+                  resultRun: {
+                    id: latest(boxQueuedRunId),
+                    status: "completed",
+                  } as OrchestrationV2Run,
+                }
               : {}),
           };
         }
@@ -337,6 +349,7 @@ const boxToolkitLayer = (thread: BoxThread) => {
         const queued = yield* Ref.get(thread.queuedReply);
         const error = yield* Ref.get(thread.error);
         const laterError = yield* Ref.get(thread.laterError);
+        const restart = yield* Ref.get(thread.restart);
         // One item per page, with errors available only in the activity view.
         const replies = [
           ...(reply === null
@@ -379,6 +392,16 @@ const boxToolkitLayer = (thread: BoxThread) => {
                   id: TurnItemId.make("item:queued-reply"),
                   runId: boxQueuedRunId,
                   text: queued,
+                  type: "assistant_message",
+                },
+              ]),
+          ...(restart === null
+            ? []
+            : [
+                {
+                  id: TurnItemId.make("item:restarted-reply"),
+                  runId: continuationOf(restart.of),
+                  text: restart.reply,
                   type: "assistant_message",
                 },
               ]),
@@ -1681,6 +1704,68 @@ it.effect("a follow-up there ends with its own reply, not one queued behind it",
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect.each([
+  {
+    restarted: "follow-up",
+    of: boxLaterRunId,
+    laterReply: "Running the slow suite…",
+    restartReply: "The slow suite passes too.",
+    queuedReply: "The flaky suite passes.",
+  },
+  {
+    restarted: "queued",
+    of: boxQueuedRunId,
+    laterReply: "The slow suite passes too.",
+    restartReply: "The flaky suite passes.",
+    queuedReply: "Running the flaky suite…",
+  },
+])(
+  "a follow-up there ends with its own reply when the $restarted run is restarted",
+  ({ of, laterReply, restartReply, queuedReply }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = yield* makeBoxThread;
+        const b = yield* serveBox(thread);
+        const offers = yield* SubscriptionRef.make<
+          ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+        >([]);
+        const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+        const a = yield* makeLaptop(database, offers);
+        yield* a.remote.start();
+        yield* linkTo(a.links, b, "full-access");
+        yield* seedParent(a);
+        const delegated = yield* delegateToBox(a);
+        yield* Ref.set(thread.reply, "All green.");
+        yield* Ref.set(thread.status, "completed");
+        yield* Deferred.succeed(thread.finished, undefined);
+        yield* taskResult(a, delegated.taskId);
+
+        const followUp = yield* a.call("t3_thread_send", {
+          environmentId: box.environmentId,
+          threadId: delegated.remoteChild.threadId,
+          message: "Now run the slow suite too.",
+        });
+        yield* a.call("t3_thread_send", {
+          environmentId: box.environmentId,
+          threadId: delegated.remoteChild.threadId,
+          message: "Then the flaky suite.",
+          mode: "queue",
+        });
+        const followUpId = (followUp.structuredContent as { taskId: NodeId }).taskId;
+
+        // The thread there settles on the queued run, after one of the two was restarted.
+        yield* Ref.set(thread.laterReply, laterReply);
+        yield* Ref.set(thread.queuedReply, queuedReply);
+        yield* Ref.set(thread.restart, { of, reply: restartReply });
+        yield* Deferred.succeed(thread.laterFinished, undefined);
+        expect(yield* taskResult(a, followUpId)).toMatchObject({
+          status: "completed",
+          result: "The slow suite passes too.",
+        });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("a follow-up sent after the parent's own run ended is still a task", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1746,6 +1831,23 @@ it.effect("a follow-up sent after the parent's own run ended is still a task", (
         runId: parentRunId,
         status: "running",
       });
+
+      // Its run there ends with its own reply, and the parent wakes for it.
+      const wakes = (
+        seen: ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>,
+      ) => seen.filter((offer) => offer.threadId === parentThreadId).length;
+      const wokenBefore = wakes(yield* SubscriptionRef.get(offers));
+      yield* Ref.set(thread.laterReply, "The slow suite passes too.");
+      yield* Deferred.succeed(thread.laterFinished, undefined);
+      expect(yield* taskResult(a, followUp.taskId!)).toMatchObject({
+        status: "completed",
+        result: "The slow suite passes too.",
+      });
+      const offered = yield* SubscriptionRef.changes(offers).pipe(
+        Stream.filter((seen) => wakes(seen) > wokenBefore),
+        Stream.runHead,
+      );
+      expect(Option.isSome(offered)).toBe(true);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -725,22 +726,30 @@ const make = Effect.gen(function* () {
       return yield* settled(parentThreadId, taskId);
     }
     if (!isTerminal(waited.status)) return false;
-    // The thread's answer there may be a later run another task here owns, such as a
-    // follow-up queued behind this one; then this task's is its own run's.
-    const othersRun =
+    // A later run's answer there may be a follow-up's recorded here since, or its restart, which
+    // no run id here names. Then this task's is its own run's latest restart, the one waited on.
+    const laterFollowUp =
       waited.resultRun !== undefined &&
-      waited.resultRun.runId !== remote.runId &&
-      (yield* threads.getThreadRecords(parentThreadId, ["subagents"])).subagents.some(
-        (other) =>
-          other.id !== taskId &&
-          other.remoteChild?.environmentId === remote.environmentId &&
-          other.remoteChild.threadId === remote.threadId &&
-          other.remoteChild.runId === waited.resultRun?.runId,
-      );
+      waited.resultRun.runId !== waited.runId &&
+      (yield* threads.getThreadRecords(parentThreadId, ["subagents"]).pipe(
+        Effect.map(({ subagents }) => {
+          const recordedAt = subagents.find((task) => task.id === taskId)?.startedAt ?? null;
+          return subagents.some(
+            (other) =>
+              other.id !== taskId &&
+              other.remoteChild?.environmentId === remote.environmentId &&
+              other.remoteChild.threadId === remote.threadId &&
+              // One recorded in the same instant may be later too.
+              (recordedAt === null ||
+                other.startedAt === null ||
+                !DateTime.isLessThan(other.startedAt, recordedAt)),
+          );
+        }),
+      ));
     const resultRun =
-      waited.resultRun !== undefined && !othersRun
+      waited.resultRun !== undefined && !laterFollowUp
         ? waited.resultRun
-        : { runId: remote.runId ?? waited.runId, status: waited.status };
+        : { runId: waited.runId, status: waited.status };
     const result = yield* lastReply(scope, remote, resultRun.runId, resultRun.status === "failed");
     yield* complete(
       parentThreadId,
