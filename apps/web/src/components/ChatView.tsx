@@ -1622,8 +1622,7 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
-  // The parent's view already watches the worktree an embedded side chat shares.
-  const gitStatusCwd = embedded ? null : (activeThread?.worktreePath ?? gitCwd);
+  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null

@@ -6544,7 +6544,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     // Without a source run the digest covers the parent's whole history: inherited fork rows
     // first, so the cap truncates them first, then imported and run items.
     const sideChatParentRunIds = [
-      ...sourceRunsAfterFork.map((run) => run.id),
+      // Queued messages have not reached the main thread yet.
+      ...sourceRunsAfterFork.filter((run) => run.status !== "queued").map((run) => run.id),
       ...(sourceRun === null && sourceProjection?.thread.historyOrigin === "v1_import"
         ? [null]
         : []),
@@ -6767,11 +6768,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const mergeBackDeltaItems =
       mergeBackSourceProjection === null || mergeBackSourceRun === null
         ? []
-        : yield* readHandoffItems(
-            mergeBackSourceProjection.thread.id,
-            mergeBackSourceProjection.runs
-              .filter((run) => run.ordinal <= mergeBackSourceRun.ordinal)
-              .map((run) => run.id),
+        : visibleConversationItems(
+            mergeBackSourceProjection,
+            yield* readHandoffItems(
+              mergeBackSourceProjection.thread.id,
+              mergeBackSourceProjection.runs
+                .filter((run) => run.ordinal <= mergeBackSourceRun.ordinal)
+                .map((run) => run.id),
+            ),
           );
     const mergeBackHandoff =
       pendingMergeBackTransfer === undefined ||

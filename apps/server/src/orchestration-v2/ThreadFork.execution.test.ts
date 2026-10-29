@@ -648,7 +648,7 @@ const writeParentRun = (input: {
   readonly threadId: ThreadId;
   readonly runId: RunId;
   readonly ordinal: number;
-  readonly status: "preparing" | "running" | "completed" | "rolled_back";
+  readonly status: "preparing" | "running" | "queued" | "completed" | "rolled_back";
   readonly text: string;
   /** A checkpointed run on a native provider thread, which `latest_stable` forks start from. */
   readonly stable?: boolean;
@@ -991,6 +991,13 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       status: "running",
       text: "PARENT_RUNNING_MARKER",
     });
+    yield* writeParentRun({
+      threadId: parentId,
+      runId: RunId.make("side-chat-queued-parent-run"),
+      ordinal: 3,
+      status: "queued",
+      text: "PARENT_QUEUED_MARKER",
+    });
     const fork = (commandId: string, sourceThreadId: ThreadId, targetThreadId: ThreadId) =>
       orchestrator.dispatch({
         type: "thread.fork",
@@ -1076,6 +1083,7 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
     );
     assert.include(handoff!.summaryText, "- User: GRANDPARENT_MARKER");
     assert.notInclude(handoff!.summaryText, "PARENT_ROLLED_BACK_MARKER");
+    assert.notInclude(handoff!.summaryText, "PARENT_QUEUED_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_IMPORTED_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_RUNNING_MARKER");
     assert.include(handoff!.summaryText, `t3_thread_read on thread ${parentId}`);
