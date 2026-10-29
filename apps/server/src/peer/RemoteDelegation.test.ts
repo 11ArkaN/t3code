@@ -116,6 +116,8 @@ interface BoxThread {
   /** Completed on the first interrupt there. */
   readonly interruptedOnce: Deferred.Deferred<void>;
   readonly finished: Deferred.Deferred<void>;
+  /** Ends the later run a message sent there started, for a wait pinned to it. */
+  readonly laterFinished: Deferred.Deferred<void>;
   /** While set, reading the thread there waits: completed once a read starts, released by `releaseRead`. */
   readonly holdRead: Ref.Ref<boolean>;
   readonly readStarted: Deferred.Deferred<void>;
@@ -153,6 +155,7 @@ const makeBoxThread = Effect.gen(function* () {
     runless: yield* Ref.make(false),
     interruptedOnce: yield* Deferred.make<void>(),
     finished: yield* Deferred.make<void>(),
+    laterFinished: yield* Deferred.make<void>(),
     holdRead: yield* Ref.make(false),
     readStarted: yield* Deferred.make<void>(),
     releaseRead: yield* Deferred.make<void>(),
@@ -264,6 +267,19 @@ const boxToolkitLayer = (thread: BoxThread) => {
             projectId: boxProject,
             threadId: input.threadId,
           });
+        }
+        if (input.runId === boxLaterRunId) {
+          const laterDone = yield* Deferred.await(thread.laterFinished).pipe(
+            Effect.timeoutOption(input.timeoutMs),
+          );
+          return {
+            threadId: input.threadId,
+            run: {
+              id: boxLaterRunId,
+              status: Option.isSome(laterDone) ? "completed" : "running",
+            } as OrchestrationV2Run,
+            timedOut: Option.isNone(laterDone),
+          };
         }
         const done = yield* Deferred.await(thread.finished).pipe(
           Effect.timeoutOption(input.timeoutMs),
@@ -1533,6 +1549,57 @@ it.effect("stopping the parent stops follow-up work on a task there that has its
       });
       expect(yield* stoppedThere(a, delegated.taskId, 2)).toMatchObject({ status: "completed" });
       expect(yield* Ref.get(thread.interrupted)).toBe(2);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a follow-up sent to a finished task there is a new task that wakes the parent", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const thread = yield* makeBoxThread;
+      const b = yield* serveBox(thread);
+      const offers = yield* SubscriptionRef.make<
+        ReadonlyArray<ProviderContinuationRequests.ProviderContinuationRequest>
+      >([]);
+      const database = yield* SqlitePersistence.layerMemory.pipe(Layer.build);
+      const a = yield* makeLaptop(database, offers);
+      yield* a.remote.start();
+      yield* linkTo(a.links, b, "full-access");
+      yield* seedParent(a);
+      const delegated = yield* delegateToBox(a);
+      yield* Ref.set(thread.reply, "All green.");
+      yield* Ref.set(thread.status, "completed");
+      yield* Deferred.succeed(thread.finished, undefined);
+      expect(yield* taskResult(a, delegated.taskId)).toMatchObject({
+        status: "completed",
+        result: "All green.",
+      });
+
+      // As for a finished child here, the follow-up is a fresh task.
+      const sent = yield* a.call("t3_thread_send", {
+        environmentId: box.environmentId,
+        threadId: delegated.remoteChild.threadId,
+        message: "Now run the slow suite too.",
+      });
+      expect(sent.isError, JSON.stringify(sent.content)).toBe(false);
+      const followUp = sent.structuredContent as { taskId?: NodeId; delivery: string };
+      expect(followUp.taskId, JSON.stringify(followUp)).toBeDefined();
+      expect(followUp.taskId).not.toBe(delegated.taskId);
+
+      // Its run there ends with its own reply, which the parent's live run here claims.
+      yield* Ref.set(thread.laterReply, "The slow suite passes too.");
+      yield* Deferred.succeed(thread.laterFinished, undefined);
+      const second = yield* taskResult(a, followUp.taskId!);
+      expect(second).toMatchObject({
+        status: "completed",
+        result: "The slow suite passes too.",
+        completionDelivery: { state: "claimed" },
+      });
+      const tasks = (yield* a.orchestrator.getThreadProjection(parentThreadId)).subagents;
+      expect(tasks.find((task) => task.id === delegated.taskId)).toMatchObject({
+        status: "completed",
+        result: "All green.",
+      });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
