@@ -1,18 +1,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NetService from "@t3tools/shared/Net";
 import type * as NodeOS from "node:os";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as DirectEndpoints from "./DirectEndpoints.ts";
 import { resolveBoundEndpoints } from "./DirectEndpoints.ts";
+import * as RemoteOpenTargets from "./RemoteOpenTargets.ts";
 
 const INTERFACES: ReturnType<typeof NodeOS.networkInterfaces> = {
   lo0: [
@@ -237,5 +244,95 @@ describe("DirectEndpoints Tailscale Serve", () => {
     Effect.gen(function* () {
       expect(yield* resolveWithServe(502)).toEqual([]);
     }),
+  );
+});
+
+// A CLI that cannot reach tailscaled: `tailscale status` never answers, so each read waits out its timeout.
+const layerTailscaleHung = (onStatusSpawn: () => void) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      if (ChildProcess.isStandardCommand(command) && command.args[0] === "status") onStatusSpawn();
+      return Effect.succeed(
+        ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.never,
+          isRunning: Effect.succeed(true),
+          kill: () => Effect.void,
+          unref: Effect.succeed(Effect.void),
+          stdin: Sink.drain,
+          stdout: Stream.empty,
+          stderr: Stream.empty,
+          all: Stream.empty,
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+        }),
+      );
+    }),
+  );
+
+const layerSshdListening = Layer.succeed(NetService.NetService, {
+  canListenOnHost: () => Effect.succeed(true),
+  isPortAvailableOnLoopback: () => Effect.succeed(true),
+  hasListenerOnHost: () => Effect.succeed(true),
+  reserveLoopbackPort: () => Effect.succeed(40_000),
+  findAvailablePort: (preferred) => Effect.succeed(preferred),
+});
+
+const MDNS_ONLY = [{ kind: "mdns", host: "bb-1.local", username: "t3-user" }];
+
+// What ws.loadServerConfig resolves for every client that connects.
+const connectWithTailscaleHung = (onStatusSpawn: () => void) =>
+  Effect.gen(function* () {
+    const remoteOpenTargets = yield* RemoteOpenTargets.RemoteOpenTargets;
+    const directEndpoints = yield* DirectEndpoints.DirectEndpoints;
+    return Effect.all([remoteOpenTargets.resolveTargets(), directEndpoints.resolve()], {
+      concurrency: "unbounded",
+    }).pipe(
+      Effect.provideService(HostProcess.Hostname, "bb-1"),
+      Effect.provideService(HostProcess.Username, "t3-user"),
+    );
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(DirectEndpoints.layer, RemoteOpenTargets.layer).pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            layerServeConfig,
+            layerTailscaleHung(onStatusSpawn),
+            layerServeProbe(200),
+            layerSshdListening,
+          ),
+        ),
+      ),
+    ),
+  );
+
+describe("Tailscale status shared by DirectEndpoints and RemoteOpenTargets", () => {
+  effectIt.effect("reads `tailscale status` once per connect, not once per service", () =>
+    Effect.gen(function* () {
+      let statusReads = 0;
+      const connect = yield* connectWithTailscaleHung(() => statusReads++);
+      const first = yield* Effect.forkChild(connect);
+      yield* TestClock.adjust("4 seconds");
+      expect(yield* Fiber.join(first)).toEqual([MDNS_ONLY, []]);
+      expect(statusReads, "tailscale status spawns for one connect").toBe(1);
+    }),
+  );
+
+  effectIt.effect(
+    "answers a later connect from the settled failed read without waiting again",
+    () =>
+      Effect.gen(function* () {
+        const connect = yield* connectWithTailscaleHung(() => {});
+        const first = yield* Effect.forkChild(connect);
+        yield* TestClock.adjust("4 seconds");
+        expect(yield* Fiber.join(first)).toEqual([MDNS_ONLY, []]);
+
+        const later = yield* connect.pipe(Effect.timeoutOption("1 second"), Effect.forkChild);
+        yield* TestClock.adjust("1 second");
+        expect(yield* Fiber.join(later), "later connect still waiting on tailscale status").toEqual(
+          Option.some([MDNS_ONLY, []]),
+        );
+      }),
   );
 });
