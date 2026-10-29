@@ -487,7 +487,10 @@ export function useComposerSend(input: ComposerSendInput) {
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
         ? parseSideChatCommand(promptAtSend)
         : null;
-    if (sideChatDisabledReason !== null && sideChatCommand) {
+    const answeringQuestion =
+      Boolean(activePendingProgress) && sendCtx?.answeringPendingUserInput !== false;
+    // Where side chats are unavailable, `/side` text can still be a literal answer.
+    if (sideChatDisabledReason !== null && sideChatCommand && !answeringQuestion) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",

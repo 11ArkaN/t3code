@@ -291,11 +291,12 @@ function makeLocalCommandHarness(input: {
     readonly interruptCurrentRun?: boolean;
   };
   /**
-   * A side chat whose context targets this run, an earlier run that failed before the provider,
-   * or an earlier run that delivered it. `nativeForkFrom` plans a native fork of the parent.
+   * A side chat whose context targets this run, an earlier run that failed or was cancelled before
+   * the provider, or an earlier run that delivered it. `nativeForkFrom` plans a native fork of the
+   * parent.
    */
   readonly sideChat?: {
-    readonly contextRun: "current" | "failed" | "delivered";
+    readonly contextRun: "current" | "failed" | "cancelled" | "delivered";
     readonly nativeForkFrom?: "idle" | "busy";
   };
 }) {
@@ -539,7 +540,10 @@ function makeLocalCommandHarness(input: {
                 ordinal: 1,
                 userMessageId: MessageId.make("side-chat-earlier-message"),
                 activeAttemptId: RunAttemptId.make("side-chat-earlier-attempt"),
-                status: input.sideChat.contextRun === "failed" ? "failed" : "completed",
+                status:
+                  input.sideChat.contextRun === "delivered"
+                    ? "completed"
+                    : input.sideChat.contextRun,
                 completedAt: now,
               },
               run,
@@ -1162,6 +1166,7 @@ effectIt.effect("recovers an abandoned failed turn before continuing its native 
 effectIt.effect.each([
   { contextRun: "current", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
   { contextRun: "failed", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
+  { contextRun: "cancelled", runtimeMode: "approval-required", context: "SIDE_CHAT_CONTEXT" },
   { contextRun: "delivered", runtimeMode: "full-access", context: "" },
 ] as const)(
   "sends side chat context inline once, for the $contextRun run's turn",

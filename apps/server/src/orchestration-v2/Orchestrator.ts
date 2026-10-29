@@ -4282,18 +4282,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.targetThreadId} is still running. Bring back is available when it is idle.`,
       });
     }
-    const otherPendingMergeBack = targetProjection.contextTransfers.find(
+    const otherPendingMergeBack = targetProjection.contextTransfers.some(
       (transfer) =>
         transfer.type === "merge_back" &&
         transfer.status === "pending" &&
         transfer.targetThreadId === command.targetThreadId &&
         transfer.sourceThreadId !== command.sourceThreadId,
     );
-    if (otherPendingMergeBack !== undefined) {
+    if (otherPendingMergeBack) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Thread ${command.targetThreadId} already has pending context from ${otherPendingMergeBack.sourceThreadId}. Send a message there first.`,
+        cause: `Thread ${command.targetThreadId} already has pending context from another side chat or fork. Send a message there first.`,
       });
     }
 

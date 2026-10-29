@@ -1070,7 +1070,7 @@ it.effect("merge-back rejects a second fork's context until the first is consume
 
     yield* mergeBack("merge-back-guard-first", first);
     const rejected = yield* mergeBack("merge-back-guard-second", second).pipe(Effect.flip);
-    assert.include(String(rejected.cause), first.threadId);
+    assert.include(String(rejected.cause), "pending context from another side chat or fork");
     yield* mergeBack("merge-back-guard-first-again", first);
     // That pending merge-back targets the parent, so it does not block one into `first`.
     const nested = { threadId: ThreadId.make("merge-back-guard-nested") };

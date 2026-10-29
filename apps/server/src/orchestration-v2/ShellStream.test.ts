@@ -277,7 +277,7 @@ describe("omitOlderSettledShells", () => {
     expect(result.olderSettled.counts).toEqual([]);
   });
 
-  it("keeps older rows that are snoozed, live, or above a kept subagent, and still counts them", () => {
+  it("keeps older rows that are snoozed, live, or above a kept subagent or side chat, and still counts them", () => {
     const threads = [
       ...newest,
       row("snoozed", 30, { snoozedUntil: DateTime.makeUnsafe(101 * DAY) }),
@@ -295,6 +295,15 @@ describe("omitOlderSettledShells", () => {
         settledOverride: null,
         settledAt: null,
       }),
+      row("side-chat-parent", 30),
+      row("side-chat", null, {
+        lineage: {
+          parentThreadId: ThreadId.make("side-chat-parent"),
+          relationshipToParent: "fork",
+          rootThreadId: ThreadId.make("side-chat-parent"),
+          sideChat: true,
+        },
+      }),
     ];
     const result = omit(threads);
     expect(result.threads.map((thread) => thread.id).slice(25)).toEqual([
@@ -302,8 +311,10 @@ describe("omitOlderSettledShells", () => {
       "running",
       "parent",
       "child",
+      "side-chat-parent",
+      "side-chat",
     ]);
-    expect(result.olderSettled.counts).toEqual([{ projectId: "project-a", count: 4 }]);
+    expect(result.olderSettled.counts).toEqual([{ projectId: "project-a", count: 5 }]);
   });
 });
 

@@ -28,33 +28,37 @@ export function ThreadSideChatsRow(props: {
       <Text className="text-xs text-foreground-muted">Side chats</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-1">
         <View className="flex-row gap-1 pr-4">
-          {sideChats.map((sideChat) => (
-            <Pressable
-              key={sideChat.id}
-              accessibilityRole="button"
-              accessibilityLabel={`Open side chat ${sideChat.title}`}
-              className="max-w-48 flex-row items-center gap-1.5 rounded-full bg-subtle px-2.5 py-1"
-              onPress={() =>
-                openLinkedThread({ environmentId: props.environmentId, threadId: sideChat.id })
-              }
-            >
-              {sideChat.hasPendingApprovals ||
-              sideChat.hasPendingUserInput ||
-              sideChat.pendingSubagentRequest ? (
-                <View
-                  className={cn(
-                    "h-1.5 w-1.5 shrink-0 rounded-full",
-                    sideChat.hasPendingApprovals || sideChat.pendingSubagentRequest === "approval"
-                      ? "bg-warning-foreground"
-                      : "bg-adaptive-indigo-600-300",
-                  )}
-                />
-              ) : null}
-              <Text className="shrink text-xs text-foreground" numberOfLines={1}>
-                {sideChat.title}
-              </Text>
-            </Pressable>
-          ))}
+          {sideChats.map((sideChat) => {
+            const needs =
+              sideChat.hasPendingApprovals || sideChat.pendingSubagentRequest === "approval"
+                ? "approval"
+                : sideChat.hasPendingUserInput || sideChat.pendingSubagentRequest
+                  ? "input"
+                  : null;
+            return (
+              <Pressable
+                key={sideChat.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Open side chat ${sideChat.title}${needs === null ? "" : `, needs ${needs}`}`}
+                className="max-w-48 flex-row items-center gap-1.5 rounded-full bg-subtle px-2.5 py-1"
+                onPress={() =>
+                  openLinkedThread({ environmentId: props.environmentId, threadId: sideChat.id })
+                }
+              >
+                {needs === null ? null : (
+                  <View
+                    className={cn(
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                      needs === "approval" ? "bg-warning-foreground" : "bg-adaptive-indigo-600-300",
+                    )}
+                  />
+                )}
+                <Text className="shrink text-xs text-foreground" numberOfLines={1}>
+                  {sideChat.title}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </ScrollView>
     </View>

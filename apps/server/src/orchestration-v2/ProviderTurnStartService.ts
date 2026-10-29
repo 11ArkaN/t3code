@@ -335,6 +335,7 @@ export const layer: Layer.Layer<
                 source.id === handoff.targetRunId &&
                 (source.status === "failed" ||
                   source.status === "interrupted" ||
+                  source.status === "cancelled" ||
                   (source.status === "completed" &&
                     handoff.delivery === undefined &&
                     // Compaction and /goal turns defer history to the next turn.

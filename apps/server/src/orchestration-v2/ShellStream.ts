@@ -119,7 +119,8 @@ const NEWEST_SETTLED_KEPT = 25;
 /**
  * Opted-in snapshots keep the 25 newest settled top-level threads (and ties) and count the rest per
  * project in `olderSettled`; clients page them with `getOlderSettledThreads`. Older rows stay while
- * pinned, snoozed, live, or above a kept subagent, so walks over shell rows still find them.
+ * pinned, snoozed, live, or above a kept subagent or side chat, so walks over shell rows still find
+ * them.
  */
 export function omitOlderSettledShells(input: {
   readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;
@@ -143,7 +144,7 @@ export function omitOlderSettledShells(input: {
   const beforeMs = settledTimes[NEWEST_SETTLED_KEPT - 1] ?? settledTimes.at(-1) ?? nowMs;
   const ancestorIds = new Set<string>();
   for (const thread of input.threads) {
-    if (thread.lineage.relationshipToParent !== "subagent") continue;
+    if (isListedThreadLineage(thread.lineage)) continue;
     if (thread.lineage.parentThreadId !== null) ancestorIds.add(thread.lineage.parentThreadId);
     ancestorIds.add(thread.lineage.rootThreadId);
   }
