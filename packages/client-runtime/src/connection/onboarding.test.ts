@@ -3,6 +3,7 @@ import {
   EnvironmentId,
   type AuthEnvironmentScope,
   ORCHESTRATION_PROTOCOL_VERSION,
+  TailnetIpv4,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -60,6 +61,7 @@ const layerClientPresentation = Layer.succeed(
       label: "T3 Code Test",
       deviceType: "desktop",
       os: "Test OS",
+      surface: "desktop",
     },
   }),
 );
@@ -176,6 +178,10 @@ function layerPairingHttp(
 function layerPairingOnboarding(
   options?: Parameters<typeof layerPairingHttp>[1] & {
     readonly savedCredential?: ConnectionCredential;
+    /** Saving fails, as with no OS keyring for the catalog. */
+    readonly saveFails?: boolean;
+    /** Collects each Tailscale sign-in's address. */
+    readonly signIns?: Array<string>;
   },
   calls: Array<{ readonly url: string; readonly init: RequestInit }> = [],
 ) {
@@ -188,7 +194,15 @@ function layerPairingOnboarding(
       listDismissed: Effect.succeed([]),
     }),
     Layer.mock(Persistence.ConnectionRegistrationStore)({
-      register: () => Effect.void,
+      register: () =>
+        options?.saveFails === true
+          ? Effect.fail(
+              new Persistence.ConnectionPersistenceError({
+                operation: "register-connection",
+                message: "No secure storage.",
+              }),
+            )
+          : Effect.void,
       setEnabled: () => Effect.void,
     }),
     Layer.mock(Persistence.EnvironmentCacheStore)({}),
@@ -214,11 +228,13 @@ function layerPairingOnboarding(
       Layer.mock(RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization)({
         // A session is pinned to the address it signed in at.
         signInTailnet: (input) =>
-          Effect.succeed(
-            new TailnetConnectionCredential({
-              ...TAILNET_SESSION,
-              signInBaseUrl: input.httpBaseUrl,
-            }),
+          Effect.sync(() => options?.signIns?.push(input.httpBaseUrl)).pipe(
+            Effect.as(
+              new TailnetConnectionCredential({
+                ...TAILNET_SESSION,
+                signInBaseUrl: input.httpBaseUrl,
+              }),
+            ),
           ),
       }),
     ),
@@ -302,6 +318,11 @@ describe("connection onboarding", () => {
           : String(tokenRequest?.init.body);
       const tokenParams = new URLSearchParams(tokenBody);
       expect(tokenParams.get("subject_token")).toBe("pairing-token");
+      const tailnet = yield* preparePairingRegistration({
+        host: "100.88.1.2",
+        pairingCode: "pairing-token",
+      }).pipe(Effect.provide(layerPairingOnboarding()));
+      expect(tailnet.profile.httpBaseUrl).toBe("http://100.88.1.2:3773/");
       expect(tokenParams.has("scope")).toBe(false);
       expect(tokenParams.get("client_label")).toBe("T3 Code Test");
       expect(tokenParams.get("client_device_type")).toBe("desktop");
@@ -761,6 +782,27 @@ describe("connection onboarding", () => {
       ),
     ),
   );
+
+  it.effect("does not sign in again to a found machine it could not save", () => {
+    const signIns: Array<string> = [];
+    return Effect.gen(function* () {
+      const onboarding = yield* Onboarding.ConnectionOnboarding;
+      const found = [
+        {
+          name: "studio",
+          magicDnsName: "studio.tail.ts.net",
+          tailnetIpv4: TailnetIpv4.make("100.88.1.2"),
+          environmentId: PAIRED_ENVIRONMENT_ID,
+        },
+      ];
+      expect((yield* onboarding.addDiscoveredTailnetMachines(found)).added).toEqual([]);
+      yield* onboarding.addDiscoveredTailnetMachines(found);
+      // Each sign-in mints a session on the host, so a save that cannot work is not retried.
+      expect(signIns).toEqual(["http://100.88.1.2:3773/"]);
+    }).pipe(
+      Effect.provide(layerPairingOnboarding({ tailnetSignIn: true, saveFails: true, signIns })),
+    );
+  });
 
   it.effect("prepares an SSH registration from the provisioned platform environment", () =>
     Effect.gen(function* () {

@@ -117,8 +117,11 @@ export class ConnectionOnboarding extends Context.Service<
 
 const resolvePairingTarget = Effect.fn("clientRuntime.connection.onboarding.resolvePairingTarget")(
   function* (input: PairingConnectionInput) {
+    // A bare tailnet name or 100.x address means T3 Code's port, with a code as without one.
+    const tailnetHost = input.host === undefined ? null : tailnetSignInBaseUrl(input.host);
     return yield* Effect.try({
-      try: () => resolveRemotePairingTarget(input),
+      try: () =>
+        resolveRemotePairingTarget(tailnetHost === null ? input : { ...input, host: tailnetHost }),
       catch: (cause) =>
         new ConnectionBlockedError({
           reason: "configuration",
@@ -355,7 +358,7 @@ const registerTailnetConnection = Effect.fn(
 
 const addDiscoveredTailnetMachines = Effect.fn(
   "clientRuntime.connection.onboarding.addDiscoveredTailnetMachines",
-)(function* (machines: ReadonlyArray<TailnetPeerEnvironment>) {
+)(function* (machines: ReadonlyArray<TailnetPeerEnvironment>, unsaveable: Set<EnvironmentId>) {
   const presentation = yield* ClientCapabilities.ClientPresentation;
   if (!supportsTailnetSignIn(presentation.metadata)) return { added: [], conflicts: [] };
   const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
@@ -365,7 +368,7 @@ const addDiscoveredTailnetMachines = Effect.fn(
     dismissed: yield* SubscriptionRef.get(registry.dismissedEnvironmentIds),
   });
   const added = yield* Effect.forEach(
-    add,
+    add.filter((machine) => !unsaveable.has(machine.environmentId)),
     (machine) =>
       prepareTailnetRegistration({
         httpBaseUrl: `http://${machine.tailnetIpv4}:${TAILNET_SIGN_IN_PORT}/`,
@@ -377,6 +380,8 @@ const addDiscoveredTailnetMachines = Effect.fn(
             onNone: () => Effect.succeed([]),
             onSome: (registration) =>
               saveTailnetRegistration(registration, false).pipe(
+                // Every try signs in again and leaves a session behind on the host.
+                Effect.tapError(() => Effect.sync(() => unsaveable.add(machine.environmentId))),
                 Effect.as([
                   { environmentId: machine.environmentId, label: registration.target.label },
                 ]),
@@ -534,6 +539,8 @@ export const make = Effect.gen(function* () {
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
   const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+  // Found machines that signed in but could not be saved, skipped until the app restarts.
+  const unsaveable = new Set<EnvironmentId>();
   const withTailnetServices = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
@@ -548,7 +555,7 @@ export const make = Effect.gen(function* () {
       return yield* withTailnetServices(registerTailnetConnection(input));
     }),
     addDiscoveredTailnetMachines: Effect.fnUntraced(function* (machines) {
-      return yield* withTailnetServices(addDiscoveredTailnetMachines(machines));
+      return yield* withTailnetServices(addDiscoveredTailnetMachines(machines, unsaveable));
     }),
     registerPairing: Effect.fnUntraced(
       function* (input) {
