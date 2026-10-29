@@ -126,8 +126,12 @@ function orderByImportsAndTier<F extends OrderableDiffFile>(
   files: ReadonlyArray<F>,
   pathOf: (file: F) => string,
 ): ReadonlyArray<F> {
-  const byPath = new Map<string, F>();
-  for (const file of files) byPath.set(pathOf(file), file);
+  // A type change (file to symlink) is a delete and an add under one path; keep both.
+  const byPath = new Map<string, F[]>();
+  for (const file of files) {
+    const path = pathOf(file);
+    byPath.set(path, [...(byPath.get(path) ?? []), file]);
+  }
   const tiers = new Map<string, DiffFileTier>();
   for (const path of byPath.keys()) tiers.set(path, diffFileTier(path));
 
@@ -145,11 +149,10 @@ function orderByImportsAndTier<F extends OrderableDiffFile>(
 
   const imports = new Map<string, ReadonlySet<string>>();
   for (const path of sourcePaths) {
-    const file = byPath.get(path)!;
-    imports.set(
-      path,
-      importedPaths(path, [...file.additionLines, ...file.deletionLines], byModulePath, byBaseName),
-    );
+    const lines = byPath
+      .get(path)!
+      .flatMap((file) => [...file.additionLines, ...file.deletionLines]);
+    imports.set(path, importedPaths(path, lines, byModulePath, byBaseName));
   }
   const orderedSource = orderByImports(sourcePaths, imports);
 
@@ -170,7 +173,9 @@ function orderByImportsAndTier<F extends OrderableDiffFile>(
     .filter((path) => tiers.get(path) === "generated")
     .sort((left, right) => left.localeCompare(right));
 
-  return [...orderedSource, ...orderedTests, ...orderedGenerated].map((path) => byPath.get(path)!);
+  return [...orderedSource, ...orderedTests, ...orderedGenerated].flatMap((path) =>
+    byPath.get(path)!,
+  );
 }
 
 /** Where each file, and each directory (with a trailing slash), first appears in `paths`. */

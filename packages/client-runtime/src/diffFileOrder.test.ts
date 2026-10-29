@@ -50,6 +50,14 @@ describe("orderDiffFilesForReview", () => {
     ]);
   });
 
+  it("keeps both entries of a path that changed type, such as a file replaced by a symlink", () => {
+    const deleted = { ...file("AGENTS.md"), additionLines: [], deletionLines: ["# Agents"] };
+    const added = file("AGENTS.md", ["CLAUDE.md"]);
+    expect(
+      orderDiffFilesForReview([file("CLAUDE.md"), deleted, added], (entry) => entry.name),
+    ).toEqual([deleted, added, file("CLAUDE.md")]);
+  });
+
   it("pulls a test listed last into its directory, keeping the first-seen order", () => {
     expect(
       order([
