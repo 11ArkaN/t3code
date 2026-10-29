@@ -18,12 +18,10 @@ import {
 export { SettingsScreenContent };
 
 export function SettingsScreen(
-  props: Pick<AppBarProps, "title" | "actions" | "trailing" | "search"> & {
+  props: Pick<AppBarProps, "title" | "actions" | "trailing" | "search" | "menus"> & {
     readonly children: ReactNode;
     readonly formSheet?: boolean;
     readonly workspaceRoot?: boolean;
-    /** Replaces the screen's own header, such as with the workspace tab bar. */
-    readonly appBar?: ReactNode;
   },
 ) {
   const navigation = useNavigation();
@@ -45,17 +43,17 @@ export function SettingsScreen(
 
   return (
     <View collapsable={false} className={`flex-1 ${surfaceClassName}`}>
-      {props.appBar ?? (
-        <AppBar
-          title={props.title}
-          actions={props.actions}
-          search={props.search}
-          trailing={Platform.OS === "android" ? props.trailing : undefined}
-          sidebar={false}
-          onBack={workspaceRoot ? undefined : () => navigation.goBack()}
-          hideBottomBorder={!props.formSheet}
-        />
-      )}
+      <AppBar
+        title={props.title}
+        actions={props.actions}
+        search={props.search}
+        trailing={Platform.OS === "android" ? props.trailing : undefined}
+        // iOS screens put their filter menus in native header items themselves.
+        menus={Platform.OS === "android" ? props.menus : undefined}
+        sidebar={false}
+        onBack={workspaceRoot ? undefined : () => navigation.goBack()}
+        hideBottomBorder={!props.formSheet}
+      />
       <ScreenScrollViewBottomInset value={deviceType === "pad" || compactTabs ? 80 : 0}>
         <ScreenScrollViewSurface value={surfaceClassName}>
           {props.formSheet ? (
