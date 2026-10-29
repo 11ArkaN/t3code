@@ -276,6 +276,12 @@ describe("Tailscale facts in the diagnosis", () => {
       localTailscale: { state: "needs_login", peers: [] },
     });
     expect(localDown?.headline).toBe("Tailscale on this device is signed out");
+    const awaitingApproval = withFacts({
+      localTailscale: { state: "needs_machine_approval", peers: [] },
+    });
+    expect(awaitingApproval?.steps[0]).toMatch(
+      /^Approve this device at https:\/\/login\.tailscale/,
+    );
 
     const running = (peers: ReadonlyArray<DesktopTailscalePeer>) =>
       withFacts({ localTailscale: { state: "running", peers } });

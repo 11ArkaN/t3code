@@ -453,7 +453,11 @@ function tailnetVerdict(
   if (localTailscaleDown(local?.state)) {
     return {
       headline: tailscaleIssueHeadline("this device", { cause: local.state, fix: "" }, null, now),
-      steps: ["Turn on Tailscale on this device and sign in. T3 Code reconnects on its own."],
+      steps: [
+        local.state === "needs_machine_approval"
+          ? "Approve this device at https://login.tailscale.com/admin/machines. T3 Code reconnects on its own."
+          : "Turn on Tailscale on this device and sign in. T3 Code reconnects on its own.",
+      ],
     };
   }
   const hostNotice = hostTailscaleNotice(host, input.hostTailscale, now, HOST_TAILSCALE_DOWN);
