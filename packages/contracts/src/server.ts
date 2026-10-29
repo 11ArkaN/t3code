@@ -683,9 +683,12 @@ export function tailscaleIssueHeadline(
       return `The Tailscale node key on ${host} has expired`;
     case "key_expiring": {
       const expiresAt = keyExpiry === null ? Number.NaN : Date.parse(keyExpiry);
+      // A cached status can outlive the expiry it warned about.
       return Number.isNaN(expiresAt)
         ? `The Tailscale node key on ${host} expires soon`
-        : `The Tailscale node key on ${host} expires in ${formatRoughDuration(expiresAt - now)}`;
+        : expiresAt <= now
+          ? `The Tailscale node key on ${host} has expired`
+          : `The Tailscale node key on ${host} expires in ${formatRoughDuration(expiresAt - now)}`;
     }
     case "health_warning":
       return `Tailscale on ${host} reports: ${issue.message ?? "a problem"}`;
