@@ -384,11 +384,34 @@ const automaticUpdate = (
   ...updateThread(state, threadKey, updater),
 });
 
+// A side chat pane has no panel of its own, so its panel actions open in its parent's panel.
+const panelHosts = new Map<string, string>();
+
+/** Routes `guest`'s panel actions to `host`'s panel until the returned cleanup runs. */
+export function hostRightPanel(guest: ScopedThreadRef, host: ScopedThreadRef): () => void {
+  const guestKey = scopedThreadKey(guest);
+  const hostKey = scopedThreadKey(host);
+  panelHosts.set(guestKey, hostKey);
+  return () => {
+    if (panelHosts.get(guestKey) === hostKey) panelHosts.delete(guestKey);
+  };
+}
+
 const userAction = (
+  state: RightPanelStoreState,
+  guestKey: string,
+  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+  closesView = false,
+): Partial<RightPanelStoreState> => {
+  const threadKey = panelHosts.get(guestKey) ?? guestKey;
+  return userActionOnThread(state, threadKey, updater, closesView);
+};
+
+const userActionOnThread = (
   state: RightPanelStoreState,
   threadKey: string,
   updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
-  closesView = false,
+  closesView: boolean,
 ): Partial<RightPanelStoreState> => ({
   ...updateThread(state, threadKey, (current) => {
     const next = updater(current);

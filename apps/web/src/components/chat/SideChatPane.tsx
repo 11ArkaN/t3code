@@ -11,10 +11,11 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ComposerHandleContext } from "../../composerHandleContext";
 import type { SideChatParentPanel } from "../../lib/sideChatPane";
+import { hostRightPanel } from "../../rightPanelStore";
 import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentShellHasSnapshot } from "../../state/shell";
@@ -35,6 +36,11 @@ export default function SideChatPane(props: {
 }) {
   const { parentRef, threadId } = props;
   const threadRef = scopeThreadRef(parentRef.environmentId, threadId);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the parent panel as host in the panel store
+  useEffect(
+    () => hostRightPanel(scopeThreadRef(parentRef.environmentId, threadId), parentRef),
+    [parentRef, threadId],
+  );
   const shell = useQuietThreadShell(threadRef);
   const parent = useQuietThreadShell(parentRef);
   const snapshotLoaded = useEnvironmentShellHasSnapshot(parentRef.environmentId);
