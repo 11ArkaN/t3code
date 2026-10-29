@@ -64,10 +64,14 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
+      Effect.interruptible,
       Effect.forkIn(scope),
       Effect.as(deferred),
     );
-  });
+  }).pipe(
+    // Claiming `inFlight` and forking are one step: an interrupt between them would strand the claim.
+    Effect.uninterruptible,
+  );
   yield* refresh;
 
   return TailscaleStatusReader.of({
