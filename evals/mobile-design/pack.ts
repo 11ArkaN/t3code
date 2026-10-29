@@ -22,6 +22,9 @@ const MAX_WIDTH = 2400;
 const MAX_TILE_HEIGHT = 1400;
 const LABEL_HEIGHT = 44;
 const GAP = 24;
+// Claude reads images at most 1568 px on the long edge, and one request holds about 32 MB of
+// images, so a larger file only pushes the pack's later images out of a review.
+const MAX_IMAGE_EDGE = 1568;
 
 interface Tile {
   readonly file: string;
@@ -70,9 +73,16 @@ async function contactSheet(
   return { data, width: sheetWidth, height: sheetHeight };
 }
 
-async function writeImage(data: Buffer, destination: string) {
+/** Writes an image no larger than a reviewer reads it; a PNG gets a palette to cut its size. */
+async function writeImage(input: Buffer | string, destination: string) {
   await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
-  await NodeFSP.writeFile(destination, data);
+  const image = sharp(input).resize({
+    width: MAX_IMAGE_EDGE,
+    height: MAX_IMAGE_EDGE,
+    fit: "inside",
+    withoutEnlargement: true,
+  });
+  await (destination.endsWith(".png") ? image.png({ palette: true }) : image).toFile(destination);
 }
 
 /** Poses whose screenshots share a shape, so they sit well side by side. */
@@ -185,14 +195,11 @@ export async function buildPack(input: {
 
   const references = await NodeFSP.readdir(input.referencesDirectory).catch(() => []);
   const referenceImages = references.filter((name) => /\.(png|jpe?g)$/i.test(name));
-  if (referenceImages.length > 0) {
-    await NodeFSP.mkdir(NodePath.join(pack, "references"), { recursive: true });
-    for (const name of referenceImages) {
-      await NodeFSP.copyFile(
-        NodePath.join(input.referencesDirectory, name),
-        NodePath.join(pack, "references", name),
-      );
-    }
+  for (const name of referenceImages) {
+    await writeImage(
+      NodePath.join(input.referencesDirectory, name),
+      NodePath.join(pack, "references", name),
+    );
   }
 
   // Reviewers score only the device classes this run captured.
