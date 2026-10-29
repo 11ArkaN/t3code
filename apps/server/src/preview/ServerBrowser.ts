@@ -2398,9 +2398,8 @@ const make = Effect.gen(function* () {
     });
     const started = startScreencast(1);
     if (tab.desktop) {
-      // A page reached over CDP has no emulated viewport. Input lands in its zoomed CSS
-      // pixels, which change when the host resizes its panel or zooms. Measuring after the
-      // screencast starts keeps the host from counting it as the agent's input.
+      // A page reached over CDP has no emulated viewport; input lands in its zoomed CSS pixels.
+      // Measuring after the screencast starts keeps the desktop from marking the tab agentUsed.
       let measurement = 0;
       const pushPageSize = async () => {
         const current = ++measurement;

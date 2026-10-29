@@ -587,6 +587,46 @@ it.live("a viewer of a tab the desktop draws is measured again once a navigation
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("a viewer of a tab the desktop draws can act before the page is measured", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      desktopRendersNext = true;
+      const { browser, tabId } = yield* ready;
+      const { context } = desktopConnections[0]!;
+      const newCDPSession = context.newCDPSession;
+      const measuring = Promise.withResolvers<void>();
+      const measured = Promise.withResolvers<void>();
+      yield* Effect.addFinalizer(() => Effect.sync(() => measured.resolve()));
+      context.newCDPSession = async (target) => {
+        const session = await newCDPSession(target);
+        const send = session.send.getMockImplementation()!;
+        session.send.mockImplementation(async (method, input) => {
+          if (method === "Runtime.evaluate" && (input as { contextId?: number }).contextId === 9) {
+            measuring.resolve();
+            await measured.promise;
+          }
+          return send(method, input);
+        });
+        return session;
+      };
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* Effect.promise(() => measuring.promise);
+      yield* viewer.input({ type: "takeControl" });
+      const early = [];
+      let control = yield* Queue.take(viewer.output);
+      while (control._tag !== "control" || control.controller !== "you") {
+        early.push(control);
+        control = yield* Queue.take(viewer.output);
+      }
+      expect(early).not.toContainEqual(expect.objectContaining({ _tag: "viewport" }));
+      measured.resolve();
+      let viewport = yield* Queue.take(viewer.output);
+      while (viewport._tag !== "viewport") viewport = yield* Queue.take(viewer.output);
+      expect(viewport).toEqual({ _tag: "viewport", ...DESKTOP_LAYOUT });
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live.each([
   { method: "goto" as const, message: { type: "navigate", url: "http://10.255.255.1/" } },
   { method: "goBack" as const, message: { type: "history", delta: -1 } },
