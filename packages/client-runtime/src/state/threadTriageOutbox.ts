@@ -471,11 +471,15 @@ export function createThreadTriageOutbox<R, E>(input: {
         const snapshot = registry.get(input.sourceSnapshotAtom(environmentId));
         const thread = snapshot?.threads.find((candidate) => candidate.id === key.threadId);
         const superseded = pendingFor(registry, key);
+        const guarded =
+          (input.serverConfigAtom ? registry.get(input.serverConfigAtom(environmentId)) : null)
+            ?.environment.capabilities.threadTriageVersionGuard === true;
         try {
           // Started before any await so the optimistic change shows in the same frame.
           const result = await command.run(
             registry,
             snapshot !== null &&
+              guarded &&
               input.shellStatusAtom !== undefined &&
               registry.get(input.shellStatusAtom(environmentId)) !== "live"
               ? {
@@ -499,10 +503,7 @@ export function createThreadTriageOutbox<R, E>(input: {
           }
           const offline = offlineError(result.cause);
           if (offline === undefined) return result;
-          const config = input.serverConfigAtom
-            ? registry.get(input.serverConfigAtom(environmentId))
-            : null;
-          if (config?.environment.capabilities.threadTriageVersionGuard !== true) {
+          if (!guarded) {
             return AsyncResult.failure(
               Cause.fail(
                 new ThreadVersionGuardUnsupportedError({

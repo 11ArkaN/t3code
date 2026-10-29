@@ -641,15 +641,21 @@ describe("settle and snooze while the environment is offline", () => {
       ? []
       : (JSON.parse(storage.value) as { entries: Array<Record<string, unknown>> }).entries;
 
-  it.effect.each(["settle", "snooze"] as const)(
-    "guards a %s taken before shell synchronization",
-    (action) =>
+  // An older server cannot check the sequence, so the connected command goes out unguarded.
+  it.effect.each([
+    { action: "settle", guarded: true },
+    { action: "snooze", guarded: true },
+    { action: "settle", guarded: false },
+    { action: "snooze", guarded: false },
+  ] as const)(
+    "sends a $action taken before shell synchronization (version guard: $guarded)",
+    ({ action, guarded }) =>
       Effect.gen(function* () {
-        const h = yield* makeHarness();
+        const h = yield* makeHarness({ versionGuard: guarded, cachedVersionGuard: guarded });
         h.registry.set(h.statusAtom(ENVIRONMENT_ID), "synchronizing");
         const result = h.commands[action].run(h.registry, snooze);
         const request = yield* Queue.take(h.requests);
-        expect(request.command).toMatchObject({ snapshotSequence: 1 });
+        expect(Reflect.get(request.command, "snapshotSequence")).toBe(guarded ? 1 : undefined);
         yield* Deferred.succeed(request.reply, { sequence: 2 });
         expect((yield* Effect.promise(() => result))._tag).toBe("Success");
       }),
