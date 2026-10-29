@@ -8,6 +8,7 @@ import {
   MOBILE_THEME_IDS,
   getThemeColorsForAppearance,
 } from "@t3tools/shared/themePalettes";
+import { flattenThemeColor } from "@t3tools/shared/colorContrast";
 import {
   readDefaultMobileThemeVariables,
   readGeneratedMobileThemeVariables,
@@ -18,7 +19,6 @@ import {
   createMobileThemeSelectionPatch,
   createMobileThemeVariables,
   DEFAULT_MOBILE_THEME_ID,
-  flattenThemeColor,
   getMobileThemeVariables,
   resolveMobileThemeIds,
   themeColorWithAlpha,

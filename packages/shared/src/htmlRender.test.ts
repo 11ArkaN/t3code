@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { flattenThemeColor } from "./colorContrast.ts";
 import {
   htmlRenderTheme,
   injectHtmlRenderBootstrap,
@@ -141,7 +142,22 @@ describe("htmlRenderTheme", () => {
     expect(contrastRatio(foreground, variables["--accent"]!)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("passes the default themes' accent through unchanged", () => {
+  it("measures a translucent accent as painted on the canvas", () => {
+    const canvas = "#161515";
+    const { variables } = htmlRenderTheme(
+      { ...T3_CODE_DARK_THEME_COLORS, canvas, accent: "#ffffff10" },
+      "dark",
+    );
+    for (const name of ["--accent", "--chart-1"]) {
+      const painted = flattenThemeColor(variables[name]!, canvas);
+      expect(
+        contrastRatio(painted, canvas),
+        `${name} ${variables[name]} paints ${painted} on ${canvas}`,
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("passes the T3 Code default themes' accent through unchanged", () => {
     for (const [colors, appearance] of [
       [T3_CODE_DARK_THEME_COLORS, "dark"],
       [T3_CODE_LIGHT_THEME_COLORS, "light"],

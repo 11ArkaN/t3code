@@ -1,5 +1,6 @@
 import type { MaterialColors } from "@expo/ui/jetpack-compose";
-import { flattenThemeColor, type MobileThemeVariables } from "./mobileTheme";
+import { flattenThemeColor } from "@t3tools/shared/colorContrast";
+import type { MobileThemeVariables } from "./mobileTheme";
 
 export function createNativeThemeColors(colors: MobileThemeVariables): MaterialColors {
   const roles = {

@@ -1,4 +1,6 @@
-import { flattenThemeColor, type MobileThemeVariables } from "./mobileTheme";
+import { flattenThemeColor } from "@t3tools/shared/colorContrast";
+
+import type { MobileThemeVariables } from "./mobileTheme";
 
 /** Native chip parsers need opaque hex instead of CSS rgba or platform-specific alpha order. */
 export function createNativeComposerTheme(theme: MobileThemeVariables) {

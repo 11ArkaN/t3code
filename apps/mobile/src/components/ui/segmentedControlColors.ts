@@ -1,5 +1,6 @@
+import { flattenThemeColor } from "@t3tools/shared/colorContrast";
+
 import {
-  flattenThemeColor,
   themeColorContrastRatio,
   themeColorWithAlpha,
   themeColorWithContrast,

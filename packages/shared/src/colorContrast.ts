@@ -26,6 +26,28 @@ export function rgbChannels(color: string): readonly [number, number, number] | 
   return [Number.parseInt(red, 16), Number.parseInt(green, 16), Number.parseInt(blue, 16)];
 }
 
+/** Composites a translucent hex or rgba() color over `surface` into the opaque hex it paints. */
+export function flattenThemeColor(color: string, surface: string): string {
+  const alphaHex = /^#([\da-f]{6})([\da-f]{2})$/i.exec(color);
+  if (alphaHex) {
+    const channels = rgbChannels(color)!;
+    return flattenThemeColor(
+      `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Number.parseInt(alphaHex[2]!, 16) / 255})`,
+      surface,
+    );
+  }
+  const match = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?\s*\)$/i.exec(
+    color.trim(),
+  );
+  if (!match) return color;
+  const alpha = match[4] === undefined ? 1 : Number(match[4]);
+  const behind = rgbChannels(surface) ?? [0, 0, 0];
+  const channels = [match[1], match[2], match[3]].map((channel, index) =>
+    Math.max(0, Math.min(255, Math.round(Number(channel) * alpha + behind[index]! * (1 - alpha)))),
+  );
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
 function srgbToLinear(channel: number): number {
   const value = channel / 255;
   return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;

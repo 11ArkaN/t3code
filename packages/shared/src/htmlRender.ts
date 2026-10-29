@@ -1,4 +1,9 @@
-import { contrastRatio, rgbChannels, themeAccentWithContrast } from "./colorContrast.ts";
+import {
+  contrastRatio,
+  flattenThemeColor,
+  rgbChannels,
+  themeAccentWithContrast,
+} from "./colorContrast.ts";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -194,8 +199,13 @@ export function htmlRenderTheme(
   fonts: HtmlRenderFonts = HTML_RENDER_DEFAULT_FONTS,
 ): HtmlRenderTheme {
   const fixed = FIXED_COLORS[appearance];
-  // Charts draw lines and markers in the accent; WCAG 1.4.11 asks 3:1 for them on the canvas.
-  const accent = themeAccentWithContrast(colors.accent, [colors.canvas], 3);
+  // Charts draw lines and markers in the accent; WCAG 1.4.11 asks 3:1 for them on the canvas,
+  // measured as painted, so a translucent hex accent is composited over the canvas first.
+  const painted = rgbChannels(colors.accent)
+    ? flattenThemeColor(colors.accent, colors.canvas)
+    : colors.accent;
+  const lifted = themeAccentWithContrast(painted, [colors.canvas], 3);
+  const accent = lifted === painted ? colors.accent : lifted;
   const accentForeground =
     accent === colors.accent
       ? colors.accentForeground

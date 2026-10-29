@@ -1,8 +1,8 @@
+import { flattenThemeColor } from "@t3tools/shared/colorContrast";
 import { describe, expect, it } from "vite-plus/test";
 
 import { contextChipAccent, contextChipPresentation } from "./composerChipPresentation";
 import {
-  flattenThemeColor,
   getMobileThemeVariables,
   MOBILE_THEME_IDS,
   type MobileThemeVariables,
