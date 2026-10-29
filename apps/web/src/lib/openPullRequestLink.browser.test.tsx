@@ -104,21 +104,32 @@ it.each([
   expect(useRightPanelStore.getState().byThreadKey).toEqual({});
 });
 
-it("offers the original unavailable commit URL when web popups are blocked", async () => {
-  setup();
-  using _desktop = stubGlobal("desktopBridge", undefined);
-  await using screen = await render(
-    <AppAtomRegistryProvider>
-      <ToastProvider>
-        <CommitLink />
-      </ToastProvider>
-    </AppAtomRegistryProvider>,
-  );
-  using open = vi.spyOn(window, "open").mockReturnValue(null);
-  await screen.getByRole("link", { name: "Commit" }).click();
-  await expect.element(page.getByRole("button", { name: "Open link", exact: true })).toBeVisible();
-  expect(open).not.toHaveBeenCalled();
-  await page.getByRole("button", { name: "Open link", exact: true }).click();
-  expect(open).toHaveBeenCalledExactlyOnceWith(commitUrl, "_blank", "noopener,noreferrer");
-  expect(state.openLink).not.toHaveBeenCalled();
-});
+it.each(["system", "app"] as const)(
+  "offers the original unavailable commit URL when web popups are blocked (%s)",
+  async (browserLinkTarget) => {
+    setup();
+    // Without preview access, the "app" preference opens a popup too.
+    __setClientSettingsForTests({
+      ...DEFAULT_CLIENT_SETTINGS,
+      pullRequestLinksOpenInApp: true,
+      browserLinkTarget,
+    });
+    using _desktop = stubGlobal("desktopBridge", undefined);
+    await using screen = await render(
+      <AppAtomRegistryProvider>
+        <ToastProvider>
+          <CommitLink />
+        </ToastProvider>
+      </AppAtomRegistryProvider>,
+    );
+    using open = vi.spyOn(window, "open").mockReturnValue(null);
+    await screen.getByRole("link", { name: "Commit" }).click();
+    await expect
+      .element(page.getByRole("button", { name: "Open link", exact: true }))
+      .toBeVisible();
+    expect(open).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Open link", exact: true }).click();
+    expect(open).toHaveBeenCalledExactlyOnceWith(commitUrl, "_blank", "noopener,noreferrer");
+    expect(state.openLink).not.toHaveBeenCalled();
+  },
+);

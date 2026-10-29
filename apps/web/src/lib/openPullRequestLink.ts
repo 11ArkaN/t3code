@@ -10,6 +10,7 @@ import {
 
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 
+import { canOpenLinksInApp } from "../browser/browserLinkTarget";
 import { useOpenLink } from "../browser/useOpenLink";
 import { useClientSettings } from "../hooks/useSettings";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
@@ -189,7 +190,10 @@ export function useOpenChangeRequestLink(
           if (openPullRequest()) return;
           if (onCommitUnavailable) return onCommitUnavailable();
           // A popup opened after the lookup has lost the click's activation, so browsers block it.
-          if (window.desktopBridge === undefined && browserLinkTarget !== "app") {
+          if (
+            window.desktopBridge === undefined &&
+            (browserLinkTarget !== "app" || !canOpenLinksInApp(resolvedThreadRef))
+          ) {
             const toastId = toastManager.add(
               stackedThreadToast({
                 type: "info",
