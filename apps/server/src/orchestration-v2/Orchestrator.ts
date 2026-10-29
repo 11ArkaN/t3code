@@ -107,6 +107,7 @@ import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import {
   ContextHandoffServiceV2,
   readInheritedHandoffItems,
+  visibleConversationItems,
   visibleDeltaRunOrdinals,
 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "@t3tools/provider-core/server/notification";
@@ -6565,7 +6566,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...(sideChatWithoutSource ? yield* readInheritedItems(sourceProjection.thread) : []),
             ...(sideChatParentRunIds.length === 0
               ? []
-              : yield* readHandoffItems(sourceProjection.thread.id, sideChatParentRunIds)),
+              : visibleConversationItems(
+                  sourceProjection,
+                  yield* readHandoffItems(sourceProjection.thread.id, sideChatParentRunIds),
+                )),
           ];
     // The framing note goes in even when the parent has no activity after the fork point.
     const sideChatContextHandoff =

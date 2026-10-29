@@ -971,8 +971,15 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
     yield* writeImportedHistory(parentId, "PARENT_IMPORTED_MARKER");
     yield* writeParentRun({
       threadId: parentId,
-      runId: RunId.make("side-chat-busy-parent-run"),
+      runId: RunId.make("side-chat-rewound-parent-run"),
       ordinal: 1,
+      status: "rolled_back",
+      text: "PARENT_ROLLED_BACK_MARKER",
+    });
+    yield* writeParentRun({
+      threadId: parentId,
+      runId: RunId.make("side-chat-busy-parent-run"),
+      ordinal: 2,
       status: "running",
       text: "PARENT_RUNNING_MARKER",
     });
@@ -1060,6 +1067,7 @@ it.effect("a side chat opened during the parent's first turn starts from a diges
       handoff!.summaryText.indexOf("- User: GRANDPARENT_MARKER"),
     );
     assert.include(handoff!.summaryText, "- User: GRANDPARENT_MARKER");
+    assert.notInclude(handoff!.summaryText, "PARENT_ROLLED_BACK_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_IMPORTED_MARKER");
     assert.include(handoff!.summaryText, "- User: PARENT_RUNNING_MARKER");
     assert.include(handoff!.summaryText, `t3_thread_read on thread ${parentId}`);

@@ -3,6 +3,7 @@ import {
   OrchestrationV2ContextHandoff,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
@@ -132,6 +133,19 @@ export function visibleDeltaRunOrdinals(
 }
 
 /** History `thread` shows from its fork ancestors, oldest first. Side chats inherit no rows. */
+/** Drops rolled-back runs and cancelled queued messages, which are not part of the conversation. */
+export function visibleConversationItems(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "attempts">,
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): ReadonlyArray<OrchestrationV2TurnItem> {
+  const visible = createOrchestrationV2TurnItemVisibility({
+    runs: projection.runs,
+    attempts: projection.attempts,
+    items,
+  });
+  return items.filter(visible);
+}
+
 export const readInheritedHandoffItems = Effect.fn(
   "orchestrationV2.contextHandoff.readInheritedHandoffItems",
 )(function* (
@@ -157,13 +171,7 @@ export const readInheritedHandoffItems = Effect.fn(
         ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
       ],
     });
-    // Rolled-back runs and cancelled queued messages are not part of the conversation.
-    const visible = createOrchestrationV2TurnItemVisibility({
-      runs: source.runs,
-      attempts: source.attempts,
-      items: turnItems,
-    });
-    segments.unshift(turnItems.filter(visible));
+    segments.unshift(visibleConversationItems(source, turnItems));
     current = source.thread;
   }
   return segments.flat();
