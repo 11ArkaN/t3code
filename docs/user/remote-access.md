@@ -160,7 +160,7 @@ Tailscale HTTPS.
 
 Any untagged device that the machine's owner has on the tailnet gets full access,
 including terminals and files. Tagged devices, devices shared in from another
-tailnet, other users, and subnet routers or exit nodes cannot sign in. Browsers
+tailnet, other users, and subnet routers cannot sign in. Browsers
 still need a pairing code. To remove a device's access everywhere, remove it from
 your tailnet; access ends within an hour.
 

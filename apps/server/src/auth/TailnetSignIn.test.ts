@@ -262,11 +262,6 @@ it.layer(NodeServices.layer)("TailnetSignIn", (it) => {
       refused: "routes_for_others",
     },
     {
-      name: "the device is an exit node",
-      node: phoneNode({ AllowedIPs: [`${PHONE_ADDRESS}/32`, "0.0.0.0/0", "::/0"] }),
-      refused: "routes_for_others",
-    },
-    {
       name: "whois leaves out a required field",
       node: { StableID: "nPhone", User: `int64:${OWNER_ID}`, Addresses: [`${PHONE_ADDRESS}/32`] },
       refused: "tailscale_unavailable",
@@ -284,13 +279,17 @@ it.layer(NodeServices.layer)("TailnetSignIn", (it) => {
   it.effect.each<{
     readonly name: string;
     readonly request?: RequestShape;
-    readonly owner?: string;
+    readonly node?: JsonObject;
   }>([
     { name: "a native app" },
+    {
+      name: "an exit node",
+      node: phoneNode({ AllowedIPs: [`${PHONE_ADDRESS}/32`, "0.0.0.0/0", "::/0"] }),
+    },
     { name: "the desktop renderer", request: { origin: "t3code://app" } },
     { name: "an IPv4-mapped peer address", request: { remoteAddress: `::ffff:${PHONE_ADDRESS}` } },
     { name: "the MagicDNS name", request: { host: "box.tail.ts.net:3773" } },
-  ])("signs in $name, and the exchange makes a tailnet session", ({ request }) =>
+  ])("signs in $name, and the exchange makes a tailnet session", ({ request, node }) =>
     Effect.gen(function* () {
       const key = makeDpopKey();
       const grant = yield* signIn(key, request);
@@ -302,7 +301,7 @@ it.layer(NodeServices.layer)("TailnetSignIn", (it) => {
         method: "dpop-access-token",
         proofKeyThumbprint: key.thumbprint,
       });
-    }).pipe(Effect.provide(layerTest({ status: hostStatus(), node: phoneNode() }))),
+    }).pipe(Effect.provide(layerTest({ status: hostStatus(), node: node ?? phoneNode() }))),
   );
 
   it.effect("signs in the configured owner's device on a tagged host", () =>
@@ -352,15 +351,15 @@ it.layer(NodeServices.layer)("TailnetSignIn", (it) => {
         "ServerAuthInvalidCredentialError",
       );
       expect(yield* refusalOf(signIn(key))).toBe("blocked");
-      expect(yield* service.listDevices()).toMatchObject([
-        { stableNodeId: "nPhone", label: "phone", activeSessionCount: 0 },
+      expect(yield* service.listDevices("tailscale:nPhone")).toMatchObject([
+        { stableNodeId: "nPhone", label: "phone", activeSessionCount: 0, current: true },
       ]);
 
       expect(yield* service.unblockDevice("nPhone")).toBe(true);
       const renewed = yield* exchange((yield* signIn(key)).credential, key);
       expect((yield* sessions.verify(renewed.access_token)).subject).toBe("tailscale:nPhone");
-      expect(yield* service.listDevices()).toMatchObject([
-        { stableNodeId: "nPhone", blockedAt: null, activeSessionCount: 1 },
+      expect(yield* service.listDevices("bearer:laptop")).toMatchObject([
+        { stableNodeId: "nPhone", blockedAt: null, activeSessionCount: 1, current: false },
       ]);
     }).pipe(Effect.provide(layerTest({ status: hostStatus(), node: phoneNode() }))),
   );

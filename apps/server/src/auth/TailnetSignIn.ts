@@ -70,7 +70,10 @@ export class TailnetSignIn extends Context.Service<
       | EnvironmentAuth.ServerAuthInvalidCredentialError
       | EnvironmentAuth.ServerAuthInternalError
     >;
-    readonly listDevices: () => Effect.Effect<ReadonlyArray<TailnetDevice>, TailnetAccessError>;
+    /** `currentSubject` is the asking session's, which marks that device `current`. */
+    readonly listDevices: (
+      currentSubject: string,
+    ) => Effect.Effect<ReadonlyArray<TailnetDevice>, TailnetAccessError>;
     /** Refuses the device here and ends its sessions. Returns how many sessions ended. */
     readonly blockDevice: (stableNodeId: string) => Effect.Effect<number, TailnetAccessError>;
     readonly unblockDevice: (stableNodeId: string) => Effect.Effect<boolean, TailnetAccessError>;
@@ -112,6 +115,10 @@ const isOwnHost = (host: string | undefined, status: TailscaleStatus, localPort:
   return accepted.has(host.toLowerCase());
 };
 
+// An exit node forwards its peers' traffic to the internet, never other devices
+// into the tailnet, so it still speaks only for itself. A subnet router does not.
+const EXIT_NODE_ROUTES = ["0.0.0.0/0", "::/0"];
+
 /** The first check this node fails, or null when it is the owner's own device. */
 const refuseNode = (
   node: TailscaleWhois,
@@ -122,8 +129,8 @@ const refuseNode = (
   if (node.sharerUserId !== null) return "shared_device";
   if (node.stableNodeId === status.selfNodeId) return "own_node";
   if (node.userId !== ownerUserId) return "other_user";
-  const ownAddresses = new Set(node.addresses);
-  if (node.primaryRoutes.length > 0 || node.allowedIps.some((ip) => !ownAddresses.has(ip))) {
+  const accepted = new Set([...node.addresses, ...EXIT_NODE_ROUTES]);
+  if (node.primaryRoutes.length > 0 || node.allowedIps.some((ip) => !accepted.has(ip))) {
     return "routes_for_others";
   }
   return null;
@@ -231,7 +238,7 @@ const make = Effect.gen(function* () {
 
   const listDevices: TailnetSignIn["Service"]["listDevices"] = Effect.fn(
     "TailnetSignIn.listDevices",
-  )(function* () {
+  )(function* (currentSubject) {
     const [active, blocked] = yield* Effect.all(
       [
         sessions.listActive().pipe(Effect.mapError(accessError("Could not list sessions."))),
@@ -249,6 +256,7 @@ const make = Effect.gen(function* () {
         label: existing?.label ?? session.client.label ?? null,
         blockedAt: null,
         activeSessionCount: (existing?.activeSessionCount ?? 0) + 1,
+        current: session.subject === currentSubject,
       });
     }
     for (const block of blocked) {
@@ -258,6 +266,7 @@ const make = Effect.gen(function* () {
         label: existing?.label ?? block.label,
         blockedAt: block.blockedAt,
         activeSessionCount: existing?.activeSessionCount ?? 0,
+        current: `${TAILNET_SUBJECT_PREFIX}${block.stableNodeId}` === currentSubject,
       });
     }
     return [...devices.values()];
