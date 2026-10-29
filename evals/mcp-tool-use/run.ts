@@ -1398,7 +1398,8 @@ const setup = (tools, origin, results) => {
       if (!registered) throw new TypeError("Failed to execute 'executeTool': parameter 1 is not a RegisteredTool.");
       if (!names.includes(tool.name)) throw new Error("No tool named " + tool.name + ".");
       if (++count > 128) throw new Error("Page exceeded 128 tool executions.");
-      executed[executed.length] = [tool.name, parse(stringify(input) ?? "null")];
+      // Chromium 152 takes JSON text; newer WebMCP also accepts an input object.
+      executed[executed.length] = [tool.name, parse(typeof input === "string" ? input : stringify(input) ?? "null")];
       return Object.hasOwn(results, tool.name) ? stringify(results[tool.name]) : "ok";
     },
   };
