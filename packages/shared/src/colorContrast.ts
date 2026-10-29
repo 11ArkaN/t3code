@@ -84,12 +84,15 @@ export function themeAccentWithContrast(
 
   const [lightness, a, b] = srgbToOklab(accentChannels);
   const hue = Math.atan2(b, a);
+  const sourceChroma = Math.hypot(a, b);
+  // Under 0.02 the hue is noise; saturating it would turn a grey accent mustard or magenta.
+  const maxChroma = sourceChroma < 0.02 ? sourceChroma : Math.max(sourceChroma, 0.2);
   const inGamut = (channels: ReadonlyArray<number>) =>
     channels.every((channel) => channel >= -1e-4 && channel <= 1 + 1e-4);
   const mostVivid = (stepLightness: number) => {
     let chroma = 0;
     let lower = 0;
-    let upper = Math.max(Math.hypot(a, b), 0.2);
+    let upper = maxChroma;
     for (let index = 0; index < 20; index += 1) {
       const candidate = (lower + upper) / 2;
       if (

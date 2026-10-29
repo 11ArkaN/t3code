@@ -96,6 +96,20 @@ describe("htmlRenderTheme", () => {
     },
   );
 
+  it("keeps a grey accent grey when it lifts it", () => {
+    const { variables } = htmlRenderTheme(
+      { ...T3_CODE_DARK_THEME_COLORS, canvas: "#0a0a0a", accent: "#262626" },
+      "dark",
+    );
+    const accent = variables["--accent"]!;
+    expect(contrastRatio(accent, "#0a0a0a")).toBeGreaterThanOrEqual(3);
+    const channels = [1, 3, 5].map((start) => Number.parseInt(accent.slice(start, start + 2), 16));
+    expect(
+      Math.max(...channels) - Math.min(...channels),
+      `${accent} is tinted`,
+    ).toBeLessThanOrEqual(2);
+  });
+
   it("passes the default themes' accent through unchanged", () => {
     for (const [colors, appearance] of [
       [T3_CODE_DARK_THEME_COLORS, "dark"],
